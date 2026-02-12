@@ -1,45 +1,53 @@
+{% load custom_filters %}
 <!DOCTYPE html>
 <html>
 <head>
     <title>Dashboard</title>
     <style>
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            font-size: 13px;
-        }
-        th, td {
-            border: 1px solid #ccc;
-            padding: 6px;
-            text-align: center;
-        }
-        th {
-            background: #222;
-            color: white;
-            position: sticky;
-            top: 0;
-        }
+        table { border-collapse: collapse; width: 100%; font-size: 12px; }
+        th, td { border: 1px solid #ccc; padding: 6px; text-align: center; white-space: nowrap; }
+        th { background: #111; color: #fff; position: sticky; top: 0; z-index: 2; }
+        tr:nth-child(even) { background: #f8f8f8; }
+        .btn { display:inline-block; padding:10px 15px; background:#28a745; color:#fff; text-decoration:none; border-radius:4px; font-weight:bold; margin-bottom:10px; }
     </style>
 </head>
 <body>
 
+<a href="{% url 'upload' %}" class="btn">⬅ Upload CSV</a>
+
 <h2>Rate Master Dashboard</h2>
 
+{% if data %}
+<div style="overflow-x:auto; max-height: 80vh; overflow-y:auto;">
 <table>
+
     <tr>
-        {% for key in data.0.keys %}
-            <th>{{ key }}</th>
+        {% for field in field_names %}
+            <th>{{ field|upper }}</th>
         {% endfor %}
     </tr>
 
     {% for row in data %}
     <tr>
-        {% for value in row.values %}
-            <td>{{ value }}</td>
+        {% for field in field_names %}
+            {% with val=row|get_attr:field %}
+                <td>
+                    {% if field == "is_ncb" or field == "is_cpa" or field == "is_zd" %}
+                        {{ val.code|default_if_none:"" }}
+                    {% else %}
+                        {{ val|default_if_none:"" }}
+                    {% endif %}
+                </td>
+            {% endwith %}
         {% endfor %}
     </tr>
     {% endfor %}
+
 </table>
+</div>
+{% else %}
+<p><b>No data found.</b></p>
+{% endif %}
 
 </body>
 </html>

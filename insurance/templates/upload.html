@@ -2,10 +2,46 @@
 <html>
 <head>
     <title>CSV Upload</title>
+    <style>
+        .btn {
+            display: inline-block;
+            padding: 10px 15px;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+            margin-bottom: 15px;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+    </style>
 </head>
 <body>
 
+<a href="{% url 'dashboard' %}" class="btn">📊 Go To Dashboard</a>
+
 <h2>Upload Rate Master CSV</h2>
+
+{% if summary %}
+<div style="color:green;font-weight:bold;margin-bottom:15px;">
+    Inserted: {{ summary.inserted }} |
+    Duplicates Skipped: {{ summary.duplicates }} |
+    Errors: {{ summary.errors }}
+</div>
+{% endif %}
+
+{% if errors %}
+<div style="color:red;font-weight:bold;margin-bottom:15px;">
+    <h3>CSV Validation Errors</h3>
+    <ul>
+        {% for e in errors %}
+            <li>{{ e }}</li>
+        {% endfor %}
+    </ul>
+</div>
+{% endif %}
 
 <form method="POST" enctype="multipart/form-data">
     {% csrf_token %}

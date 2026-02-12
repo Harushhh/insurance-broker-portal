@@ -1,5 +1,16 @@
 from django.db import models
 
+
+# ---------- MASTER TABLE ----------
+class YesNoNAMaster(models.Model):
+    code = models.CharField(max_length=3, unique=True)
+    meaning = models.CharField(max_length=50)
+
+    def __str__(self):
+        return self.code
+
+
+# ---------- MAIN RATE TABLE ----------
 class RateMaster(models.Model):
 
     new_vehicle_makes = models.CharField(max_length=100, null=True, blank=True)
@@ -34,13 +45,13 @@ class RateMaster(models.Model):
     tariff_min = models.FloatField(null=True, blank=True)
     tariff_max = models.FloatField(null=True, blank=True)
 
-    is_ncb = models.BooleanField(default=False)
-    is_cpa = models.BooleanField(default=False)
+    # ---------- CHANGED PART ----------
+    is_ncb = models.ForeignKey(YesNoNAMaster, on_delete=models.CASCADE, related_name="ncb")
+    is_cpa = models.ForeignKey(YesNoNAMaster, on_delete=models.CASCADE, related_name="cpa")
+    is_zd  = models.ForeignKey(YesNoNAMaster, on_delete=models.CASCADE, related_name="zd")
 
     cc_min = models.IntegerField(null=True, blank=True)
     cc_max = models.IntegerField(null=True, blank=True)
-
-    is_zd = models.BooleanField(default=False)
 
     from_date = models.DateField(null=True, blank=True)
     to_date = models.DateField(null=True, blank=True)
