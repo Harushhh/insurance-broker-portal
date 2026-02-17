@@ -16,6 +16,7 @@
 <a href="{% url 'upload' %}" class="btn">⬅ Upload CSV</a>
 
 <h2>Rate Master Dashboard</h2>
+<p><b>Total Groups:</b> {{ total }}</p>
 
 {% if data %}
 <div style="overflow-x:auto; max-height: 80vh; overflow-y:auto;">
@@ -30,15 +31,15 @@
     {% for row in data %}
     <tr>
         {% for field in field_names %}
-            {% with val=row|get_attr:field %}
-                <td>
-                    {% if field == "is_ncb" or field == "is_cpa" or field == "is_zd" %}
-                        {{ val.code|default_if_none:"" }}
-                    {% else %}
-                        {{ val|default_if_none:"" }}
-                    {% endif %}
-                </td>
-            {% endwith %}
+            <td>
+                {% if field == "new_rto_list" %}
+                    {{ row.new_rto_list_joined|default_if_none:"" }}
+                {% elif field == "fuel_type" %}
+                    {{ row.fuel_type_joined|default_if_none:"" }}
+                {% else %}
+                    {{ row|get_attr:field|default_if_none:"" }}
+                {% endif %}
+            </td>
         {% endfor %}
     </tr>
     {% endfor %}

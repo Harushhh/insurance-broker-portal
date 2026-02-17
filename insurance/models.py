@@ -1,5 +1,5 @@
 from django.db import models
-
+import hashlib
 
 # ---------- MASTER TABLE ----------
 class YesNoNAMaster(models.Model):
@@ -10,6 +10,58 @@ class YesNoNAMaster(models.Model):
         return self.code
 
 
+# ---------- OTHER MASTER TABLES ----------
+class ProductMaster(models.Model):
+    # DB already has: id (int auto) + name
+    name = models.CharField(max_length=50, unique=True)
+
+    class Meta:
+        db_table = "insurance_productmaster"
+        managed = False   # IMPORTANT: because table already exists in MySQL
+
+    def __str__(self):
+        return self.name
+
+class SubProductMaster(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    name = models.CharField(max_length=50, unique=True)
+
+    def __str__(self):
+        return self.name
+
+
+class PolicyTypeMaster(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    name = models.CharField(max_length=50, unique=True)
+
+    def __str__(self):
+        return self.name
+
+
+class FuelTypeMaster(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    name = models.CharField(max_length=50, unique=True)
+
+    def __str__(self):
+        return self.name
+
+
+class MakeModelClassMaster(models.Model):
+    id = models.BigAutoField(primary_key=True)
+    name = models.CharField(max_length=150, unique=True)
+
+    def __str__(self):
+        return self.name
+
+class RateGroup(models.Model):
+    group = models.ForeignKey("RateGroup", on_delete=models.SET_NULL, null=True, blank=True)
+    key_hash = models.CharField(max_length=64, unique=True)
+    key_text = models.TextField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.key_hash
+
 # ---------- MAIN RATE TABLE ----------
 class RateMaster(models.Model):
 
@@ -19,16 +71,23 @@ class RateMaster(models.Model):
     insurer_vertical = models.CharField(max_length=100, null=True, blank=True)
     insurance_company = models.CharField(max_length=100)
 
-    product = models.CharField(max_length=50)
-    sub_product = models.CharField(max_length=50, null=True, blank=True)
-    policy_type = models.CharField(max_length=50)
+    # ✅ DB has product_id (varchar) -> FK to ProductMaster(id)
+    product = models.ForeignKey(
+    ProductMaster,
+    on_delete=models.SET_NULL,
+    null=True,
+    blank=True,
+    db_column="product_id",
+    related_name="rates",)
 
-    fuel_type = models.CharField(max_length=50, null=True, blank=True)
+    # ✅ DB has *_id columns (bigint) -> FK to master tables
+    sub_product = models.ForeignKey(SubProductMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="sub_product_id")
+    policy_type = models.ForeignKey(PolicyTypeMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="policy_type_id")
+    fuel_type = models.ForeignKey(FuelTypeMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="fuel_type_id")
+    make_model_class = models.ForeignKey(MakeModelClassMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="make_model_class_id")
 
     vehicle_age_min = models.IntegerField(null=True, blank=True)
     vehicle_age_max = models.IntegerField(null=True, blank=True)
-
-    make_model_class = models.CharField(max_length=150, null=True, blank=True)
 
     pi_od_rate = models.FloatField(null=True, blank=True)
     pi_tp_rate = models.FloatField(null=True, blank=True)
@@ -45,10 +104,10 @@ class RateMaster(models.Model):
     tariff_min = models.FloatField(null=True, blank=True)
     tariff_max = models.FloatField(null=True, blank=True)
 
-    # ---------- CHANGED PART ----------
-    is_ncb = models.ForeignKey(YesNoNAMaster, on_delete=models.CASCADE, related_name="ncb")
-    is_cpa = models.ForeignKey(YesNoNAMaster, on_delete=models.CASCADE, related_name="cpa")
-    is_zd  = models.ForeignKey(YesNoNAMaster, on_delete=models.CASCADE, related_name="zd")
+    # ✅ DB has is_*_id (bigint) -> FK to YesNoNAMaster
+    is_ncb = models.ForeignKey(YesNoNAMaster, on_delete=models.CASCADE, related_name="ncb", db_column="is_ncb_id")
+    is_cpa = models.ForeignKey(YesNoNAMaster, on_delete=models.CASCADE, related_name="cpa", db_column="is_cpa_id")
+    is_zd = models.ForeignKey(YesNoNAMaster, on_delete=models.CASCADE, related_name="zd", db_column="is_zd_id")
 
     cc_min = models.IntegerField(null=True, blank=True)
     cc_max = models.IntegerField(null=True, blank=True)
