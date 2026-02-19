@@ -4,51 +4,347 @@
 <head>
     <title>Dashboard</title>
     <style>
-        table { border-collapse: collapse; width: 100%; font-size: 12px; }
-        th, td { border: 1px solid #ccc; padding: 6px; text-align: center; white-space: nowrap; }
-        th { background: #111; color: #fff; position: sticky; top: 0; z-index: 2; }
-        tr:nth-child(even) { background: #f8f8f8; }
-        .btn { display:inline-block; padding:10px 15px; background:#28a745; color:#fff; text-decoration:none; border-radius:4px; font-weight:bold; margin-bottom:10px; }
+        body{
+            font-family: Arial, sans-serif;
+            background:#f6f7fb;
+            margin:0;
+            padding:16px;
+            color:#111;
+        }
+
+        .topbar{
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:12px;
+            margin-bottom:12px;
+            flex-wrap:wrap;
+        }
+
+        .btn {
+            display:inline-block;
+            padding:10px 14px;
+            background:#28a745;
+            color:#fff;
+            text-decoration:none;
+            border-radius:8px;
+            font-weight:bold;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+            border: none;
+            cursor: pointer;
+        }
+
+        .btn.secondary{ background:#0b5ed7; }
+        .btn.light{ background:#6c757d; }
+
+        .card{
+            background:#fff;
+            border-radius:12px;
+            box-shadow: 0 2px 14px rgba(0,0,0,0.08);
+            padding:14px;
+        }
+
+        h2{ margin:0 0 6px 0; }
+        .meta{ font-size:13px; color:#555; margin-bottom:10px; }
+
+        /* FILTER BAR */
+        .filters{
+            display:flex;
+            gap:10px;
+            flex-wrap:wrap;
+            align-items:end;
+            margin: 10px 0 14px;
+            padding: 12px;
+            background:#f9fafc;
+            border:1px solid #e7e9f2;
+            border-radius:10px;
+        }
+
+        .f-item{
+            display:flex;
+            flex-direction:column;
+            gap:6px;
+            min-width: 180px;
+        }
+
+        .f-item label{
+            font-size:12px;
+            color:#333;
+            font-weight:700;
+        }
+
+        input[type="text"], input[type="date"], select{
+            padding:10px;
+            border:1px solid #d7dbe7;
+            border-radius:8px;
+            outline:none;
+            font-size:13px;
+            background:#fff;
+        }
+
+        .f-actions{
+            display:flex;
+            gap:10px;
+        }
+
+        /* TABLE */
+        .table-wrap{
+            overflow:auto;
+            max-height: 72vh;
+            border:1px solid #e6e6e6;
+            border-radius:10px;
+            background:#fff;
+        }
+
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 12px;
+            background:#fff;
+        }
+
+        th, td {
+            border-bottom: 1px solid #eee;
+            padding: 10px 10px;
+            vertical-align: top;
+        }
+
+        th {
+            background: #111;
+            color: #fff;
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            text-transform: uppercase;
+            font-size: 11px;
+            letter-spacing: 0.4px;
+            white-space: nowrap;
+        }
+
+        tr:nth-child(even) { background: #fafafa; }
+        tr:hover { background: #eef6ff; }
+
+        /* default cell behavior */
+        td{ white-space: normal; word-break: break-word; line-height: 1.35; }
+
+        .cell-num{ text-align:center; white-space: nowrap; }
+        .cell-text{ text-align:left; }
+        .cell-id{
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 11px;
+            color:#333;
+            text-align:center;
+            white-space: nowrap;
+        }
+
+        /* Long text expand */
+        details{ cursor:pointer; }
+        details summary{
+            list-style:none;
+            cursor:pointer;
+            color:#0b5ed7;
+            font-weight:700;
+            display:inline-block;
+            margin-bottom:4px;
+            user-select:none;
+        }
+        details summary::-webkit-details-marker{ display:none; }
+
+        .full{
+            white-space: normal;
+            word-break: break-word;
+            line-height: 1.45;
+            color:#111;
+            background:#f4f7ff;
+            border:1px solid #dde6ff;
+            padding:8px;
+            border-radius:8px;
+            max-width: 520px;
+        }
     </style>
 </head>
 <body>
 
-<a href="{% url 'upload' %}" class="btn">⬅ Upload CSV</a>
-
-<h2>Rate Master Dashboard</h2>
-<p><b>Total Groups:</b> {{ total }}</p>
-
-{% if data %}
-<div style="overflow-x:auto; max-height: 80vh; overflow-y:auto;">
-<table>
-
-    <tr>
-        {% for field in field_names %}
-            <th>{{ field|upper }}</th>
-        {% endfor %}
-    </tr>
-
-    {% for row in data %}
-    <tr>
-        {% for field in field_names %}
-            <td>
-                {% if field == "new_rto_list" %}
-                    {{ row.new_rto_list_joined|default_if_none:"" }}
-                {% elif field == "fuel_type" %}
-                    {{ row.fuel_type_joined|default_if_none:"" }}
-                {% else %}
-                    {{ row|get_attr:field|default_if_none:"" }}
-                {% endif %}
-            </td>
-        {% endfor %}
-    </tr>
-    {% endfor %}
-
-</table>
+<div class="topbar">
+    <a href="{% url 'upload' %}" class="btn">⬅ Upload CSV</a>
 </div>
-{% else %}
-<p><b>No data found.</b></p>
-{% endif %}
+
+<div class="card">
+    <h2>Rate Master Dashboard</h2>
+    <div class="meta"><b>Total Groups:</b> {{ total }}</div>
+
+    <!-- ✅ FILTERS -->
+    <form method="GET" class="filters">
+        <div class="f-item" style="min-width:260px;">
+            <label>Search</label>
+            <input type="text" name="q" placeholder="Search company / RTO / make..."
+                   value="{{ selected.q|default_if_none:'' }}">
+        </div>
+
+        <div class="f-item">
+            <label>Insurance Company</label>
+            <select name="insurance_company">
+                <option value="">All</option>
+                {% for c in insurance_company_list %}
+                    <option value="{{ c }}"
+                        {% if selected.insurance_company == c %}selected{% endif %}>
+                        {{ c }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="f-item">
+            <label>Product</label>
+            <select name="product">
+                <option value="">All</option>
+                {% for p in product_list %}
+                    <option value="{{ p.id }}"
+                        {% if selected.product|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>
+                        {{ p.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="f-item">
+            <label>Fuel</label>
+            <select name="fuel">
+                <option value="">All</option>
+                {% for f in fuel_list %}
+                    <option value="{{ f.id }}"
+                        {% if selected.fuel|stringformat:"s" == f.id|stringformat:"s" %}selected{% endif %}>
+                        {{ f.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- ✅ NEW: Sub Product -->
+        <div class="f-item">
+            <label>Sub Product</label>
+            <select name="sub_product">
+                <option value="">All</option>
+                {% for sp in sub_product_list %}
+                    <option value="{{ sp.id }}"
+                        {% if selected.sub_product|stringformat:"s" == sp.id|stringformat:"s" %}selected{% endif %}>
+                        {{ sp.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- ✅ NEW: Make Model Class -->
+        <div class="f-item">
+            <label>Make Model Class</label>
+            <select name="make_model_class">
+                <option value="">All</option>
+                {% for mmc in make_model_class_list %}
+                    <option value="{{ mmc.id }}"
+                        {% if selected.make_model_class|stringformat:"s" == mmc.id|stringformat:"s" %}selected{% endif %}>
+                        {{ mmc.name }}
+                    </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- ✅ NEW: Date Range -->
+        <div class="f-item">
+            <label>From Date (>=)</label>
+            <input type="date" name="from_date" value="{{ selected.from_date|default_if_none:'' }}">
+        </div>
+
+        <div class="f-item">
+            <label>To Date (<=)</label>
+            <input type="date" name="to_date" value="{{ selected.to_date|default_if_none:'' }}">
+        </div>
+
+        <div class="f-actions">
+            <button class="btn secondary" type="submit">Apply</button>
+            <a class="btn light" href="{% url 'dashboard' %}">Reset</a>
+        </div>
+    </form>
+
+    {% if data %}
+    <div class="table-wrap">
+        <table>
+            <tr>
+                {% for field in field_names %}
+                    <th>{{ field }}</th>
+                {% endfor %}
+            </tr>
+
+            {% for row in data %}
+            <tr>
+                {% for field in field_names %}
+                    {% with val=row|get_attr:field %}
+
+                    {% if field == "id" or field == "group_id" or field == "mpg_id" %}
+                        <td class="cell-id">
+                            {{ val|display_value }}
+                        </td>
+
+                    {% elif field == "vehicle_age_min" or field == "vehicle_age_max" or field == "tariff_min" or field == "tariff_max" or field == "cc_min" or field == "cc_max" or field == "sc_min" or field == "sc_max" or field == "pi_od_rate" or field == "pi_tp_rate" or field == "pi_tp_2" or field == "pi_tp_3" or field == "pi_tp_4" or field == "pi_tp_5" or field == "pi_net_rate" or field == "pi_flat_amount" or field == "pi_vli" or field == "po_od_rate" or field == "po_tp_rate" or field == "po_net_rate" or field == "po_flat_amount" or field == "user_id" or field == "records_in_group" %}
+                        <td class="cell-num">
+                            {{ val|display_value }}
+                        </td>
+
+                    {% else %}
+                        <td class="cell-text">
+                            {% if val is None %}
+                                <!-- blank -->
+                            {% else %}
+
+                                {% if field == "new_rto_list" or field == "display_rto_list" %}
+                                    {% with txt=val|display_value %}
+                                        <details>
+                                            <summary>Show RTOs</summary>
+                                            <div class="full">{{ txt }}</div>
+                                        </details>
+                                    {% endwith %}
+
+                                {% elif field == "display_fuel_types" %}
+                                    {% with txt=val|display_value %}
+                                        <details>
+                                            <summary>Show Fuel Types</summary>
+                                            <div class="full">{{ txt }}</div>
+                                        </details>
+                                    {% endwith %}
+
+                                {% elif field == "add_tnc" %}
+                                    {% with txt=val|display_value %}
+                                        <details>
+                                            <summary>Show T&amp;C</summary>
+                                            <div class="full">{{ txt }}</div>
+                                        </details>
+                                    {% endwith %}
+
+                                {% elif field == "remarks" %}
+                                    {% with txt=val|display_value %}
+                                        <details>
+                                            <summary>Show Remarks</summary>
+                                            <div class="full">{{ txt }}</div>
+                                        </details>
+                                    {% endwith %}
+
+                                {% else %}
+                                    {{ val|display_value }}
+                                {% endif %}
+
+                            {% endif %}
+                        </td>
+                    {% endif %}
+
+                    {% endwith %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+    {% else %}
+        <p><b>No data found.</b></p>
+    {% endif %}
+</div>
 
 </body>
 </html>
