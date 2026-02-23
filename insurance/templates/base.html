@@ -1,0 +1,310 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Insurance Portal{% endblock %}</title>
+
+  <!-- Modern font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --bg:#f6f7fb;
+      --card:#ffffff;
+      --text:#0f172a;
+      --muted:#64748b;
+      --border:#e5e7eb;
+      --shadow: 0 10px 30px rgba(2, 8, 23, .08);
+      --brand:#2563eb;
+      --brand2:#0ea5e9;
+      --danger:#ef4444;
+      --radius:14px;
+    }
+
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, rgba(37,99,235,.12), transparent 60%),
+                  radial-gradient(900px 500px at 80% 0%, rgba(14,165,233,.12), transparent 55%),
+                  var(--bg);
+      color:var(--text);
+    }
+
+    .container{
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 18px;
+    }
+
+    /* TOP NAV */
+    .topbar{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      padding: 14px 16px;
+      background: rgba(255,255,255,.75);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(229,231,235,.8);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      position: sticky;
+      top: 12px;
+      z-index: 50;
+    }
+
+    .brand{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      font-weight:800;
+      letter-spacing:.2px;
+    }
+    .brand-badge{
+      width:34px;height:34px;
+      border-radius:10px;
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+      box-shadow: 0 8px 18px rgba(37,99,235,.25);
+    }
+    .brand small{
+      display:block;
+      font-weight:600;
+      color:var(--muted);
+      font-size: 12px;
+      margin-top:2px;
+    }
+
+    .actions{
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      height: 38px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: #fff;
+      color: var(--text);
+      text-decoration:none;
+      font-weight:600;
+      cursor:pointer;
+      transition: transform .08s ease, box-shadow .15s ease, background .15s ease;
+      user-select:none;
+    }
+    .btn:hover{ box-shadow: 0 10px 22px rgba(2,8,23,.08); }
+    .btn:active{ transform: translateY(1px); }
+
+    .btn.primary{
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+      border: none;
+      color:#fff;
+    }
+    .btn.danger{
+      background:#fff;
+      border:1px solid rgba(239,68,68,.35);
+      color: var(--danger);
+    }
+
+    /* MENU DROPDOWN */
+    .menu-wrap{ position:relative; }
+
+    /* IMPORTANT: keep dropdown ABOVE content so it won't "freeze" clicks */
+    .dropdown{
+      position:absolute;
+      right:0;
+      top: 44px;
+      width: 220px;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      padding: 8px;
+      display:none;
+      z-index: 9999; /* ✅ prevents overlap issues */
+    }
+    .dropdown.show{ display:block; }
+    .dd-item{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      padding: 10px 10px;
+      border-radius: 10px;
+      text-decoration:none;
+      color: var(--text);
+      font-weight:600;
+    }
+    .dd-item:hover{ background:#f3f4f6; }
+    .dd-muted{ color: var(--muted); font-weight:600; font-size: 12px; padding: 6px 10px; }
+
+    /* PAGE CONTENT */
+    .card{
+      background: rgba(255,255,255,.90);
+      border: 1px solid rgba(229,231,235,.85);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 16px;
+      margin-top: 14px;
+    }
+
+    h1,h2,h3{ margin:0 0 10px 0; }
+    .subtext{ color:var(--muted); font-size: 13px; margin-bottom: 12px; }
+
+    /* tables (dashboard) */
+    .table-wrap{
+      overflow:auto;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background:#fff;
+      max-height: 72vh;
+    }
+    table{
+      width:100%;
+      border-collapse: collapse;
+      font-size: 12.5px;
+    }
+    th{
+      position: sticky;
+      top:0;
+      z-index: 5;
+      background: #0b1220;
+      color: #fff;
+      text-align:left;
+      padding: 10px 10px;
+      font-size: 11px;
+      letter-spacing:.35px;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    td{
+      padding: 10px 10px;
+      border-bottom: 1px solid #eef2f7;
+      vertical-align: top;
+      white-space: nowrap;
+    }
+    tr:hover td{ background:#f7fbff; }
+
+    /* helper */
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background:#eef2ff;
+      color:#1e40af;
+      font-weight:700;
+      font-size: 11px;
+      border: 1px solid rgba(30,64,175,.15);
+    }
+
+    /* long text expand */
+    details summary{
+      cursor:pointer;
+      color: var(--brand);
+      font-weight:700;
+      list-style:none;
+    }
+    details summary::-webkit-details-marker{ display:none; }
+    .full{
+      margin-top:6px;
+      white-space: normal;
+      word-break: break-word;
+      background:#f8fafc;
+      border: 1px solid #e2e8f0;
+      padding: 10px;
+      border-radius: 10px;
+      max-width: 520px;
+      color:#0f172a;
+      line-height:1.45;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container">
+
+    {% comment %}
+      ✅ Remove menu from login page:
+      Only show topbar/menu if current path is NOT login page.
+      Works for /login/ AND /accounts/login/
+    {% endcomment %}
+    {% if request.path != "/login/" and request.path != "/accounts/login/" %}
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-badge"></div>
+        <div>
+          Insurance Portal
+          <small>Rates • Upload • Dashboard</small>
+        </div>
+      </div>
+
+      <div class="actions">
+        <div class="menu-wrap">
+          <button class="btn" id="menuBtn" type="button">☰ Menu</button>
+
+          <div class="dropdown" id="menuDrop">
+            <div class="dd-muted">Navigate</div>
+
+            <a class="dd-item" href="{% url 'dashboard' %}">📊 Dashboard</a>
+            <a class="dd-item" href="{% url 'upload' %}">⬆️ Upload CSV</a>
+            <a class="dd-item" href="{% url 'rto_dashboard' %}">🗺️ RTO Dashboard</a>
+            <a class="dd-item" href="{% url 'make_model_dashboard' %}">🏷️ Make/Model Dashboard</a>
+
+            {% if request.user.is_authenticated %}
+              <div class="dd-muted">Admin</div>
+              <a class="dd-item" href="{% url 'user_management' %}">👥 User Management</a>
+
+              <div class="dd-muted">Account</div>
+              <form method="post" action="{% url 'logout' %}" style="margin:0;">
+                {% csrf_token %}
+                <button class="dd-item" type="submit" style="width:100%;border:none;background:transparent;text-align:left;cursor:pointer;">
+                  🚪 Logout
+                </button>
+              </form>
+            {% else %}
+              <a class="dd-item" href="{% url 'login' %}">🔐 Login</a>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    {% block content %}{% endblock %}
+  </div>
+
+  <script>
+    (function(){
+      const btn = document.getElementById("menuBtn");
+      const drop = document.getElementById("menuDrop");
+      if(!btn || !drop) return;
+
+      btn.addEventListener("click", function(e){
+        e.stopPropagation();
+        drop.classList.toggle("show");
+      });
+
+      document.addEventListener("click", function(){
+        drop.classList.remove("show");
+      });
+
+      // ✅ close dropdown when pressing ESC
+      document.addEventListener("keydown", function(e){
+        if(e.key === "Escape"){
+          drop.classList.remove("show");
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

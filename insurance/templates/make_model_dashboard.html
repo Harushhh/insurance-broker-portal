@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Make Model Dashboard{% endblock %}
+
+{% block content %}
+<div class="card">
+  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+    <div>
+      <h2 style="margin:0;">Make Model Dashboard</h2>
+      <div class="subtext"><b>Total:</b> {{ total }}</div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <form method="GET" class="card" style="margin-top:14px; padding:14px;">
+  <div style="
+    display:grid;
+    grid-template-columns: 1fr 1fr auto auto;
+    gap:12px;
+    align-items:end;
+  ">
+
+    <!-- ✅ Search by CLUSTER -->
+    <div>
+      <div class="subtext" style="margin:0 0 6px;">Search Cluster</div>
+      <input type="text" name="cluster_q" placeholder="Type cluster..."
+             value="{{ selected.cluster_q|default_if_none:'' }}"
+             style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+    </div>
+
+    <!-- ✅ Dropdown by NAME -->
+    <div>
+      <div class="subtext" style="margin:0 0 6px;">Make/Model Name</div>
+      <select name="make_model_name" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <option value="">All</option>
+        {% for n in make_model_name_list %}
+          <option value="{{ n }}" {% if selected.make_model_name == n %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    <button class="btn primary" type="submit">Apply</button>
+    <a class="btn" href="{% url 'make_model_dashboard' %}">Reset</a>
+  </div>
+</form>
+
+  <!-- Table -->
+  <div class="table-wrap" style="margin-top:14px;">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:90px;">ID</th>
+          <th>MAKE MODEL NAME</th>
+          <th style="width:220px;">MAKE MODEL CLUSTER</th>
+        </tr>
+      </thead>
+
+      <tbody>
+        {% if make_models %}
+          {% for m in make_models %}
+            <tr>
+              <td>{{ m.id }}</td>
+              <td style="white-space:normal; word-break:break-word;">{{ m.make_model_name }}</td>
+              <td style="white-space:normal; word-break:break-word;">{{ m.make_model_cluster|default_if_none:"" }}</td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <td colspan="3">No records found.</td>
+          </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+  @media (max-width: 900px){
+    form.card > div{
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}

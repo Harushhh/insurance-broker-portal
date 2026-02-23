@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}User Management{% endblock %}
+{% block content %}
+
+<h2>User Management</h2>
+<p>Assign ADMIN or USER role to employees.</p>
+
+<table border="1" cellpadding="10" style="background:#fff;border-collapse:collapse;">
+  <tr>
+    <th>Username</th>
+    <th>Current Role</th>
+    <th>Change Role</th>
+  </tr>
+
+  {% for u in users %}
+  <tr>
+    <td>{{ u.username }}</td>
+    <td>
+      {% if u.is_superuser %}SUPERUSER{% else %}{{ u.role|default:"(none)" }}{% endif %}
+    </td>
+    <td>
+      <form method="post" style="display:flex;gap:8px;align-items:center;">
+        {% csrf_token %}
+        <input type="hidden" name="user_id" value="{{ u.id }}">
+        <select name="group_name">
+          <option value="">Remove Role</option>
+          <option value="ADMIN" {% if u.role == "ADMIN" %}selected{% endif %}>ADMIN</option>
+          <option value="USER" {% if u.role == "USER" %}selected{% endif %}>USER</option>
+        </select>
+        <button type="submit">Save</button>
+      </form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+
+{% endblock %}

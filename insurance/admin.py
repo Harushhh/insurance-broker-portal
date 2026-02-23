@@ -47,3 +47,9 @@ class RateMasterAdmin(admin.ModelAdmin):
         "po_net_rate",
         "po_flat_amount",
     )
+
+from django.contrib import admin
+from .models import RTOMaster, MakeModelMaster
+
+admin.site.register(RTOMaster)
+admin.site.register(MakeModelMaster)
