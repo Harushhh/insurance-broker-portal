@@ -32,7 +32,6 @@ NA_MAKE_MODEL_MAP = {
         "Goods Carrying Tractor",
     ],
     "TW": [
-        # ✅ Replace these with your actual TW classes
         "Scooter",
         "Bike",
     ],
@@ -89,15 +88,10 @@ def build_key_hash(cleaned_dict):
     parts = []
     for f in GROUP_FIELDS:
         v = cleaned_dict.get(f)
-
-        # FK objects -> pk
         if hasattr(v, "pk"):
             v = v.pk
-
-        # Date -> stable format
         if hasattr(v, "strftime"):
             v = v.strftime("%Y-%m-%d")
-
         parts.append(normalize(v))
 
     key_text = "|".join(parts)
@@ -138,10 +132,6 @@ def split_csv_values(values):
 # ✅ NA filter helpers
 # -------------------------
 def get_na_class_list_for_product(product_id: str):
-    """
-    If product_id is provided -> return NA list for that product name
-    If product_id missing -> return combined NA list of all products in mapping
-    """
     if product_id and str(product_id).isdigit():
         p = ProductMaster.objects.filter(id=int(product_id)).first()
         if p:
@@ -155,47 +145,26 @@ def get_na_class_list_for_product(product_id: str):
 
 
 def apply_make_model_filter(qs, product_id: str, make_model_class: str):
-    """
-    make_model_class can be:
-    - ""      -> no filter
-    - "12"    -> normal filter by id
-    - "NA"    -> special filter (map to real classes for that product)
-    """
     if not make_model_class:
         return qs
-
-    # Normal dropdown selection by ID
     if str(make_model_class).isdigit():
         return qs.filter(make_model_class_id=make_model_class)
-
-    # Special "NA" selection
     if make_model_class == "NA":
         na_list = get_na_class_list_for_product(product_id)
-
         if not na_list:
-            # fallback only literal NA rows
             return qs.filter(make_model_class__name__iexact="NA")
-
         return qs.filter(
             Q(make_model_class__name__in=na_list) |
             Q(make_model_class__name__iexact="NA")
         )
-
     return qs
 
 
 def should_display_na(product_name: str, make_model_name: str):
-    """
-    UI rule:
-    If make_model_class is one of NA-mapped values for that product -> show NA
-    If it is literally NA -> show NA
-    """
     if not make_model_name:
         return False
-
     if make_model_name.strip().upper() == "NA":
         return True
-
     mapped = NA_MAKE_MODEL_MAP.get(product_name, [])
     return make_model_name in mapped
 
@@ -222,19 +191,13 @@ def upload_csv(request):
         inserted = 0
         errors = []
 
-        # -----------------------------
-        # ✅ CASE 1: Upload RTO Master
-        # CSV columns needed: rto_name, rto_cluster
-        # -----------------------------
         if upload_type == "rto_master":
             for i, row in enumerate(reader, start=2):
                 try:
                     rto_name = (row.get("rto_name") or "").strip()
                     rto_cluster = (row.get("rto_cluster") or "").strip()
-
                     if not rto_name:
                         raise ValueError("rto_name is blank")
-
                     RTOMaster.objects.update_or_create(
                         rto_name=rto_name,
                         defaults={"rto_cluster": rto_cluster or None}
@@ -242,25 +205,18 @@ def upload_csv(request):
                     inserted += 1
                 except Exception as e:
                     errors.append(f"Row {i}: {str(e)}")
-
             return render(request, "upload.html", {
                 "summary": {"inserted": inserted, "duplicates": 0, "errors": len(errors)},
                 "errors": errors,
             })
 
-        # -----------------------------
-        # ✅ CASE 2: Upload Make Model Master
-        # CSV columns needed: make_model_name, make_model_cluster
-        # -----------------------------
         if upload_type == "make_model_master":
             for i, row in enumerate(reader, start=2):
                 try:
                     make_model_name = (row.get("make_model_name") or "").strip()
                     make_model_cluster = (row.get("make_model_cluster") or "").strip()
-
                     if not make_model_name:
                         raise ValueError("make_model_name is blank")
-
                     MakeModelMaster.objects.update_or_create(
                         make_model_name=make_model_name,
                         defaults={"make_model_cluster": make_model_cluster or None}
@@ -268,20 +224,15 @@ def upload_csv(request):
                     inserted += 1
                 except Exception as e:
                     errors.append(f"Row {i}: {str(e)}")
-
             return render(request, "upload.html", {
                 "summary": {"inserted": inserted, "duplicates": 0, "errors": len(errors)},
                 "errors": errors,
             })
 
-        # -----------------------------
-        # ✅ CASE 3: Default = RateMaster (your existing code)
-        # -----------------------------
-        # If user didn't select anything, treat as rate_master
-        # (your existing RateMaster upload code continues below)
-
         inserted = 0
         errors = []
+        valid_rtos = set(RTOMaster.objects.values_list('rto_name', flat=True))
+        valid_makes = set(MakeModelMaster.objects.values_list('make_model_name', flat=True))
 
         def resolve_master(value, ModelClass):
             if value is None:
@@ -296,6 +247,18 @@ def upload_csv(request):
 
         for i, row in enumerate(reader, start=2):
             try:
+                raw_rtos = row.get("new_rto_list") or ""
+                rto_items = [x.strip() for x in raw_rtos.split(",") if x.strip()]
+                for rto in rto_items:
+                    if rto not in valid_rtos:
+                        raise ValueError(f"RTO '{rto}' does not exist in RTOMaster. Please add it first.")
+
+                raw_makes = row.get("new_vehicle_makes") or ""
+                make_items = [x.strip() for x in raw_makes.split(",") if x.strip()]
+                for make in make_items:
+                    if make not in valid_makes:
+                        raise ValueError(f"Vehicle Make '{make}' does not exist in MakeModelMaster. Please add it first.")
+
                 product_val = str(row.get("product", "")).strip()
                 product_obj = None
                 if product_val:
@@ -319,43 +282,33 @@ def upload_csv(request):
                     "new_vehicle_makes": row.get("new_vehicle_makes") or None,
                     "insurer_vertical": row.get("insurer_vertical") or None,
                     "insurance_company": str(row.get("insurance_company", "")).strip(),
-
                     "product": product_obj,
                     "sub_product": sub_product_obj,
                     "policy_type": policy_type_obj,
                     "vehicle_age_min": float(row.get("vehicle_age_min") or 0),
                     "vehicle_age_max": float(row.get("vehicle_age_max") or 0),
                     "make_model_class": mmc_obj,
-
                     "pi_od_rate": float(row.get("pi_od_rate") or 0),
                     "pi_tp_rate": float(row.get("pi_tp_rate") or 0),
                     "pi_tp_2": float(row.get("pi_tp_2") or 0),
                     "pi_tp_3": float(row.get("pi_tp_3") or 0),
                     "pi_tp_4": float(row.get("pi_tp_4") or 0),
                     "pi_tp_5": float(row.get("pi_tp_5") or 0),
-
                     "pi_net_rate": float(row.get("pi_net_rate") or 0),
                     "pi_flat_amount": float(row.get("pi_flat_amount") or 0),
                     "pi_vli": float(row.get("pi_vli") or 0),
                     "pi_type": row.get("pi_type") or None,
-
                     "tariff_min": float(row.get("tariff_min") or 0),
                     "tariff_max": float(row.get("tariff_max") or 0),
-
                     "is_ncb": is_ncb_obj,
                     "is_cpa": is_cpa_obj,
-
                     "cc_min": float(row.get("cc_min") or 0),
                     "cc_max": float(row.get("cc_max") or 0),
-
                     "is_zd": is_zd_obj,
-
                     "from_date": parse_date(row.get("from_date")),
                     "to_date": parse_date(row.get("to_date")),
-
                     "sc_min": float(row.get("sc_min") or 0),
                     "sc_max": float(row.get("sc_max") or 0),
-
                     "add_tnc": row.get("add_tnc") or None,
                 }
 
@@ -409,9 +362,7 @@ def upload_csv(request):
                     po_net_rate=float(row.get("po_net_rate") or 0),
                     po_flat_amount=float(row.get("po_flat_amount") or 0),
                 )
-
                 inserted += 1
-
             except Exception as e:
                 errors.append(f"Row {i}: {str(e)}")
 
@@ -419,7 +370,6 @@ def upload_csv(request):
             "summary": {"inserted": inserted, "duplicates": 0, "errors": len(errors)},
             "errors": errors
         })
-
     return render(request, "upload.html")
 
 # -------------------------
@@ -433,7 +383,7 @@ def dashboard(request):
         "is_ncb", "is_cpa", "is_zd"
     ).all()
 
-    # filters
+    # Get values typed in by user
     q = (request.GET.get("q") or "").strip()
     insurance_company = (request.GET.get("insurance_company") or "").strip()
     product = (request.GET.get("product") or "").strip()
@@ -442,6 +392,10 @@ def dashboard(request):
     make_model_class = (request.GET.get("make_model_class") or "").strip()
     from_date = (request.GET.get("from_date") or "").strip()
     to_date = (request.GET.get("to_date") or "").strip()
+    
+    # ✅ RTO Code & Make/Model Code logic
+    rto_code = (request.GET.get("rto_code") or "").strip()
+    make_model_code = (request.GET.get("make_model_code") or "").strip() # ✅ NEW
 
     if q:
         qs = qs.filter(
@@ -449,7 +403,6 @@ def dashboard(request):
             Q(new_rto_list__icontains=q) |
             Q(new_vehicle_makes__icontains=q)
         )
-
     if insurance_company:
         qs = qs.filter(insurance_company=insurance_company)
     if product:
@@ -459,7 +412,34 @@ def dashboard(request):
     if sub_product:
         qs = qs.filter(sub_product_id=sub_product)
 
-    # ✅ IMPORTANT: apply NA logic
+    # Apply RTO Code Filter (Cluster Logic)
+    if rto_code:
+        matching_rto_names = RTOMaster.objects.filter(
+            rto_cluster__icontains=rto_code
+        ).values_list("rto_name", flat=True)
+
+        if matching_rto_names:
+            q_rto = Q()
+            for rto_name in matching_rto_names:
+                q_rto |= Q(new_rto_list__icontains=rto_name)
+            qs = qs.filter(q_rto)
+        else:
+            qs = qs.none()
+
+    # ✅ NEW: Apply Make/Model Code Filter (Cluster Logic)
+    if make_model_code:
+        matching_make_names = MakeModelMaster.objects.filter(
+            make_model_cluster__icontains=make_model_code
+        ).values_list("make_model_name", flat=True)
+
+        if matching_make_names:
+            q_make = Q()
+            for make_name in matching_make_names:
+                q_make |= Q(new_vehicle_makes__icontains=make_name)
+            qs = qs.filter(q_make)
+        else:
+            qs = qs.none()
+
     qs = apply_make_model_filter(qs, product, make_model_class)
 
     if from_date:
@@ -478,7 +458,6 @@ def dashboard(request):
     grouped_rows = []
     for gid, rows in buckets.items():
         first = rows[0]
-
         all_rtos = split_csv_values([r.new_rto_list for r in rows])
         all_fuels = [r.fuel_type.name for r in rows if r.fuel_type]
 
@@ -487,7 +466,6 @@ def dashboard(request):
         first.display_rto_list = unique_join(all_rtos)
         first.display_fuel_types = unique_join(all_fuels)
 
-        # ✅ FIX: NEVER assign string to FK field
         product_name = first.product.name if first.product else ""
         mmc_name = first.make_model_class.name if first.make_model_class else ""
 
@@ -498,61 +476,15 @@ def dashboard(request):
 
         grouped_rows.append(first)
 
-    # ✅ Use display_make_model_class in columns
     field_names = [
-        "display_group_id",
-        "records_in_group",
-        "new_vehicle_makes",
-        "display_rto_list",
-        "insurer_vertical",
-        "insurance_company",
-        "product",
-        "sub_product",
-        "policy_type",
-        "display_fuel_types",
-        "display_make_model_class",
-
-        "vehicle_age_min",
-        "vehicle_age_max",
-
-        "pi_od_rate",
-        "pi_tp_rate",
-        "pi_tp_2",
-        "pi_tp_3",
-        "pi_tp_4",
-        "pi_tp_5",
-
-        "pi_net_rate",
-        "pi_flat_amount",
-        "pi_vli",
-        "pi_type",
-
-        "tariff_min",
-        "tariff_max",
-
-        "is_ncb",
-        "is_cpa",
-        "is_zd",
-
-        "cc_min",
-        "cc_max",
-
-        "from_date",
-        "to_date",
-
-        "sc_min",
-        "sc_max",
-
-        "user_id",
-        "veh_use",
-        "remarks",
-        "add_tnc",
-
-        "po_type",
-        "po_od_rate",
-        "po_tp_rate",
-        "po_net_rate",
-        "po_flat_amount",
+        "display_group_id", "records_in_group", "new_vehicle_makes", "display_rto_list",
+        "insurer_vertical", "insurance_company", "product", "sub_product", "policy_type",
+        "display_fuel_types", "display_make_model_class", "vehicle_age_min", "vehicle_age_max",
+        "pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5",
+        "pi_net_rate", "pi_flat_amount", "pi_vli", "pi_type", "tariff_min", "tariff_max",
+        "is_ncb", "is_cpa", "is_zd", "cc_min", "cc_max", "from_date", "to_date",
+        "sc_min", "sc_max", "user_id", "veh_use", "remarks", "add_tnc",
+        "po_type", "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount",
     ]
 
     insurance_company_list = (
@@ -562,10 +494,7 @@ def dashboard(request):
     product_list = ProductMaster.objects.all().order_by("name")
     fuel_list = FuelTypeMaster.objects.all().order_by("name")
     sub_product_list = SubProductMaster.objects.all().order_by("name")
-
-    # ✅ Add NA option in dropdown (if not already there)
     make_model_class_list = list(MakeModelClassMaster.objects.all().order_by("name"))
-    # ensure NA exists
     MakeModelClassMaster.objects.get_or_create(name="NA")
 
     return render(request, "dashboard.html", {
@@ -588,6 +517,8 @@ def dashboard(request):
             "make_model_class": make_model_class,
             "from_date": from_date,
             "to_date": to_date,
+            "rto_code": rto_code,
+            "make_model_code": make_model_code, # ✅ NEW: Keep typed text in the box
         }
     })
 
@@ -611,6 +542,8 @@ def export_rates_xlsx(request):
     make_model_class = (request.GET.get("make_model_class") or "").strip()
     from_date = (request.GET.get("from_date") or "").strip()
     to_date = (request.GET.get("to_date") or "").strip()
+    rto_code = (request.GET.get("rto_code") or "").strip()
+    make_model_code = (request.GET.get("make_model_code") or "").strip() # ✅ NEW
 
     if q:
         qs = qs.filter(
@@ -627,6 +560,34 @@ def export_rates_xlsx(request):
     if sub_product:
         qs = qs.filter(sub_product_id=sub_product)
 
+    # Filter for RTO code during export
+    if rto_code:
+        matching_rto_names = RTOMaster.objects.filter(
+            rto_cluster__icontains=rto_code
+        ).values_list("rto_name", flat=True)
+
+        if matching_rto_names:
+            q_rto = Q()
+            for rto_name in matching_rto_names:
+                q_rto |= Q(new_rto_list__icontains=rto_name)
+            qs = qs.filter(q_rto)
+        else:
+            qs = qs.none()
+
+    # ✅ NEW: Filter for Make/Model Code during Excel export
+    if make_model_code:
+        matching_make_names = MakeModelMaster.objects.filter(
+            make_model_cluster__icontains=make_model_code
+        ).values_list("make_model_name", flat=True)
+
+        if matching_make_names:
+            q_make = Q()
+            for make_name in matching_make_names:
+                q_make |= Q(new_vehicle_makes__icontains=make_name)
+            qs = qs.filter(q_make)
+        else:
+            qs = qs.none()
+
     qs = apply_make_model_filter(qs, product, make_model_class)
 
     if from_date:
@@ -634,74 +595,45 @@ def export_rates_xlsx(request):
     if to_date:
         qs = qs.filter(from_date__lte=to_date)
 
-    qs = qs.order_by("-id")  # UNGROUPED
+    qs = qs.order_by("-id")  
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Rates (Ungrouped)"
 
     headers = [
-        "id", "group_id",
-        "new_vehicle_makes", "new_rto_list", "insurer_vertical",
+        "id", "group_id", "new_vehicle_makes", "new_rto_list", "insurer_vertical",
         "insurance_company", "product", "sub_product", "policy_type", "fuel_type",
         "make_model_class", "vehicle_age_min", "vehicle_age_max",
         "pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5",
         "pi_net_rate", "pi_flat_amount", "pi_vli", "pi_type",
         "tariff_min", "tariff_max", "cc_min", "cc_max",
-        "is_ncb", "is_cpa", "is_zd",
-        "from_date", "to_date",
-        "sc_min", "sc_max",
-        "user_id", "veh_use", "remarks",
-        "add_tnc",
+        "is_ncb", "is_cpa", "is_zd", "from_date", "to_date",
+        "sc_min", "sc_max", "user_id", "veh_use", "remarks", "add_tnc",
         "po_type", "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount",
     ]
     ws.append(headers)
 
     for r in qs:
         ws.append([
-            r.id,
-            r.group_id,
-            r.new_vehicle_makes or "",
-            r.new_rto_list or "",
-            r.insurer_vertical or "",
-            r.insurance_company or "",
-            r.product.name if r.product else "",
-            r.sub_product.name if r.sub_product else "",
-            r.policy_type.name if r.policy_type else "",
-            r.fuel_type.name if r.fuel_type else "",
-            r.make_model_class.name if r.make_model_class else "",
-            r.vehicle_age_min if r.vehicle_age_min is not None else "",
-            r.vehicle_age_max if r.vehicle_age_max is not None else "",
-            r.pi_od_rate if r.pi_od_rate is not None else "",
-            r.pi_tp_rate if r.pi_tp_rate is not None else "",
-            r.pi_tp_2 if r.pi_tp_2 is not None else "",
-            r.pi_tp_3 if r.pi_tp_3 is not None else "",
-            r.pi_tp_4 if r.pi_tp_4 is not None else "",
-            r.pi_tp_5 if r.pi_tp_5 is not None else "",
-            r.pi_net_rate if r.pi_net_rate is not None else "",
-            r.pi_flat_amount if r.pi_flat_amount is not None else "",
-            r.pi_vli if r.pi_vli is not None else "",
-            r.pi_type or "",
-            r.tariff_min if r.tariff_min is not None else "",
-            r.tariff_max if r.tariff_max is not None else "",
-            r.cc_min if r.cc_min is not None else "",
-            r.cc_max if r.cc_max is not None else "",
-            r.is_ncb.code if r.is_ncb else "",
-            r.is_cpa.code if r.is_cpa else "",
-            r.is_zd.code if r.is_zd else "",
-            r.from_date.strftime("%Y-%m-%d") if r.from_date else "",
-            r.to_date.strftime("%Y-%m-%d") if r.to_date else "",
-            r.sc_min if r.sc_min is not None else "",
-            r.sc_max if r.sc_max is not None else "",
-            r.user_id if r.user_id is not None else "",
-            r.veh_use or "",
-            r.remarks or "",
-            r.add_tnc or "",
-            r.po_type or "",
-            r.po_od_rate if r.po_od_rate is not None else "",
-            r.po_tp_rate if r.po_tp_rate is not None else "",
-            r.po_net_rate if r.po_net_rate is not None else "",
-            r.po_flat_amount if r.po_flat_amount is not None else "",
+            r.id, r.group_id, r.new_vehicle_makes or "", r.new_rto_list or "", r.insurer_vertical or "",
+            r.insurance_company or "", r.product.name if r.product else "",
+            r.sub_product.name if r.sub_product else "", r.policy_type.name if r.policy_type else "",
+            r.fuel_type.name if r.fuel_type else "", r.make_model_class.name if r.make_model_class else "",
+            r.vehicle_age_min if r.vehicle_age_min is not None else "", r.vehicle_age_max if r.vehicle_age_max is not None else "",
+            r.pi_od_rate if r.pi_od_rate is not None else "", r.pi_tp_rate if r.pi_tp_rate is not None else "",
+            r.pi_tp_2 if r.pi_tp_2 is not None else "", r.pi_tp_3 if r.pi_tp_3 is not None else "",
+            r.pi_tp_4 if r.pi_tp_4 is not None else "", r.pi_tp_5 if r.pi_tp_5 is not None else "",
+            r.pi_net_rate if r.pi_net_rate is not None else "", r.pi_flat_amount if r.pi_flat_amount is not None else "",
+            r.pi_vli if r.pi_vli is not None else "", r.pi_type or "",
+            r.tariff_min if r.tariff_min is not None else "", r.tariff_max if r.tariff_max is not None else "",
+            r.cc_min if r.cc_min is not None else "", r.cc_max if r.cc_max is not None else "",
+            r.is_ncb.code if r.is_ncb else "", r.is_cpa.code if r.is_cpa else "", r.is_zd.code if r.is_zd else "",
+            r.from_date.strftime("%Y-%m-%d") if r.from_date else "", r.to_date.strftime("%Y-%m-%d") if r.to_date else "",
+            r.sc_min if r.sc_min is not None else "", r.sc_max if r.sc_max is not None else "",
+            r.user_id if r.user_id is not None else "", r.veh_use or "", r.remarks or "", r.add_tnc or "",
+            r.po_type or "", r.po_od_rate if r.po_od_rate is not None else "", r.po_tp_rate if r.po_tp_rate is not None else "",
+            r.po_net_rate if r.po_net_rate is not None else "", r.po_flat_amount if r.po_flat_amount is not None else "",
         ])
 
     response = HttpResponse(
@@ -727,16 +659,12 @@ def user_management(request):
     if request.method == "POST":
         user_id = request.POST.get("user_id")
         group_name = request.POST.get("group_name")
-
         u = User.objects.get(id=user_id)
-
         for g in groups:
             u.groups.remove(g)
-
         if group_name in ["ADMIN", "USER"]:
             g = Group.objects.get(name=group_name)
             u.groups.add(g)
-
         return redirect("user_management")
 
     def get_role(u):
@@ -749,10 +677,7 @@ def user_management(request):
     user_rows = []
     for u in users:
         user_rows.append({
-            "id": u.id,
-            "username": u.username,
-            "role": get_role(u),
-            "is_superuser": u.is_superuser,
+            "id": u.id, "username": u.username, "role": get_role(u), "is_superuser": u.is_superuser,
         })
 
     return render(request, "user_management.html", {
@@ -763,66 +688,33 @@ def user_management(request):
 @login_required
 def rto_dashboard(request):
     qs = RTOMaster.objects.all().order_by("rto_name")
-
-    # ✅ NEW: dropdown = name
     rto_name = (request.GET.get("rto_name") or "").strip()
-
-    # ✅ NEW: search = cluster
     cluster_q = (request.GET.get("cluster_q") or "").strip()
 
     if rto_name:
         qs = qs.filter(rto_name=rto_name)
-
     if cluster_q:
         qs = qs.filter(rto_cluster__icontains=cluster_q)
 
-    # dropdown list (names)
-    rto_name_list = (
-        RTOMaster.objects.values_list("rto_name", flat=True)
-        .distinct()
-        .order_by("rto_name")
-    )
-
+    rto_name_list = RTOMaster.objects.values_list("rto_name", flat=True).distinct().order_by("rto_name")
     return render(request, "rto_dashboard.html", {
-        "data": qs,
-        "total": qs.count(),
-        "rto_name_list": rto_name_list,
-        "selected": {
-            "rto_name": rto_name,
-            "cluster_q": cluster_q,
-        }
+        "data": qs, "total": qs.count(), "rto_name_list": rto_name_list,
+        "selected": {"rto_name": rto_name, "cluster_q": cluster_q}
     })
-
 
 @login_required
 def make_model_dashboard(request):
     qs = MakeModelMaster.objects.all().order_by("make_model_name")
-
-    # ✅ NEW: dropdown = name
     make_model_name = (request.GET.get("make_model_name") or "").strip()
-
-    # ✅ NEW: search = cluster
     cluster_q = (request.GET.get("cluster_q") or "").strip()
 
     if make_model_name:
         qs = qs.filter(make_model_name=make_model_name)
-
     if cluster_q:
         qs = qs.filter(make_model_cluster__icontains=cluster_q)
 
-    # dropdown list (names)
-    make_model_name_list = (
-        MakeModelMaster.objects.values_list("make_model_name", flat=True)
-        .distinct()
-        .order_by("make_model_name")
-    )
-
+    make_model_name_list = MakeModelMaster.objects.values_list("make_model_name", flat=True).distinct().order_by("make_model_name")
     return render(request, "make_model_dashboard.html", {
-        "data": qs,
-        "total": qs.count(),
-        "make_model_name_list": make_model_name_list,
-        "selected": {
-            "make_model_name": make_model_name,
-            "cluster_q": cluster_q,
-        }
+        "data": qs, "total": qs.count(), "make_model_name_list": make_model_name_list,
+        "selected": {"make_model_name": make_model_name, "cluster_q": cluster_q}
     })

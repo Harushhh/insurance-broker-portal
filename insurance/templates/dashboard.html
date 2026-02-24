@@ -10,22 +10,33 @@
       <div class="subtext"><b>Total Groups:</b> {{ total }}</div>
     </div>
 
-    <!-- ✅ Export button (uses current filters) -->
     <a class="btn primary"
        href="{% url 'export_rates_xlsx' %}?{{ request.GET.urlencode }}">
       ⬇️ Export Excel (Ungrouped)
     </a>
   </div>
 
-  <!-- ✅ FILTERS -->
   <form method="GET" class="card" style="margin-top:14px; padding:14px;">
-    <!-- ✅ give this grid a CLASS so responsive works -->
     <div class="filters-grid">
 
       <div>
         <div class="subtext" style="margin:0 0 6px;">Search</div>
         <input type="text" name="q" placeholder="Search company / RTO / make..."
                value="{{ selected.q|default_if_none:'' }}"
+               style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">RTO Code</div>
+        <input type="text" name="rto_code" placeholder="e.g. MH03"
+               value="{{ selected.rto_code|default_if_none:'' }}"
+               style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Make/Model Code</div>
+        <input type="text" name="make_model_code" placeholder="e.g. Swift"
+               value="{{ selected.make_model_code|default_if_none:'' }}"
                style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
 
@@ -73,10 +84,7 @@
         <div class="subtext" style="margin:0 0 6px;">Make Model Class</div>
         <select name="make_model_class" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
           <option value="">All</option>
-
-          <!-- ✅ IMPORTANT: NA option -->
           <option value="NA" {% if selected.make_model_class == "NA" %}selected{% endif %}>NA</option>
-
           {% for mmc in make_model_class_list %}
             <option value="{{ mmc.id }}" {% if selected.make_model_class|stringformat:"s" == mmc.id|stringformat:"s" %}selected{% endif %}>
               {{ mmc.name }}
@@ -120,8 +128,7 @@
               <td style="white-space:normal; word-break:break-word; line-height:1.35;">
 
                 {% if val is None %}
-                  <!-- blank -->
-                {% else %}
+                  {% else %}
 
                   {% if field == "display_rto_list" %}
                     <details>
@@ -166,7 +173,6 @@
   {% endif %}
 </div>
 
-<!-- ✅ Filters layout (this fixes your “filters look like this” issue) -->
 <style>
   .filters-grid{
     display:grid;

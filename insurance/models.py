@@ -151,7 +151,7 @@ from django.db import models
 
 class RTOMaster(models.Model):
     rto_name = models.CharField(max_length=100, unique=True)
-    rto_cluster = models.CharField(max_length=1000000, blank=True, null=True)
+    rto_cluster = models.TextField(blank=True, null=True)
 
     def __str__(self):
         return self.rto_name
@@ -159,7 +159,7 @@ class RTOMaster(models.Model):
 
 class MakeModelMaster(models.Model):
     make_model_name = models.CharField(max_length=150, unique=True)
-    make_model_cluster = models.CharField(max_length=1000000, blank=True, null=True)
+    make_model_cluster = models.TextField(blank=True, null=True)
 
     def __str__(self):
         return self.make_model_name

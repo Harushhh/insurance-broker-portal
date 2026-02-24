@@ -119,7 +119,6 @@
     /* MENU DROPDOWN */
     .menu-wrap{ position:relative; }
 
-    /* IMPORTANT: keep dropdown ABOVE content so it won't "freeze" clicks */
     .dropdown{
       position:absolute;
       right:0;
@@ -131,7 +130,7 @@
       box-shadow: var(--shadow);
       padding: 8px;
       display:none;
-      z-index: 9999; /* ✅ prevents overlap issues */
+      z-index: 9999;
     }
     .dropdown.show{ display:block; }
     .dd-item{
@@ -194,20 +193,6 @@
     }
     tr:hover td{ background:#f7fbff; }
 
-    /* helper */
-    .pill{
-      display:inline-flex;
-      align-items:center;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background:#eef2ff;
-      color:#1e40af;
-      font-weight:700;
-      font-size: 11px;
-      border: 1px solid rgba(30,64,175,.15);
-    }
-
-    /* long text expand */
     details summary{
       cursor:pointer;
       color: var(--brand);
@@ -234,11 +219,11 @@
   <div class="container">
 
     {% comment %}
-      ✅ Remove menu from login page:
-      Only show topbar/menu if current path is NOT login page.
-      Works for /login/ AND /accounts/login/
+      ✅ Remove topbar/menu on login page
+      Your login page is at "/" (and sometimes /login/ or /accounts/login/)
     {% endcomment %}
-    {% if request.path != "/login/" and request.path != "/accounts/login/" %}
+    {% with p=request.path %}
+    {% if p != "/" and p != "/login/" and p != "/accounts/login/" %}
     <div class="topbar">
       <div class="brand">
         <div class="brand-badge"></div>
@@ -279,6 +264,7 @@
       </div>
     </div>
     {% endif %}
+    {% endwith %}
 
     {% block content %}{% endblock %}
   </div>
@@ -298,7 +284,6 @@
         drop.classList.remove("show");
       });
 
-      // ✅ close dropdown when pressing ESC
       document.addEventListener("keydown", function(e){
         if(e.key === "Escape"){
           drop.classList.remove("show");

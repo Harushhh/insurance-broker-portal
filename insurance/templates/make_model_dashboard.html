@@ -55,8 +55,8 @@
       </thead>
 
       <tbody>
-        {% if make_models %}
-          {% for m in make_models %}
+        {% if data %}
+          {% for m in data %}
             <tr>
               <td>{{ m.id }}</td>
               <td style="white-space:normal; word-break:break-word;">{{ m.make_model_name }}</td>
