@@ -6,7 +6,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{% block title %}Insurance Portal{% endblock %}</title>
 
-  <!-- Modern font -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -220,7 +219,6 @@
 
     {% comment %}
       ✅ Remove topbar/menu on login page
-      Your login page is at "/" (and sometimes /login/ or /accounts/login/)
     {% endcomment %}
     {% with p=request.path %}
     {% if p != "/" and p != "/login/" and p != "/accounts/login/" %}
@@ -241,6 +239,9 @@
             <div class="dd-muted">Navigate</div>
 
             <a class="dd-item" href="{% url 'dashboard' %}">📊 Dashboard</a>
+            
+            <a class="dd-item" href="{% url 'motor_payout_rates' %}">💰 Motor Payout Rates</a>
+            
             <a class="dd-item" href="{% url 'upload' %}">⬆️ Upload CSV</a>
             <a class="dd-item" href="{% url 'rto_dashboard' %}">🗺️ RTO Dashboard</a>
             <a class="dd-item" href="{% url 'make_model_dashboard' %}">🏷️ Make/Model Dashboard</a>

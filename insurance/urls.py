@@ -8,6 +8,9 @@ urlpatterns = [
 
     path("upload/", views.upload_csv, name="upload"),
     path("dashboard/", views.dashboard, name="dashboard"),
+    path("edit-rate/<str:group_id>/", views.edit_rate, name="edit_rate"),
+    path("bulk-update/", views.bulk_update_rates, name="bulk_update_rates"),
+    path("motor-payout-rates/", views.motor_payout_rates, name="motor_payout_rates"),
     path("user-management/", views.user_management, name="user_management"),
     path("export/", views.export_rates_xlsx, name="export_rates_xlsx"),
     path("rto-dashboard/", views.rto_dashboard, name="rto_dashboard"),

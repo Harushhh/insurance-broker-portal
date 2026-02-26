@@ -1,0 +1,304 @@
+{% extends "base.html" %}
+{% load custom_filters %}
+{% block title %}Motor Payout Rates{% endblock %}
+
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+<div class="card">
+  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+    <div>
+      <h2 style="margin:0;">Motor Payout Rates Checker</h2>
+      <div class="subtext"><b>Valid Matches Found:</b> {{ total_found }}</div>
+    </div>
+  </div>
+
+  <form method="GET" class="card" style="margin-top:14px; padding:14px; border:2px solid #38bdf8; background:#f0f9ff;">
+    <p style="margin-top:0; font-weight:600; color:#0284c7; font-size:14px;">🔍 Enter vehicle details below to find matching eligibility rates:</p>
+    
+    <div class="filters-grid">
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Target Date</div>
+        <input type="date" name="target_date" value="{{ selected.target_date }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Make Model Class</div>
+        <select name="make_model_class" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+          <option value="NA" {% if selected.make_model_class == "NA" %}selected{% endif %}>NA</option>
+          {% for mmc in make_model_class_list %}
+            <option value="{{ mmc.id }}" {% if selected.make_model_class|stringformat:"s" == mmc.id|stringformat:"s" %}selected{% endif %}>{{ mmc.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Make Name (Code)</div>
+        <select name="make_names" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+        </select>
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Sub Product</div>
+        <select name="sub_product" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+          {% for sp in sub_product_list %}
+            <option value="{{ sp.id }}" {% if selected.sub_product|stringformat:"s" == sp.id|stringformat:"s" %}selected{% endif %}>{{ sp.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">RTO Code</div>
+        <input type="text" name="rto_code" placeholder="e.g. MH03" value="{{ selected.rto_code|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Exact CC</div>
+        <input type="number" name="cc" placeholder="e.g. 1197" value="{{ selected.cc|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Fuel</div>
+        <select name="fuel" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+          {% for f in fuel_list %}
+            <option value="{{ f.id }}" {% if selected.fuel|stringformat:"s" == f.id|stringformat:"s" %}selected{% endif %}>{{ f.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Exact SC</div>
+        <input type="number" step="any" name="sc" placeholder="e.g. 4" value="{{ selected.sc|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Manufacturing Year</div>
+        <input type="number" name="mfg_year" placeholder="e.g. 2021" value="{{ selected.mfg_year|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Zero Dep (ZD)</div>
+        <div class="segmented-control">
+          <label>
+            <input type="radio" name="is_zd" value="YES" {% if selected.is_zd == 'YES' %}checked{% endif %}>
+            <span>YES</span>
+          </label>
+          <label>
+            <input type="radio" name="is_zd" value="NO" {% if selected.is_zd == 'NO' %}checked{% endif %}>
+            <span>NO</span>
+          </label>
+          <label>
+            <input type="radio" name="is_zd" value="" {% if not selected.is_zd %}checked{% endif %}>
+            <span>ALL</span>
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">CPA</div>
+        <div class="segmented-control">
+          <label>
+            <input type="radio" name="is_cpa" value="YES" {% if selected.is_cpa == 'YES' %}checked{% endif %}>
+            <span>YES</span>
+          </label>
+          <label>
+            <input type="radio" name="is_cpa" value="NO" {% if selected.is_cpa == 'NO' %}checked{% endif %}>
+            <span>NO</span>
+          </label>
+          <label>
+            <input type="radio" name="is_cpa" value="" {% if not selected.is_cpa %}checked{% endif %}>
+            <span>ALL</span>
+          </label>
+        </div>
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">NCB</div>
+        <div class="segmented-control">
+          <label>
+            <input type="radio" name="is_ncb" value="YES" {% if selected.is_ncb == 'YES' %}checked{% endif %}>
+            <span>YES</span>
+          </label>
+          <label>
+            <input type="radio" name="is_ncb" value="NO" {% if selected.is_ncb == 'NO' %}checked{% endif %}>
+            <span>NO</span>
+          </label>
+          <label>
+            <input type="radio" name="is_ncb" value="" {% if not selected.is_ncb %}checked{% endif %}>
+            <span>ALL</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; flex-wrap:wrap; gap:10px;">
+      <div style="display:flex; gap:10px;">
+        <button class="btn primary" type="submit">🔍 Check Eligibility</button>
+        <a class="btn" href="{% url 'motor_payout_rates' %}">Clear</a>
+      </div>
+      
+      <div style="display:flex; gap:8px; align-items:center;">
+        <span style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Table Zoom</span>
+        <button type="button" class="btn" onclick="zoomTable(1)" style="height:32px; width:32px; padding:0; border-radius:6px;" title="Zoom In">🔍+</button>
+        <button type="button" class="btn" onclick="zoomTable(-1)" style="height:32px; width:32px; padding:0; border-radius:6px;" title="Zoom Out">🔍-</button>
+      </div>
+    </div>
+  </form>
+
+  {% if data %}
+    <div class="table-wrap">
+      <table class="styled-table">
+        <tr>
+          {% for field in field_names %}
+            <th>{{ field }}</th>
+          {% endfor %}
+        </tr>
+
+        {% for row in data %}
+          <tr>
+            {% for field in field_names %}
+              {% with val=row|get_attr:field %}
+              <td {% if field == 'new_rto_list' or field == 'new_vehicle_makes' %}class="wrap-text"{% endif %}>
+                {% if val is None or val == "" %}
+                  {% else %}
+                  {% if field == "add_tnc" %}
+                    <details>
+                      <summary>Show T&amp;C</summary>
+                      <div class="full">{{ val|display_value }}</div>
+                    </details>
+                  {% else %}
+                    {{ val|display_value }}
+                  {% endif %}
+                {% endif %}
+              </td>
+              {% endwith %}
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </table>
+    </div>
+  {% else %}
+    <div class="card" style="margin-top:14px; text-align:center; padding: 40px; color:#64748b;">
+      <b>No eligible payout records found for this combination.</b>
+    </div>
+  {% endif %}
+</div>
+
+<script>
+  $(document).ready(function() {
+      $('.filters-grid select').select2({ width: '100%', placeholder: "Select..." });
+
+      // DEPENDENT DROPDOWN LOGIC
+      const classMakesMapping = {{ class_makes_mapping_json|safe }};
+      const allMakes = {{ all_makes_json|safe }};
+      const selectedMake = "{{ selected.make_names|escapejs }}";
+
+      const classSelect = $('select[name="make_model_class"]');
+      const makeSelect = $('select[name="make_names"]');
+
+      function updateMakesDropdown() {
+          const selectedClass = classSelect.val();
+          
+          makeSelect.empty();
+          makeSelect.append(new Option('All', ''));
+
+          let makesToShow = allMakes;
+
+          if (selectedClass && selectedClass !== "NA" && classMakesMapping[selectedClass]) {
+              makesToShow = classMakesMapping[selectedClass];
+          }
+
+          makesToShow.forEach(function(make) {
+              const opt = new Option(make, make);
+              if (make === selectedMake) {
+                  opt.selected = true;
+              }
+              makeSelect.append(opt);
+          });
+
+          makeSelect.trigger('change.select2');
+      }
+
+      updateMakesDropdown();
+
+      classSelect.on('change', function() {
+          updateMakesDropdown();
+      });
+  });
+
+  let currentFont = 13;
+  let currentPadV = 12;
+  let currentPadH = 16;
+
+  function zoomTable(direction) {
+      currentFont += (direction * 1.5);
+      currentPadV += (direction * 1.0);
+      currentPadH += (direction * 1.5);
+      if (currentFont < 8) { currentFont = 8; currentPadV = 6; currentPadH = 8; }
+      if (currentFont > 22) { currentFont = 22; currentPadV = 18; currentPadH = 26; }
+      document.documentElement.style.setProperty('--tb-font', currentFont + 'px');
+      document.documentElement.style.setProperty('--tb-pad', `${currentPadV}px ${currentPadH}px`);
+  }
+</script>
+
+<style>
+  :root { --tb-font: 13px; --tb-pad: 12px 16px; }
+  .filters-grid { display:grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap:12px; align-items:end; }
+  @media (max-width: 1100px){ .filters-grid{ grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
+  @media (max-width: 650px){ .filters-grid{ grid-template-columns: 1fr; } }
+
+  .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+  .styled-table { width: 100%; border-collapse: collapse; min-width: max-content; }
+  .styled-table th, .styled-table td { border: 1px solid #e2e8f0; padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; vertical-align: middle; white-space: nowrap; line-height: 1.4; transition: all 0.15s ease; }
+  .wrap-text { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 380px; }
+  .styled-table th { background-color: #f1f5f9; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #475569; position: sticky; top:0; z-index:10; }
+  .styled-table tr { background-color: #ffffff; }
+  .styled-table tr:nth-child(even) { background-color: #f8fafc; }
+  .styled-table tr:hover { background-color: #e2e8f0; }
+
+  .select2-container--default .select2-selection--single { height: 38px; border: 1px solid var(--border); border-radius: 8px; background-color: #fff; display: flex; align-items: center; }
+  .select2-container--default .select2-selection--single .select2-selection__rendered { color: var(--text); padding-left: 10px; font-size:14px; }
+  .select2-container--default .select2-selection--single .select2-selection__arrow { height: 36px; right: 8px; }
+  
+  /* ✅ NEW CSS: Segmented Radio Button Styling */
+  .segmented-control {
+    display: flex;
+    width: 100%;
+    height: 38px; /* Matches Select2 height */
+    background: #fff;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .segmented-control label {
+    flex: 1;
+    cursor: pointer;
+    position: relative;
+    margin: 0;
+  }
+  .segmented-control input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+  }
+  .segmented-control span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    width: 100%;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--muted);
+    border-right: 1px solid var(--border);
+    transition: background 0.15s, color 0.15s;
+  }
+  .segmented-control label:last-child span {
+    border-right: none;
+  }
+  .segmented-control input[type="radio"]:checked + span {
+    background: linear-gradient(135deg, var(--brand), var(--brand2));
+    color: #fff;
+  }
+</style>
+{% endblock %}

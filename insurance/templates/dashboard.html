@@ -3,6 +3,10 @@
 {% block title %}Dashboard{% endblock %}
 
 {% block content %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
 <div class="card">
   <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
     <div>
@@ -10,34 +14,37 @@
       <div class="subtext"><b>Total Groups:</b> {{ total }}</div>
     </div>
 
-    <a class="btn primary"
-       href="{% url 'export_rates_xlsx' %}?{{ request.GET.urlencode }}">
+    <a class="btn primary" href="{% url 'export_rates_xlsx' %}?{{ request.GET.urlencode }}">
       ⬇️ Export Excel (Ungrouped)
     </a>
   </div>
 
   <form method="GET" class="card" style="margin-top:14px; padding:14px;">
     <div class="filters-grid">
-
       <div>
         <div class="subtext" style="margin:0 0 6px;">Search</div>
-        <input type="text" name="q" placeholder="Search company / RTO / make..."
-               value="{{ selected.q|default_if_none:'' }}"
-               style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <input type="text" name="q" placeholder="Search company / RTO / make..." value="{{ selected.q|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
-
+      
       <div>
         <div class="subtext" style="margin:0 0 6px;">RTO Code</div>
-        <input type="text" name="rto_code" placeholder="e.g. MH03"
-               value="{{ selected.rto_code|default_if_none:'' }}"
-               style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <input type="text" name="rto_code" placeholder="e.g. MH03" value="{{ selected.rto_code|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
 
       <div>
-        <div class="subtext" style="margin:0 0 6px;">Make/Model Code</div>
-        <input type="text" name="make_model_code" placeholder="e.g. Swift"
-               value="{{ selected.make_model_code|default_if_none:'' }}"
-               style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <div class="subtext" style="margin:0 0 6px;">Make Name (Code)</div>
+        <input type="text" name="make_model_code" placeholder="e.g. Swift" value="{{ selected.make_model_code|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Make Model Class</div>
+        <select name="make_model_class" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+          <option value="NA" {% if selected.make_model_class == "NA" %}selected{% endif %}>NA</option>
+          {% for mmc in make_model_class_list %}
+            <option value="{{ mmc.id }}" {% if selected.make_model_class|stringformat:"s" == mmc.id|stringformat:"s" %}selected{% endif %}>{{ mmc.name }}</option>
+          {% endfor %}
+        </select>
       </div>
 
       <div>
@@ -49,7 +56,7 @@
           {% endfor %}
         </select>
       </div>
-
+      
       <div>
         <div class="subtext" style="margin:0 0 6px;">Product</div>
         <select name="product" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -59,7 +66,7 @@
           {% endfor %}
         </select>
       </div>
-
+      
       <div>
         <div class="subtext" style="margin:0 0 6px;">Fuel</div>
         <select name="fuel" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -69,7 +76,7 @@
           {% endfor %}
         </select>
       </div>
-
+      
       <div>
         <div class="subtext" style="margin:0 0 6px;">Sub Product</div>
         <select name="sub_product" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -79,113 +86,234 @@
           {% endfor %}
         </select>
       </div>
-
+      
       <div>
-        <div class="subtext" style="margin:0 0 6px;">Make Model Class</div>
-        <select name="make_model_class" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <div class="subtext" style="margin:0 0 6px;">From Date (>=)</div>
+        <input type="date" name="from_date" value="{{ selected.from_date|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+      
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">To Date (<=)</div>
+        <input type="date" name="to_date" value="{{ selected.to_date|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+      
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Age (Min-Max)</div>
+        <input type="text" name="age_range" placeholder="e.g. 0-4.01" value="{{ selected.age_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+      
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">CC (Min-Max)</div>
+        <input type="text" name="cc_range" placeholder="e.g. 1000-1500" value="{{ selected.cc_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+      
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">SC (Min-Max)</div>
+        <input type="text" name="sc_range" placeholder="e.g. 1-5" value="{{ selected.sc_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+      
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Zero Dep (ZD)</div>
+        <select name="is_zd" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
           <option value="">All</option>
-          <option value="NA" {% if selected.make_model_class == "NA" %}selected{% endif %}>NA</option>
-          {% for mmc in make_model_class_list %}
-            <option value="{{ mmc.id }}" {% if selected.make_model_class|stringformat:"s" == mmc.id|stringformat:"s" %}selected{% endif %}>
-              {{ mmc.name }}
-            </option>
+          {% for y in yes_no_na_list %}
+            <option value="{{ y.code }}" {% if selected.is_zd == y.code %}selected{% endif %}>{{ y.code }}</option>
           {% endfor %}
         </select>
       </div>
-
+      
       <div>
-        <div class="subtext" style="margin:0 0 6px;">From Date (>=)</div>
-        <input type="date" name="from_date" value="{{ selected.from_date|default_if_none:'' }}"
-               style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <div class="subtext" style="margin:0 0 6px;">NCB</div>
+        <select name="is_ncb" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+          {% for y in yes_no_na_list %}
+            <option value="{{ y.code }}" {% if selected.is_ncb == y.code %}selected{% endif %}>{{ y.code }}</option>
+          {% endfor %}
+        </select>
       </div>
-
+      
       <div>
-        <div class="subtext" style="margin:0 0 6px;">To Date (<=)</div>
-        <input type="date" name="to_date" value="{{ selected.to_date|default_if_none:'' }}"
-               style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <div class="subtext" style="margin:0 0 6px;">CPA</div>
+        <select name="is_cpa" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+          {% for y in yes_no_na_list %}
+            <option value="{{ y.code }}" {% if selected.is_cpa == y.code %}selected{% endif %}>{{ y.code }}</option>
+          {% endfor %}
+        </select>
       </div>
     </div>
 
-    <div style="display:flex; gap:10px; margin-top:14px; flex-wrap:wrap;">
-      <button class="btn primary" type="submit">Apply</button>
-      <a class="btn" href="{% url 'dashboard' %}">Reset</a>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; flex-wrap:wrap; gap:10px;">
+      <div style="display:flex; gap:10px;">
+        <button class="btn primary" type="submit">Apply</button>
+        <a class="btn" href="{% url 'dashboard' %}">Reset</a>
+        <button type="button" class="btn primary" onclick="openBulkModal()" style="background: linear-gradient(135deg, #10b981, #059669);">
+          📝 Bulk Update Selected
+        </button>
+      </div>
+
+      <div style="display:flex; gap:8px; align-items:center;">
+        <span style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Table Zoom</span>
+        <button type="button" class="btn" onclick="zoomTable(1)" style="height:32px; width:32px; padding:0; border-radius:6px;" title="Zoom In">🔍+</button>
+        <button type="button" class="btn" onclick="zoomTable(-1)" style="height:32px; width:32px; padding:0; border-radius:6px;" title="Zoom Out">🔍-</button>
+      </div>
     </div>
   </form>
 
-  {% if data %}
-    <div class="table-wrap" style="margin-top:14px;">
-      <table>
-        <tr>
-          {% for field in field_names %}
-            <th>{{ field }}</th>
-          {% endfor %}
-        </tr>
+  <form id="bulkActionForm" method="POST" action="{% url 'bulk_update_rates' %}">
+    {% csrf_token %}
 
-        {% for row in data %}
+    {% if data %}
+      <div class="table-wrap">
+        <table class="styled-table">
           <tr>
+            <th>
+              <div style="display:flex; align-items:center; gap:8px;">
+                <input type="checkbox" id="selectAllCheckbox" style="transform:scale(1.2); cursor:pointer;">
+                <span>ACTION</span>
+              </div>
+            </th>
+            
             {% for field in field_names %}
-              {% with val=row|get_attr:field %}
-              <td style="white-space:normal; word-break:break-word; line-height:1.35;">
-
-                {% if val is None %}
-                  {% else %}
-
-                  {% if field == "display_rto_list" %}
-                    <details>
-                      <summary>Show RTOs</summary>
-                      <div class="full">{{ val|display_value }}</div>
-                    </details>
-
-                  {% elif field == "display_fuel_types" %}
-                    <details>
-                      <summary>Show Fuel Types</summary>
-                      <div class="full">{{ val|display_value }}</div>
-                    </details>
-
-                  {% elif field == "add_tnc" %}
-                    <details>
-                      <summary>Show T&amp;C</summary>
-                      <div class="full">{{ val|display_value }}</div>
-                    </details>
-
-                  {% elif field == "remarks" %}
-                    <details>
-                      <summary>Show Remarks</summary>
-                      <div class="full">{{ val|display_value }}</div>
-                    </details>
-
-                  {% else %}
-                    {{ val|display_value }}
-                  {% endif %}
-
-                {% endif %}
-              </td>
-              {% endwith %}
+              <th>{{ field }}</th>
             {% endfor %}
           </tr>
-        {% endfor %}
-      </table>
+
+          {% for row in data %}
+            <tr>
+              <td>
+                <div style="display:flex; align-items:center; gap:10px;">
+                  <input type="checkbox" class="row-checkbox" name="selected_groups" value="{{ row.display_group_id|default:row.id }}" style="transform:scale(1.2); cursor:pointer;">
+                  <a href="{% url 'edit_rate' row.display_group_id %}" class="btn primary" style="padding: 4px 10px; font-size: 11px; height: auto;">
+                    ✏️ Edit
+                  </a>
+                </div>
+              </td>
+
+              {% for field in field_names %}
+                {% with val=row|get_attr:field %}
+                <td {% if field == 'display_rto_list' or field == 'new_vehicle_makes' %}class="wrap-text"{% endif %}>
+                  {% if val is None %}
+                  {% else %}
+                    {% if field == "add_tnc" %}
+                      <details><summary>Show T&amp;C</summary><div class="full">{{ val|display_value }}</div></details>
+                    {% elif field == "remarks" %}
+                      <details><summary>Show Remarks</summary><div class="full">{{ val|display_value }}</div></details>
+                    {% else %}
+                      {{ val|display_value }}
+                    {% endif %}
+                  {% endif %}
+                </td>
+                {% endwith %}
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </table>
+      </div>
+    {% else %}
+      <div class="card" style="margin-top:14px;">
+        <b>No data found.</b>
+      </div>
+    {% endif %}
+
+    <div id="bulkModal" class="modal-overlay">
+      <div class="modal-content card">
+        <h3 style="margin-top:0;">📝 Bulk Update Column</h3>
+        <p class="subtext">Select a column to update and enter the new value. This will modify ALL selected rows instantly.</p>
+        
+        <div style="margin-bottom:14px;">
+          <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:4px; display:block;">Select Field to Change</label>
+          <select class="modal-select2" name="update_field" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border);">
+            {% for field in field_names %}
+              {% if field != "display_group_id" and field != "records_in_group" and field != "age_range" and field != "cc_range" and field != "sc_range" %}
+                <option value="{{ field }}">{{ field }}</option>
+              {% endif %}
+            {% endfor %}
+          </select>
+        </div>
+
+        <div style="margin-bottom:20px;">
+          <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:4px; display:block;">New Value</label>
+          <input type="text" name="update_value" placeholder="Enter new value..." style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border);">
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:10px;">
+          <button type="button" class="btn" onclick="closeBulkModal()">Cancel</button>
+          <button type="submit" class="btn primary" style="background:#10b981;">Apply Update</button>
+        </div>
+      </div>
     </div>
-  {% else %}
-    <div class="card" style="margin-top:14px;">
-      <b>No data found.</b>
-    </div>
-  {% endif %}
+  </form>
 </div>
 
-<style>
-  .filters-grid{
-    display:grid;
-    grid-template-columns: repeat(4, minmax(180px, 1fr));
-    gap:12px;
-    align-items:end;
+<script>
+  $(document).ready(function() {
+      // Initialize Dropdowns
+      $('.filters-grid select').select2({ width: '100%', placeholder: "Search..." });
+      $('.modal-select2').select2({ width: '100%', dropdownParent: $('#bulkModal') });
+  });
+
+  const masterCheck = document.getElementById('selectAllCheckbox');
+  const rowChecks = document.querySelectorAll('.row-checkbox');
+
+  if(masterCheck) {
+    masterCheck.addEventListener('change', function() {
+        rowChecks.forEach(cb => cb.checked = masterCheck.checked);
+    });
   }
 
-  @media (max-width: 1100px){
-    .filters-grid{ grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+  function openBulkModal() {
+      const selected = Array.from(rowChecks).filter(cb => cb.checked);
+      if (selected.length === 0) { alert("Please select at least one row!"); return; }
+      document.getElementById('bulkModal').style.display = 'flex';
   }
-  @media (max-width: 650px){
-    .filters-grid{ grid-template-columns: 1fr; }
+
+  function closeBulkModal() {
+      document.getElementById('bulkModal').style.display = 'none';
   }
+
+  let currentFont = 13;
+  let currentPadV = 12;
+  let currentPadH = 16;
+
+  function zoomTable(direction) {
+      currentFont += (direction * 1.5);
+      currentPadV += (direction * 1.0);
+      currentPadH += (direction * 1.5);
+
+      if (currentFont < 8) { currentFont = 8; currentPadV = 6; currentPadH = 8; }
+      if (currentFont > 22) { currentFont = 22; currentPadV = 18; currentPadH = 26; }
+
+      document.documentElement.style.setProperty('--tb-font', currentFont + 'px');
+      document.documentElement.style.setProperty('--tb-pad', `${currentPadV}px ${currentPadH}px`);
+  }
+</script>
+
+<style>
+  :root { --tb-font: 13px; --tb-pad: 12px 16px; }
+  .filters-grid { display:grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap:12px; align-items:end; }
+  @media (max-width: 1100px){ .filters-grid{ grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
+  @media (max-width: 650px){ .filters-grid{ grid-template-columns: 1fr; } }
+
+  .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+  .styled-table { width: 100%; border-collapse: collapse; min-width: max-content; }
+  .styled-table th, .styled-table td { border: 1px solid #e2e8f0; padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; vertical-align: middle; white-space: nowrap; line-height: 1.4; transition: all 0.15s ease; }
+  .wrap-text { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 380px; }
+  .styled-table th { background-color: #f1f5f9; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #475569; position: sticky; top:0; z-index:10; }
+  .styled-table tr { background-color: #ffffff; }
+  .styled-table tr:nth-child(even) { background-color: #f8fafc; }
+  .styled-table tr:hover { background-color: #e2e8f0; }
+
+  .styled-table th:first-child { position: sticky; left: 0; background-color: #f1f5f9; z-index: 10; border-right: 2px solid #cbd5e1; }
+  .styled-table td:first-child { position: sticky; left: 0; background-color: inherit; z-index: 5; border-right: 2px solid #cbd5e1; }
+
+  .select2-container--default .select2-selection--single { height: 38px; border: 1px solid var(--border); border-radius: 8px; background-color: #fff; display: flex; align-items: center; }
+  .select2-container--default .select2-selection--single .select2-selection__rendered { color: var(--text); padding-left: 10px; font-size:14px; }
+  .select2-container--default .select2-selection--single .select2-selection__arrow { height: 36px; right: 8px; }
+  .select2-dropdown { border: 1px solid var(--brand); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 999999 !important; }
+  .select2-search__field { border-radius: 4px !important; }
+
+  .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(4px); display: none; justify-content: center; align-items: center; z-index: 99999; }
+  .modal-content { width: 100%; max-width: 450px; background: #fff; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.15); border-radius: 16px; }
 </style>
 {% endblock %}
