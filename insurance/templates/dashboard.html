@@ -22,20 +22,17 @@
   <form method="GET" class="card" style="margin-top:14px; padding:14px;">
     <div class="filters-grid">
       <div>
-        <div class="subtext" style="margin:0 0 6px;">Search</div>
-        <input type="text" name="q" placeholder="Search company / RTO / make..." value="{{ selected.q|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <div class="subtext" style="margin:0 0 6px;">Search Group ID</div>
+        <input type="text" name="q" placeholder="e.g. 2410, 2382" value="{{ selected.q|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">RTO Code</div>
         <input type="text" name="rto_code" placeholder="e.g. MH03" value="{{ selected.rto_code|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
-
       <div>
         <div class="subtext" style="margin:0 0 6px;">Make Name (Code)</div>
         <input type="text" name="make_model_code" placeholder="e.g. Swift" value="{{ selected.make_model_code|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
-
       <div>
         <div class="subtext" style="margin:0 0 6px;">Make Model Class</div>
         <select name="make_model_class" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -56,7 +53,6 @@
           {% endfor %}
         </select>
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">Product</div>
         <select name="product" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -66,7 +62,6 @@
           {% endfor %}
         </select>
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">Fuel</div>
         <select name="fuel" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -76,7 +71,6 @@
           {% endfor %}
         </select>
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">Sub Product</div>
         <select name="sub_product" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -86,32 +80,26 @@
           {% endfor %}
         </select>
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">From Date (>=)</div>
         <input type="date" name="from_date" value="{{ selected.from_date|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">To Date (<=)</div>
         <input type="date" name="to_date" value="{{ selected.to_date|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">Age (Min-Max)</div>
         <input type="text" name="age_range" placeholder="e.g. 0-4.01" value="{{ selected.age_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">CC (Min-Max)</div>
         <input type="text" name="cc_range" placeholder="e.g. 1000-1500" value="{{ selected.cc_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">SC (Min-Max)</div>
         <input type="text" name="sc_range" placeholder="e.g. 1-5" value="{{ selected.sc_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">Zero Dep (ZD)</div>
         <select name="is_zd" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -121,7 +109,6 @@
           {% endfor %}
         </select>
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">NCB</div>
         <select name="is_ncb" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -131,7 +118,6 @@
           {% endfor %}
         </select>
       </div>
-      
       <div>
         <div class="subtext" style="margin:0 0 6px;">CPA</div>
         <select name="is_cpa" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -147,9 +133,12 @@
       <div style="display:flex; gap:10px;">
         <button class="btn primary" type="submit">Apply</button>
         <a class="btn" href="{% url 'dashboard' %}">Reset</a>
-        <button type="button" class="btn primary" onclick="openBulkModal()" style="background: linear-gradient(135deg, #10b981, #059669);">
-          📝 Bulk Update Selected
-        </button>
+        
+        {% if request.user|has_group:"ADMIN" %}
+          <button type="button" class="btn primary" onclick="openBulkModal()" style="background: linear-gradient(135deg, #10b981, #059669);">
+            📝 Bulk Update Selected
+          </button>
+        {% endif %}
       </div>
 
       <div style="display:flex; gap:8px; align-items:center;">
@@ -167,12 +156,14 @@
       <div class="table-wrap">
         <table class="styled-table">
           <tr>
-            <th>
-              <div style="display:flex; align-items:center; gap:8px;">
-                <input type="checkbox" id="selectAllCheckbox" style="transform:scale(1.2); cursor:pointer;">
-                <span>ACTION</span>
-              </div>
-            </th>
+            {% if request.user|has_group:"ADMIN" %}
+              <th>
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="checkbox" id="selectAllCheckbox" style="transform:scale(1.2); cursor:pointer;">
+                  <span>ACTION</span>
+                </div>
+              </th>
+            {% endif %}
             
             {% for field in field_names %}
               <th>{{ field }}</th>
@@ -181,23 +172,23 @@
 
           {% for row in data %}
             <tr>
-              <td>
-                <div style="display:flex; align-items:center; gap:10px;">
-                  <input type="checkbox" class="row-checkbox" name="selected_groups" value="{{ row.display_group_id|default:row.id }}" style="transform:scale(1.2); cursor:pointer;">
-                  <a href="{% url 'edit_rate' row.display_group_id %}" class="btn primary" style="padding: 4px 10px; font-size: 11px; height: auto;">
-                    ✏️ Edit
-                  </a>
-                </div>
-              </td>
+              {% if request.user|has_group:"ADMIN" %}
+                <td>
+                  <div style="display:flex; align-items:center; gap:10px;">
+                    <input type="checkbox" class="row-checkbox" name="selected_groups" value="{{ row.display_group_id|default:row.id }}" style="transform:scale(1.2); cursor:pointer;">
+                    <a href="{% url 'edit_rate' row.display_group_id %}" class="btn primary" style="padding: 4px 10px; font-size: 11px; height: auto;">
+                      ✏️ Edit
+                    </a>
+                  </div>
+                </td>
+              {% endif %}
 
               {% for field in field_names %}
                 {% with val=row|get_attr:field %}
-                <td {% if field == 'display_rto_list' or field == 'new_vehicle_makes' %}class="wrap-text"{% endif %}>
+                <td {% if field == 'display_rto_list' or field == 'new_vehicle_makes' or field == 'add_tnc' %}class="wrap-text"{% endif %}>
                   {% if val is None %}
                   {% else %}
-                    {% if field == "add_tnc" %}
-                      <details><summary>Show T&amp;C</summary><div class="full">{{ val|display_value }}</div></details>
-                    {% elif field == "remarks" %}
+                    {% if field == "remarks" %}
                       <details><summary>Show Remarks</summary><div class="full">{{ val|display_value }}</div></details>
                     {% else %}
                       {{ val|display_value }}
@@ -248,7 +239,6 @@
 
 <script>
   $(document).ready(function() {
-      // Initialize Dropdowns
       $('.filters-grid select').select2({ width: '100%', placeholder: "Search..." });
       $('.modal-select2').select2({ width: '100%', dropdownParent: $('#bulkModal') });
   });
@@ -299,18 +289,23 @@
   .styled-table { width: 100%; border-collapse: collapse; min-width: max-content; }
   .styled-table th, .styled-table td { border: 1px solid #e2e8f0; padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; vertical-align: middle; white-space: nowrap; line-height: 1.4; transition: all 0.15s ease; }
   .wrap-text { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 380px; }
+  
+  /* ✅ Sticky Header Handling */
   .styled-table th { background-color: #f1f5f9; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #475569; position: sticky; top:0; z-index:10; }
   .styled-table tr { background-color: #ffffff; }
   .styled-table tr:nth-child(even) { background-color: #f8fafc; }
   .styled-table tr:hover { background-color: #e2e8f0; }
 
-  .styled-table th:first-child { position: sticky; left: 0; background-color: #f1f5f9; z-index: 10; border-right: 2px solid #cbd5e1; }
-  .styled-table td:first-child { position: sticky; left: 0; background-color: inherit; z-index: 5; border-right: 2px solid #cbd5e1; }
+  /* ✅ Sticky Left Column Handling */
+  {% if request.user|has_group:"ADMIN" %}
+    .styled-table th:first-child { position: sticky; left: 0; background-color: #f1f5f9; z-index: 11; border-right: 2px solid #cbd5e1; }
+    .styled-table td:first-child { position: sticky; left: 0; background-color: inherit; z-index: 5; border-right: 2px solid #cbd5e1; }
+  {% endif %}
 
   .select2-container--default .select2-selection--single { height: 38px; border: 1px solid var(--border); border-radius: 8px; background-color: #fff; display: flex; align-items: center; }
   .select2-container--default .select2-selection--single .select2-selection__rendered { color: var(--text); padding-left: 10px; font-size:14px; }
   .select2-container--default .select2-selection--single .select2-selection__arrow { height: 36px; right: 8px; }
-  .select2-dropdown { border: 1px solid var(--brand); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 999999 !important; }
+  .select2-dropdown { border: 1px solid var(--brand); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 99999 !important; }
   .select2-search__field { border-radius: 4px !important; }
 
   .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(4px); display: none; justify-content: center; align-items: center; z-index: 99999; }

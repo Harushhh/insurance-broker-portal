@@ -1,37 +1,127 @@
 {% extends "base.html" %}
+{% load custom_filters %}
 {% block title %}User Management{% endblock %}
+
 {% block content %}
+<div>
+  <h2>User Management</h2>
+  <p class="subtext">Create new users, bulk upload via CSV, or assign specific page access below.</p>
 
-<h2>User Management</h2>
-<p>Assign ADMIN or USER role to employees.</p>
+  {% if msg %}
+    <div style="background:#d1fae5; color:#047857; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-weight:600; border:1px solid #10b981;">
+      {{ msg }}
+    </div>
+  {% endif %}
+  {% if error %}
+    <div style="background:#fee2e2; color:#b91c1c; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-weight:600; border:1px solid #ef4444;">
+      {{ error }}
+    </div>
+  {% endif %}
 
-<table border="1" cellpadding="10" style="background:#fff;border-collapse:collapse;">
-  <tr>
-    <th>Username</th>
-    <th>Current Role</th>
-    <th>Change Role</th>
-  </tr>
-
-  {% for u in users %}
-  <tr>
-    <td>{{ u.username }}</td>
-    <td>
-      {% if u.is_superuser %}SUPERUSER{% else %}{{ u.role|default:"(none)" }}{% endif %}
-    </td>
-    <td>
-      <form method="post" style="display:flex;gap:8px;align-items:center;">
+  <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:20px;">
+    
+    <div class="card" style="flex:1; min-width:300px; margin-top:0;">
+      <h3 style="margin-top:0; font-size:16px;">👤 Create Single User</h3>
+      <form method="POST" action="{% url 'user_management' %}">
         {% csrf_token %}
-        <input type="hidden" name="user_id" value="{{ u.id }}">
-        <select name="group_name">
-          <option value="">Remove Role</option>
-          <option value="ADMIN" {% if u.role == "ADMIN" %}selected{% endif %}>ADMIN</option>
-          <option value="USER" {% if u.role == "USER" %}selected{% endif %}>USER</option>
-        </select>
-        <button type="submit">Save</button>
+        <input type="hidden" name="action" value="create_user">
+        <div style="display:flex; gap:10px; margin-bottom:12px;">
+          <input type="text" name="new_username" placeholder="Username" required style="flex:1; padding:10px; border-radius:8px; border:1px solid var(--border);">
+          <input type="password" name="new_password" placeholder="Password" required style="flex:1; padding:10px; border-radius:8px; border:1px solid var(--border);">
+        </div>
+        <button type="submit" class="btn primary" style="width:100%;">Create User</button>
       </form>
-    </td>
-  </tr>
-  {% endfor %}
-</table>
+    </div>
 
+    <div class="card" style="flex:1; min-width:300px; margin-top:0;">
+      <h3 style="margin-top:0; font-size:16px;">📂 Bulk Upload Users (CSV)</h3>
+      <p class="subtext" style="font-size:11px; margin-bottom:8px;">File must have 2 columns: <b>username</b> and <b>password</b></p>
+      <form method="POST" action="{% url 'user_management' %}" enctype="multipart/form-data" style="display:flex; gap:10px;">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="upload_users">
+        <input type="file" name="file" accept=".csv" required style="flex:1; padding:7px; border-radius:8px; border:1px solid var(--border); background:#f8fafc;">
+        <button type="submit" class="btn primary" style="background: linear-gradient(135deg, #10b981, #059669);">Upload & Create</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:0;">
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>USERNAME</th>
+            <th>CURRENT ACCESS</th>
+            <th>MANAGE ACCESS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td style="font-weight:600;">
+              {{ u.username }}
+              {% if u.is_superuser %} <span style="color:#2563eb;font-size:11px;">(System Admin)</span> {% endif %}
+            </td>
+            
+            <td>
+              {% if u.is_superuser or u.is_admin %}
+                <span style="background:#10b981; color:#fff; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:bold;">FULL ADMIN</span>
+              {% else %}
+                <div style="display:flex; flex-wrap:wrap; gap:4px;">
+                  {% for page in u.pages %}
+                    <span style="background:#e2e8f0; color:#334155; padding:2px 8px; border-radius:12px; font-size:11px;">{{ page|replace:"Can_View_"|replace:"_" }}</span>
+                  {% empty %}
+                    <span style="color:#94a3b8; font-size:12px;">No access assigned</span>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </td>
+
+            <td>
+              {% if not u.is_superuser %}
+                {% if u.is_admin %}
+                  <form method="POST" action="{% url 'user_management' %}" style="margin:0; display:inline-block;">
+                    {% csrf_token %}
+                    <input type="hidden" name="user_id" value="{{ u.id }}">
+                    <input type="hidden" name="action" value="update_pages">
+                    <button type="submit" class="btn danger" style="padding:4px 8px; font-size:11px; height:auto;">Revoke Admin</button>
+                  </form>
+                {% else %}
+                  <div style="display:flex; gap:10px; align-items:flex-start;">
+                    
+                    <form method="POST" action="{% url 'user_management' %}" style="margin:0; background:#f8fafc; padding:10px; border-radius:8px; border:1px solid #e2e8f0;">
+                      {% csrf_token %}
+                      <input type="hidden" name="user_id" value="{{ u.id }}">
+                      <input type="hidden" name="action" value="update_pages">
+                      
+                      <div style="font-size:11px; font-weight:700; color:#64748b; margin-bottom:6px; text-transform:uppercase;">Assign Pages:</div>
+                      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-bottom:10px;">
+                        {% for pg in page_groups %}
+                          <label style="font-size:12px; display:flex; align-items:center; gap:4px; cursor:pointer;">
+                            <input type="checkbox" name="pages_{{ u.id }}" value="{{ pg }}" {% if pg in u.pages %}checked{% endif %}>
+                            {{ pg|slice:"9:"|replace:"_" }}
+                          </label>
+                        {% endfor %}
+                      </div>
+                      <button type="submit" class="btn" style="padding:4px 10px; font-size:11px; height:auto; background:#fff;">Save Pages</button>
+                    </form>
+
+                    <form method="POST" action="{% url 'user_management' %}" style="margin:0;">
+                      {% csrf_token %}
+                      <input type="hidden" name="user_id" value="{{ u.id }}">
+                      <input type="hidden" name="action" value="make_admin">
+                      <button type="submit" class="btn primary" style="padding:6px 12px; font-size:12px; height:auto;">Make Full Admin</button>
+                    </form>
+                    
+                  </div>
+                {% endif %}
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
 {% endblock %}

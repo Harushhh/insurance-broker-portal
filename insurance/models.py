@@ -1,7 +1,6 @@
 from django.db import models
 import uuid
 
-
 # ---------- MASTER TABLE ----------
 class YesNoNAMaster(models.Model):
     code = models.CharField(max_length=3, unique=True)
@@ -68,7 +67,6 @@ class RateGroup(models.Model):
 # ---------- MAIN RATE TABLE ----------
 class RateMaster(models.Model):
 
-
     # ✅ Optional: group link (useful for grouping dashboard)
     group = models.ForeignKey(
         RateGroup,
@@ -99,8 +97,9 @@ class RateMaster(models.Model):
     fuel_type = models.ForeignKey(FuelTypeMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="fuel_type_id")
     make_model_class = models.ForeignKey(MakeModelClassMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="make_model_class_id")
 
-    vehicle_age_min = models.IntegerField(null=True, blank=True)
-    vehicle_age_max = models.IntegerField(null=True, blank=True)
+    # ✅ CHANGED TO FLOAT
+    vehicle_age_min = models.FloatField(null=True, blank=True)
+    vehicle_age_max = models.FloatField(null=True, blank=True)
 
     pi_od_rate = models.FloatField(null=True, blank=True)
     pi_tp_rate = models.FloatField(null=True, blank=True)
@@ -121,8 +120,9 @@ class RateMaster(models.Model):
     is_cpa = models.ForeignKey(YesNoNAMaster, on_delete=models.CASCADE, related_name="cpa", db_column="is_cpa_id")
     is_zd = models.ForeignKey(YesNoNAMaster, on_delete=models.CASCADE, related_name="zd", db_column="is_zd_id")
 
-    cc_min = models.IntegerField(null=True, blank=True)
-    cc_max = models.IntegerField(null=True, blank=True)
+    # ✅ CHANGED TO FLOAT
+    cc_min = models.FloatField(null=True, blank=True)
+    cc_max = models.FloatField(null=True, blank=True)
 
     from_date = models.DateField(null=True, blank=True)
     to_date = models.DateField(null=True, blank=True)
@@ -146,8 +146,6 @@ class RateMaster(models.Model):
 
     def __str__(self):
         return f"{self.insurance_company} | {self.product}"
-
-from django.db import models
 
 class RTOMaster(models.Model):
     rto_name = models.CharField(max_length=100, unique=True)
