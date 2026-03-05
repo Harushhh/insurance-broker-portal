@@ -55,8 +55,13 @@ def can_view_make_model(user):
 # ✅ NA MEANS THESE MAKE_MODEL_CLASS VALUES (PER PRODUCT)
 # =========================================================
 NA_MAKE_MODEL_MAP = {
-    "GCV 4W": ["Truck", "Pick Up Van", "Dumper Tipper", "Trailer", "Tanker", "Goods Carrying Tractor"],
     "TW": ["Scooter", "Bike"],
+    "Private Car": ["Car"],
+    "GCV 4W": ["Truck", "Pick Up Van", "Dumper Tipper", "Trailer", "Tanker", "Goods Carrying Tractor"],
+    "GCV 3W": ["Goods Carrying Rickshaw"],
+    "PCV 3W": ["Passenger Carrying Rickshaw"],
+    "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
+    "MISCD": ["MISCD-Tractor", "MISCD-Others"]
 }
 
 # -------------------------
@@ -157,24 +162,45 @@ def get_na_class_list_for_product(product_id: str):
         p = ProductMaster.objects.filter(id=int(product_id)).first()
         if p: return NA_MAKE_MODEL_MAP.get(p.name, [])
         return []
+    
     combined = []
     for vals in NA_MAKE_MODEL_MAP.values(): combined.extend(vals)
     return combined
 
 def apply_make_model_filter(qs, product_id: str, make_model_class: str):
-    if not make_model_class: return qs
-    if str(make_model_class).isdigit(): return qs.filter(make_model_class_id=make_model_class)
+    if not make_model_class: 
+        return qs
+        
     if make_model_class == "NA":
         na_list = get_na_class_list_for_product(product_id)
-        if not na_list: return qs.filter(make_model_class__name__iexact="NA")
+        if not na_list: 
+            return qs.filter(make_model_class__name__iexact="NA")
         return qs.filter(Q(make_model_class__name__in=na_list) | Q(make_model_class__name__iexact="NA"))
+        
+    if str(make_model_class).isdigit():
+        selected_class_obj = MakeModelClassMaster.objects.filter(id=int(make_model_class)).first()
+        
+        if selected_class_obj:
+            selected_class_name = selected_class_obj.name
+            
+            is_na_equivalent = False
+            if product_id and str(product_id).isdigit():
+                 p = ProductMaster.objects.filter(id=int(product_id)).first()
+                 if p and p.name in NA_MAKE_MODEL_MAP:
+                     if selected_class_name in NA_MAKE_MODEL_MAP[p.name]:
+                         is_na_equivalent = True
+            else:
+                 for mapped_classes in NA_MAKE_MODEL_MAP.values():
+                     if selected_class_name in mapped_classes:
+                         is_na_equivalent = True
+                         break
+                         
+            if is_na_equivalent:
+                 return qs.filter(Q(make_model_class_id=make_model_class) | Q(make_model_class__name__iexact="NA"))
+                 
+        return qs.filter(make_model_class_id=make_model_class)
+        
     return qs
-
-def should_display_na(product_name: str, make_model_name: str):
-    if not make_model_name: return False
-    if make_model_name.strip().upper() == "NA": return True
-    mapped = NA_MAKE_MODEL_MAP.get(product_name, [])
-    return make_model_name in mapped
 
 def get_make_mapping_context():
     all_makes_objs = MakeModelMaster.objects.all()
@@ -320,6 +346,8 @@ def upload_csv(request):
 
                 RateMaster.objects.create(
                     group=group_obj,
+                    status="INACTIVE", # Default on upload
+                    is_deleted="NO",   # Default on upload
                     new_vehicle_makes=cleaned["new_vehicle_makes"],
                     new_rto_list=row.get("new_rto_list") or None,
                     insurer_vertical=cleaned["insurer_vertical"],
@@ -380,6 +408,8 @@ def dashboard(request):
     ).all()
 
     q = (request.GET.get("q") or "").strip()
+    status_filter = (request.GET.get("status") or "").strip()
+    is_deleted_filter = (request.GET.get("is_deleted") or "").strip().upper()
     insurance_company = (request.GET.get("insurance_company") or "").strip()
     product = (request.GET.get("product") or "").strip()
     fuel = (request.GET.get("fuel") or "").strip()
@@ -396,15 +426,16 @@ def dashboard(request):
     is_ncb = (request.GET.get("is_ncb") or "").strip()
     is_cpa = (request.GET.get("is_cpa") or "").strip()
 
-    # ✅ STRICT EXACT MATCH ON DISPLAY GROUP ID
     if q: 
         group_ids = [int(gid.strip()) for gid in q.split(',') if gid.strip().isdigit()]
         if group_ids:
-            # Only match if it's the exact Display Group ID
             qs = qs.filter(Q(group_id__in=group_ids) | Q(group_id__isnull=True, id__in=group_ids))
         else:
             qs = qs.none()
 
+    if status_filter: qs = qs.filter(status=status_filter)
+    if is_deleted_filter: qs = qs.filter(is_deleted=is_deleted_filter)
+    
     if insurance_company: qs = qs.filter(insurance_company=insurance_company)
     if product: qs = qs.filter(product_id=product)
     if fuel: qs = qs.filter(fuel_type_id=fuel)
@@ -445,12 +476,10 @@ def dashboard(request):
 
     qs = qs.order_by("-id")
 
-    # IDENTIFY MATCHING GROUPS
     matching_gids_set = set()
     ordered_gids = []
 
     for row in qs:
-        # Final validation to prevent substring traps
         if rto_code and matching_rto_names:
             if not row.new_rto_list: continue
             row_rtos = [x.strip().upper() for x in row.new_rto_list.split(',')]
@@ -468,7 +497,6 @@ def dashboard(request):
             matching_gids_set.add(gid)
             ordered_gids.append(gid)
 
-    # FETCH FULL GROUPS SO COMMA LISTS DO NOT BREAK
     buckets = defaultdict(list)
     if matching_gids_set:
         full_group_qs = RateMaster.objects.select_related(
@@ -492,9 +520,7 @@ def dashboard(request):
         first.display_rto_list = unique_join(all_rtos)
         first.display_fuel_types = unique_join(all_fuels)
 
-        product_name = first.product.name if first.product else ""
-        mmc_name = first.make_model_class.name if first.make_model_class else ""
-        first.display_make_model_class = "NA" if should_display_na(product_name, mmc_name) else mmc_name
+        first.display_make_model_class = first.make_model_class.name if first.make_model_class else ""
 
         age_min_str = f"{first.vehicle_age_min:.2f}" if first.vehicle_age_min is not None else ""
         age_max_str = f"{first.vehicle_age_max:.2f}" if first.vehicle_age_max is not None else ""
@@ -510,8 +536,9 @@ def dashboard(request):
 
         grouped_rows.append(first)
 
+    # ✅ ADDED IS_DELETED TO FIELD NAMES
     field_names = [
-        "display_group_id", "new_vehicle_makes", "display_rto_list",
+        "display_group_id", "status", "is_deleted", "new_vehicle_makes", "display_rto_list",
         "insurer_vertical", "insurance_company", "product", "sub_product", "policy_type",
         "display_fuel_types", "display_make_model_class", "age_range", 
         "pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5",
@@ -540,9 +567,9 @@ def dashboard(request):
         "make_model_class_list": make_model_class_list,
         "yes_no_na_list": yes_no_na_list,
         "selected": {
-            "q": q, "insurance_company": insurance_company, "product": product, "fuel": fuel,
-            "sub_product": sub_product, "make_model_class": make_model_class, "from_date": from_date,
-            "to_date": to_date, "rto_code": rto_code, "make_model_code": make_model_code, 
+            "q": q, "status": status_filter, "is_deleted": is_deleted_filter, "insurance_company": insurance_company, 
+            "product": product, "fuel": fuel, "sub_product": sub_product, "make_model_class": make_model_class, 
+            "from_date": from_date, "to_date": to_date, "rto_code": rto_code, "make_model_code": make_model_code, 
             "age_range": age_range, "cc_range": cc_range, "sc_range": sc_range, "is_zd": is_zd,
             "is_ncb": is_ncb, "is_cpa": is_cpa,
         }
@@ -559,6 +586,8 @@ def export_rates_xlsx(request):
     ).all()
 
     q = (request.GET.get("q") or "").strip()
+    status_filter = (request.GET.get("status") or "").strip()
+    is_deleted_filter = (request.GET.get("is_deleted") or "").strip().upper()
     insurance_company = (request.GET.get("insurance_company") or "").strip()
     product = (request.GET.get("product") or "").strip()
     fuel = (request.GET.get("fuel") or "").strip()
@@ -575,7 +604,6 @@ def export_rates_xlsx(request):
     is_ncb = (request.GET.get("is_ncb") or "").strip()
     is_cpa = (request.GET.get("is_cpa") or "").strip()
 
-    # ✅ STRICT EXACT MATCH ON DISPLAY GROUP ID FOR EXCEL EXPORT
     if q: 
         group_ids = [int(gid.strip()) for gid in q.split(',') if gid.strip().isdigit()]
         if group_ids:
@@ -583,6 +611,8 @@ def export_rates_xlsx(request):
         else:
             qs = qs.none()
 
+    if status_filter: qs = qs.filter(status=status_filter)
+    if is_deleted_filter: qs = qs.filter(is_deleted=is_deleted_filter)
     if insurance_company: qs = qs.filter(insurance_company=insurance_company)
     if product: qs = qs.filter(product_id=product)
     if fuel: qs = qs.filter(fuel_type_id=fuel)
@@ -650,7 +680,7 @@ def export_rates_xlsx(request):
     ws.title = "Rates (Ungrouped)"
 
     headers = [
-        "id", "group_id", "new_vehicle_makes", "new_rto_list", "insurer_vertical",
+        "id", "group_id", "status", "is_deleted", "new_vehicle_makes", "new_rto_list", "insurer_vertical",
         "insurance_company", "product", "sub_product", "policy_type", "fuel_type",
         "make_model_class", "age_range", "pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5",
         "pi_net_rate", "pi_flat_amount", "pi_vli", "pi_type", "tariff_min", "tariff_max", 
@@ -673,7 +703,7 @@ def export_rates_xlsx(request):
         sc_range_val = f"{sc_min_val} - {sc_max_val}" if (sc_min_val or sc_max_val) else ""
 
         ws.append([
-            r.id, r.group_id, r.new_vehicle_makes or "", r.new_rto_list or "", r.insurer_vertical or "",
+            r.id, r.group_id, r.status or "", r.is_deleted or "", r.new_vehicle_makes or "", r.new_rto_list or "", r.insurer_vertical or "",
             r.insurance_company or "", r.product.name if r.product else "", r.sub_product.name if r.sub_product else "", r.policy_type.name if r.policy_type else "",
             r.fuel_type.name if r.fuel_type else "", r.make_model_class.name if r.make_model_class else "",
             age_range_val, r.pi_od_rate if r.pi_od_rate is not None else "", r.pi_tp_rate if r.pi_tp_rate is not None else "",
@@ -993,6 +1023,10 @@ def bulk_update_rates(request):
         elif field_name == "fuel_type": parsed_value, _ = FuelTypeMaster.objects.get_or_create(name=new_value) if new_value else (None, False)
         elif field_name == "make_model_class": parsed_value, _ = MakeModelClassMaster.objects.get_or_create(name=new_value) if new_value else (None, False)
         elif field_name in ["is_ncb", "is_cpa", "is_zd"]: parsed_value = parse_yes_no_na(new_value)
+        
+        # ✅ CAPTURE BOTH STATUS AND DELETED BULK UPDATES
+        elif field_name in ["status", "is_deleted"]: parsed_value = str(new_value).strip().upper()
+        
         elif field_name in ["vehicle_age_min", "vehicle_age_max", "cc_min", "cc_max", "user_id"]: parsed_value = int(float(new_value)) if new_value else None
         elif field_name in ["pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5", "pi_net_rate", "pi_flat_amount", "pi_vli", "tariff_min", "tariff_max", "sc_min", "sc_max", "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount"]: parsed_value = float(new_value) if new_value else None
 
@@ -1008,9 +1042,14 @@ def motor_payout_rates(request):
     qs = RateMaster.objects.select_related(
         "product", "sub_product", "policy_type", "fuel_type", "make_model_class", "is_ncb", "is_cpa", "is_zd"
     ).all()
+    
+    # ✅ NEVER SHOW DELETED RECORDS IN THE CHECKER TOOL
+    qs = qs.exclude(is_deleted="YES")
 
     today_str = datetime.today().strftime('%Y-%m-%d')
     target_date = request.GET.get("target_date", today_str).strip()
+    
+    product = (request.GET.get("product") or "").strip()
     make_model_class = (request.GET.get("make_model_class") or "").strip()
     sub_product = (request.GET.get("sub_product") or "").strip()
     make_names = (request.GET.get("make_names") or "").strip()
@@ -1022,8 +1061,16 @@ def motor_payout_rates(request):
     is_zd = (request.GET.get("is_zd") or "").strip().upper()
     is_cpa = (request.GET.get("is_cpa") or "").strip().upper()
     is_ncb = (request.GET.get("is_ncb") or "").strip().upper()
+    
+    status_val = request.GET.get("status", "ALL").strip().upper()
+
+    if status_val and status_val != "ALL":
+        qs = qs.filter(status=status_val)
 
     if target_date: qs = qs.filter((Q(from_date__lte=target_date) | Q(from_date__isnull=True)) & (Q(to_date__gte=target_date) | Q(to_date__isnull=True)))
+    
+    if product: qs = qs.filter(product_id=product)
+    
     if make_model_class:
         if str(make_model_class).isdigit(): qs = qs.filter(make_model_class_id=make_model_class)
         elif make_model_class == "NA": qs = qs.filter(make_model_class__name__iexact="NA")
@@ -1083,6 +1130,7 @@ def motor_payout_rates(request):
     seen_groups = set()
     
     for row in qs:
+        # FINAL PYTHON VALIDATION 
         if rto_code and matching_rto_names:
             if not row.new_rto_list: continue
             row_rtos = [x.strip().upper() for x in row.new_rto_list.split(',')]
@@ -1102,17 +1150,18 @@ def motor_payout_rates(request):
         if len(results) >= 300:
             break
 
-    field_names = ["display_group_id", "insurance_company", "po_type", "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount", "add_tnc"]
+    field_names = ["display_group_id", "status", "insurance_company", "po_type", "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount", "add_tnc"]
     all_makes_json, class_makes_mapping_json, all_makes = get_make_mapping_context()
 
     return render(request, "motor_payout_rates.html", {
         "data": results, 
         "total_found": len(results), 
         "field_names": field_names,
+        "product_list": ProductMaster.objects.all().order_by("name"),
         "sub_product_list": SubProductMaster.objects.all().order_by("name"), 
         "fuel_list": FuelTypeMaster.objects.all().order_by("name"), 
         "make_model_class_list": list(MakeModelClassMaster.objects.all().order_by("name")),
         "all_makes_json": all_makes_json, 
         "class_makes_mapping_json": class_makes_mapping_json,
-        "selected": {"target_date": target_date, "make_model_class": make_model_class, "sub_product": sub_product, "make_names": make_names, "rto_code": rto_code, "cc": cc, "fuel": fuel, "sc": sc, "mfg_year": mfg_year, "is_zd": is_zd, "is_cpa": is_cpa, "is_ncb": is_ncb}
+        "selected": {"target_date": target_date, "product": product, "make_model_class": make_model_class, "sub_product": sub_product, "make_names": make_names, "rto_code": rto_code, "cc": cc, "fuel": fuel, "sc": sc, "mfg_year": mfg_year, "is_zd": is_zd, "is_cpa": is_cpa, "is_ncb": is_ncb, "status": status_val}
     })

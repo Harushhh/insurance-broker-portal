@@ -96,7 +96,8 @@ class RateMaster(models.Model):
     policy_type = models.ForeignKey(PolicyTypeMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="policy_type_id")
     fuel_type = models.ForeignKey(FuelTypeMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="fuel_type_id")
     make_model_class = models.ForeignKey(MakeModelClassMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="make_model_class_id")
-
+    status = models.CharField(max_length=20, default="INACTIVE", choices=[("ACTIVE", "Active"), ("INACTIVE", "Inactive")])
+    is_deleted = models.CharField(max_length=10, default="NO", choices=[("YES", "Yes"), ("NO", "No")])
     # ✅ CHANGED TO FLOAT
     vehicle_age_min = models.FloatField(null=True, blank=True)
     vehicle_age_max = models.FloatField(null=True, blank=True)

@@ -21,18 +21,22 @@
 
   <form method="GET" class="card" style="margin-top:14px; padding:14px;">
     <div class="filters-grid">
+      
       <div>
         <div class="subtext" style="margin:0 0 6px;">Search Group ID</div>
         <input type="text" name="q" placeholder="e.g. 2410, 2382" value="{{ selected.q|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
+
       <div>
-        <div class="subtext" style="margin:0 0 6px;">RTO Code</div>
-        <input type="text" name="rto_code" placeholder="e.g. MH03" value="{{ selected.rto_code|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <div class="subtext" style="margin:0 0 6px;">Product</div>
+        <select name="product" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+          {% for p in product_list %}
+            <option value="{{ p.id }}" {% if selected.product|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
+          {% endfor %}
+        </select>
       </div>
-      <div>
-        <div class="subtext" style="margin:0 0 6px;">Make Name (Code)</div>
-        <input type="text" name="make_model_code" placeholder="e.g. Swift" value="{{ selected.make_model_code|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
-      </div>
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">Make Model Class</div>
         <select name="make_model_class" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -53,24 +57,7 @@
           {% endfor %}
         </select>
       </div>
-      <div>
-        <div class="subtext" style="margin:0 0 6px;">Product</div>
-        <select name="product" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
-          <option value="">All</option>
-          {% for p in product_list %}
-            <option value="{{ p.id }}" {% if selected.product|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div>
-        <div class="subtext" style="margin:0 0 6px;">Fuel</div>
-        <select name="fuel" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
-          <option value="">All</option>
-          {% for f in fuel_list %}
-            <option value="{{ f.id }}" {% if selected.fuel|stringformat:"s" == f.id|stringformat:"s" %}selected{% endif %}>{{ f.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">Sub Product</div>
         <select name="sub_product" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -80,26 +67,52 @@
           {% endfor %}
         </select>
       </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Make Name (Code)</div>
+        <input type="text" name="make_model_code" placeholder="e.g. Swift" value="{{ selected.make_model_code|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">RTO Code</div>
+        <input type="text" name="rto_code" placeholder="e.g. MH03" value="{{ selected.rto_code|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+      </div>
+      
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Fuel</div>
+        <select name="fuel" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+          {% for f in fuel_list %}
+            <option value="{{ f.id }}" {% if selected.fuel|stringformat:"s" == f.id|stringformat:"s" %}selected{% endif %}>{{ f.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      
       <div>
         <div class="subtext" style="margin:0 0 6px;">From Date (>=)</div>
         <input type="date" name="from_date" value="{{ selected.from_date|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">To Date (<=)</div>
         <input type="date" name="to_date" value="{{ selected.to_date|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">Age (Min-Max)</div>
         <input type="text" name="age_range" placeholder="e.g. 0-4.01" value="{{ selected.age_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">CC (Min-Max)</div>
         <input type="text" name="cc_range" placeholder="e.g. 1000-1500" value="{{ selected.cc_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">SC (Min-Max)</div>
         <input type="text" name="sc_range" placeholder="e.g. 1-5" value="{{ selected.sc_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">Zero Dep (ZD)</div>
         <select name="is_zd" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -109,15 +122,7 @@
           {% endfor %}
         </select>
       </div>
-      <div>
-        <div class="subtext" style="margin:0 0 6px;">NCB</div>
-        <select name="is_ncb" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
-          <option value="">All</option>
-          {% for y in yes_no_na_list %}
-            <option value="{{ y.code }}" {% if selected.is_ncb == y.code %}selected{% endif %}>{{ y.code }}</option>
-          {% endfor %}
-        </select>
-      </div>
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">CPA</div>
         <select name="is_cpa" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -127,6 +132,35 @@
           {% endfor %}
         </select>
       </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">NCB</div>
+        <select name="is_ncb" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+          {% for y in yes_no_na_list %}
+            <option value="{{ y.code }}" {% if selected.is_ncb == y.code %}selected{% endif %}>{{ y.code }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Status</div>
+        <select name="status" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+          <option value="ACTIVE" {% if selected.status == 'ACTIVE' %}selected{% endif %}>ACTIVE</option>
+          <option value="INACTIVE" {% if selected.status == 'INACTIVE' %}selected{% endif %}>INACTIVE</option>
+        </select>
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Is Deleted?</div>
+        <select name="is_deleted" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+          <option value="">All</option>
+          <option value="NO" {% if selected.is_deleted == 'NO' %}selected{% endif %}>NO (In Use)</option>
+          <option value="YES" {% if selected.is_deleted == 'YES' %}selected{% endif %}>YES (Deleted)</option>
+        </select>
+      </div>
+
     </div>
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; flex-wrap:wrap; gap:10px;">
@@ -241,6 +275,60 @@
   $(document).ready(function() {
       $('.filters-grid select').select2({ width: '100%', placeholder: "Search..." });
       $('.modal-select2').select2({ width: '100%', dropdownParent: $('#bulkModal') });
+
+      // STATIC MAPPING FOR PRODUCT TO MAKE_MODEL_CLASS
+      const productClassMap = {
+          "TW": ["Scooter", "Bike"],
+          "Private Car": ["Car"],
+          "GCV 4W": ["Truck", "Pick Up Van", "Dumper Tipper", "Trailer", "Tanker", "Goods Carrying Tractor"],
+          "GCV 3W": ["Goods Carrying Rickshaw"],
+          "PCV 3W": ["Passenger Carrying Rickshaw"],
+          "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
+          "MISCD": ["MISCD-Tractor", "MISCD-Others"]
+      };
+
+      const productSelect = $('select[name="product"]');
+      const classSelect = $('select[name="make_model_class"]');
+      
+      // Backup original options
+      const allClassOptions = classSelect.find('option').clone();
+      const initialClass = "{{ selected.make_model_class|escapejs }}";
+
+      function updateClassDropdown() {
+          const selectedProductText = productSelect.find('option:selected').text().trim();
+          const currentClassVal = classSelect.val() || initialClass;
+          
+          classSelect.empty();
+          
+          // Always keep All and NA
+          classSelect.append(allClassOptions.filter(function() {
+              return $(this).val() === "" || $(this).val() === "NA";
+          }));
+
+          // Filter Make Model Class based on selected Product
+          if (selectedProductText && selectedProductText !== "All" && productClassMap[selectedProductText]) {
+              const allowedClasses = productClassMap[selectedProductText];
+              classSelect.append(allClassOptions.filter(function() {
+                  return allowedClasses.includes($(this).text().trim());
+              }));
+          } else {
+              classSelect.append(allClassOptions.filter(function() {
+                  return $(this).val() !== "" && $(this).val() !== "NA";
+              }));
+          }
+
+          // Restore previous selection if it's still valid
+          if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) {
+              classSelect.val(currentClassVal);
+          } else {
+              classSelect.val('');
+          }
+          classSelect.trigger('change.select2');
+      }
+
+      // Initialize dropdown state based on URL params
+      updateClassDropdown();
+      productSelect.on('change', updateClassDropdown);
   });
 
   const masterCheck = document.getElementById('selectAllCheckbox');
@@ -290,13 +378,11 @@
   .styled-table th, .styled-table td { border: 1px solid #e2e8f0; padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; vertical-align: middle; white-space: nowrap; line-height: 1.4; transition: all 0.15s ease; }
   .wrap-text { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 380px; }
   
-  /* ✅ Sticky Header Handling */
   .styled-table th { background-color: #f1f5f9; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #475569; position: sticky; top:0; z-index:10; }
   .styled-table tr { background-color: #ffffff; }
   .styled-table tr:nth-child(even) { background-color: #f8fafc; }
   .styled-table tr:hover { background-color: #e2e8f0; }
 
-  /* ✅ Sticky Left Column Handling */
   {% if request.user|has_group:"ADMIN" %}
     .styled-table th:first-child { position: sticky; left: 0; background-color: #f1f5f9; z-index: 11; border-right: 2px solid #cbd5e1; }
     .styled-table td:first-child { position: sticky; left: 0; background-color: inherit; z-index: 5; border-right: 2px solid #cbd5e1; }
