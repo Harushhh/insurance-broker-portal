@@ -1,127 +1,234 @@
 {% extends "base.html" %}
-{% load custom_filters %}
 {% block title %}User Management{% endblock %}
 
 {% block content %}
-<div>
-  <h2>User Management</h2>
-  <p class="subtext">Create new users, bulk upload via CSV, or assign specific page access below.</p>
-
-  {% if msg %}
-    <div style="background:#d1fae5; color:#047857; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-weight:600; border:1px solid #10b981;">
-      {{ msg }}
-    </div>
-  {% endif %}
-  {% if error %}
-    <div style="background:#fee2e2; color:#b91c1c; padding:12px 16px; border-radius:8px; margin-bottom:16px; font-weight:600; border:1px solid #ef4444;">
-      {{ error }}
-    </div>
-  {% endif %}
-
-  <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:20px;">
-    
-    <div class="card" style="flex:1; min-width:300px; margin-top:0;">
-      <h3 style="margin-top:0; font-size:16px;">👤 Create Single User</h3>
-      <form method="POST" action="{% url 'user_management' %}">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="create_user">
-        <div style="display:flex; gap:10px; margin-bottom:12px;">
-          <input type="text" name="new_username" placeholder="Username" required style="flex:1; padding:10px; border-radius:8px; border:1px solid var(--border);">
-          <input type="password" name="new_password" placeholder="Password" required style="flex:1; padding:10px; border-radius:8px; border:1px solid var(--border);">
+<div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 20px;">
+        <div>
+            <h2 style="margin:0;">User Management</h2>
+            <p class="subtext" style="margin:4px 0 0;">Manage employee access and profiles.</p>
         </div>
-        <button type="submit" class="btn primary" style="width:100%;">Create User</button>
-      </form>
+        <div style="display:flex; gap:12px;">
+            <button class="btn primary" onclick="openModal('createUserModal')" style="padding:10px 20px; font-weight:600;">
+                + Create New User
+            </button>
+        </div>
     </div>
 
-    <div class="card" style="flex:1; min-width:300px; margin-top:0;">
-      <h3 style="margin-top:0; font-size:16px;">📂 Bulk Upload Users (CSV)</h3>
-      <p class="subtext" style="font-size:11px; margin-bottom:8px;">File must have 2 columns: <b>username</b> and <b>password</b></p>
-      <form method="POST" action="{% url 'user_management' %}" enctype="multipart/form-data" style="display:flex; gap:10px;">
-        {% csrf_token %}
-        <input type="hidden" name="action" value="upload_users">
-        <input type="file" name="file" accept=".csv" required style="flex:1; padding:7px; border-radius:8px; border:1px solid var(--border); background:#f8fafc;">
-        <button type="submit" class="btn primary" style="background: linear-gradient(135deg, #10b981, #059669);">Upload & Create</button>
-      </form>
+    {% if msg %}
+        <div style="background:#dcfce7; color:#059669; padding:12px; border-radius:8px; margin-bottom:16px;">{{ msg }}</div>
+    {% endif %}
+    {% if error %}
+        <div style="background:#fee2e2; color:#e11d48; padding:12px; border-radius:8px; margin-bottom:16px;">{{ error }}</div>
+    {% endif %}
+
+    <div style="margin-bottom:24px; position:relative;">
+        <input type="text" id="userSearchInput" placeholder="🔍 Search employees or users..." 
+            style="width:100%; padding:14px 14px 14px 45px; border-radius:12px; border:1px solid var(--border); font-size:15px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
     </div>
-  </div>
 
-  <div class="card" style="margin-top:0;">
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>USERNAME</th>
-            <th>CURRENT ACCESS</th>
-            <th>MANAGE ACCESS</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for u in users %}
-          <tr>
-            <td style="font-weight:600;">
-              {{ u.username }}
-              {% if u.is_superuser %} <span style="color:#2563eb;font-size:11px;">(System Admin)</span> {% endif %}
-            </td>
-            
-            <td>
-              {% if u.is_superuser or u.is_admin %}
-                <span style="background:#10b981; color:#fff; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:bold;">FULL ADMIN</span>
-              {% else %}
-                <div style="display:flex; flex-wrap:wrap; gap:4px;">
-                  {% for page in u.pages %}
-                    <span style="background:#e2e8f0; color:#334155; padding:2px 8px; border-radius:12px; font-size:11px;">{{ page|replace:"Can_View_"|replace:"_" }}</span>
-                  {% empty %}
-                    <span style="color:#94a3b8; font-size:12px;">No access assigned</span>
-                  {% endfor %}
-                </div>
-              {% endif %}
-            </td>
-
-            <td>
-              {% if not u.is_superuser %}
-                {% if u.is_admin %}
-                  <form method="POST" action="{% url 'user_management' %}" style="margin:0; display:inline-block;">
-                    {% csrf_token %}
-                    <input type="hidden" name="user_id" value="{{ u.id }}">
-                    <input type="hidden" name="action" value="update_pages">
-                    <button type="submit" class="btn danger" style="padding:4px 8px; font-size:11px; height:auto;">Revoke Admin</button>
-                  </form>
-                {% else %}
-                  <div style="display:flex; gap:10px; align-items:flex-start;">
-                    
-                    <form method="POST" action="{% url 'user_management' %}" style="margin:0; background:#f8fafc; padding:10px; border-radius:8px; border:1px solid #e2e8f0;">
-                      {% csrf_token %}
-                      <input type="hidden" name="user_id" value="{{ u.id }}">
-                      <input type="hidden" name="action" value="update_pages">
-                      
-                      <div style="font-size:11px; font-weight:700; color:#64748b; margin-bottom:6px; text-transform:uppercase;">Assign Pages:</div>
-                      <div style="display:grid; grid-template-columns: 1fr 1fr; gap:6px; margin-bottom:10px;">
-                        {% for pg in page_groups %}
-                          <label style="font-size:12px; display:flex; align-items:center; gap:4px; cursor:pointer;">
-                            <input type="checkbox" name="pages_{{ u.id }}" value="{{ pg }}" {% if pg in u.pages %}checked{% endif %}>
-                            {{ pg|slice:"9:"|replace:"_" }}
-                          </label>
-                        {% endfor %}
-                      </div>
-                      <button type="submit" class="btn" style="padding:4px 10px; font-size:11px; height:auto; background:#fff;">Save Pages</button>
-                    </form>
-
-                    <form method="POST" action="{% url 'user_management' %}" style="margin:0;">
-                      {% csrf_token %}
-                      <input type="hidden" name="user_id" value="{{ u.id }}">
-                      <input type="hidden" name="action" value="make_admin">
-                      <button type="submit" class="btn primary" style="padding:6px 12px; font-size:12px; height:auto;">Make Full Admin</button>
-                    </form>
-                    
-                  </div>
-                {% endif %}
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div style="overflow-x:auto; border:1px solid var(--border); border-radius:12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+        <table style="width:100%; border-collapse:collapse; text-align:left;" id="userTable">
+            <thead>
+                <tr style="background:#0f172a; color:#fff; font-size:12px; text-transform:uppercase;">
+                    <th style="padding:16px;">Employee Details</th>
+                    <th style="padding:16px;">Designation</th>
+                    <th style="padding:16px;">Access Level</th>
+                    <th style="padding:16px; text-align:right;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for u in users %}
+                <tr class="user-row" style="border-bottom:1px solid var(--border); background:#fff;">
+                    <td style="padding:16px; vertical-align:top;">
+                        <strong style="font-size:15px; color:var(--text); display:block;" class="search-target">{{ u.username }}</strong>
+                        <small style="color:var(--muted);" class="search-target">{{ u.email }}</small>
+                    </td>
+                    <td style="padding:16px; vertical-align:middle; color:#475569;" class="search-target">
+                        {{ u.designation|default:"-" }}
+                    </td>
+                    <td style="padding:16px; vertical-align:middle;">
+                        {% if u.is_admin %}
+                            <span class="badge admin">FULL ADMIN</span>
+                        {% else %}
+                            <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                                {% for page in u.pages %}
+                                    <span style="padding:4px 8px; background:#eff6ff; color:#1e40af; border:1px solid #dbeafe; border-radius:6px; font-size:11px; font-weight:600;">
+                                        {{ page|cut:"Can_View_"|cut:"Can_Upload_"|cut:"_"|title }}
+                                    </span>
+                                {% empty %}
+                                    <span style="padding:4px 8px; background:#fee2e2; color:#991b1b; border:1px solid #fecaca; border-radius:6px; font-size:11px; font-weight:600;">
+                                        NO ACCESS
+                                    </span>
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                    </td>
+                    <td style="padding:16px; text-align:right; vertical-align:middle;">
+                        <button class="btn" style="padding:6px 12px; font-size:12px; border:1px solid var(--border);" 
+                                onclick="openEditModal('{{ u.id }}', '{{ u.username|escapejs }}', '{{ u.email|escapejs }}', '{{ u.contact_number|escapejs }}', '{{ u.designation|default:""|escapejs }}', '{{ u.pages|join:"," }}')">
+                            ⚙️ Edit Details
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
     </div>
-  </div>
 </div>
+
+<div id="createUserModal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 500px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h3 style="margin:0;">👤 Create New User</h3>
+            <button onclick="closeModal('createUserModal')" style="background:none; border:none; font-size:20px; cursor:pointer; color:var(--muted);">&times;</button>
+        </div>
+        <form method="POST">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="create_user">
+            
+            <label class="modal-label">Username *</label>
+            <input type="text" name="new_username" required class="modal-input">
+            
+            <label class="modal-label">Full Name</label>
+            <input type="text" name="full_name" class="modal-input">
+            
+            <label class="modal-label">Email Address</label>
+            <input type="email" name="email" class="modal-input">
+
+            <label class="modal-label">Contact Number</label>
+            <input type="text" name="contact_number" class="modal-input">
+
+            <div style="background:#f1f5f9; padding:12px; border-radius:8px; margin-top:10px; margin-bottom:20px;">
+                <p style="margin:0; font-size:13px; color:#475569;">Default password: <b>Changeme@123</b></p>
+            </div>
+
+            <div style="display:flex; gap:12px;">
+                <button type="submit" class="btn primary" style="flex:1;">Create User</button>
+                <button type="button" class="btn" onclick="closeModal('createUserModal')" style="flex:1;">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div id="editUserModal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 600px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h3 id="editModalTitle" style="margin:0;">⚙️ Edit User Details</h3>
+            <button onclick="closeModal('editUserModal')" style="background:none; border:none; font-size:20px; cursor:pointer; color:var(--muted);">&times;</button>
+        </div>
+        <form method="POST" id="editUserForm">
+            {% csrf_token %}
+            <input type="hidden" name="action" id="edit_action_input" value="update_user_access">
+            <input type="hidden" name="user_id" id="edit_user_id">
+            
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px; margin-bottom:20px;">
+                <div>
+                    <label class="modal-label">Email</label>
+                    <input type="email" name="email" id="edit_email" class="modal-input">
+                </div>
+                <div>
+                    <label class="modal-label">Contact</label>
+                    <input type="text" name="contact_number" id="edit_contact" class="modal-input">
+                </div>
+                <div style="grid-column: span 2;">
+                    <label class="modal-label">Designation</label>
+                    <input type="text" name="designation" id="edit_designation" class="modal-input">
+                </div>
+            </div>
+
+            <label class="modal-label">Page Permissions</label>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid var(--border); margin-bottom:20px;">
+                {% for pg in page_groups %}
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                    <input type="checkbox" name="pages_EDIT" value="{{ pg }}" class="perm-check">
+                    {{ pg|cut:"Can_View_"|cut:"Can_Upload_"|cut:"_"|title }}
+                </label>
+                {% endfor %}
+            </div>
+
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+                <button type="submit" class="btn primary" style="width:100%;">Save Normal Changes</button>
+                
+                <button type="button" class="btn" onclick="makeAdminAndSubmit()" style="background:#10b981; color:white; border:none; width:100%;">
+                    👑 Make Admin
+                </button>
+                
+                <button type="button" class="btn" onclick="removeAccessAndSubmit()" style="background:#ef4444; color:white; border:none; width:100%;">
+                    🚫 Remove All Access
+                </button>
+                
+                <button type="button" class="btn" onclick="closeModal('editUserModal')" style="width:100%;">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+    function openEditModal(id, name, email, contact, desig, pagesStr) {
+        document.getElementById('edit_action_input').value = 'update_user_access';
+        document.getElementById('editModalTitle').innerText = "⚙️ Edit: " + name;
+        document.getElementById('edit_user_id').value = id;
+        document.getElementById('edit_email').value = email;
+        document.getElementById('edit_contact').value = contact;
+        document.getElementById('edit_designation').value = desig;
+        
+        let checks = document.querySelectorAll('.perm-check');
+        let activePages = pagesStr.split(','); 
+        
+        checks.forEach(c => {
+            c.setAttribute('name', 'pages_' + id); 
+            if (activePages.includes(c.value)) {
+                c.checked = true;
+            } else {
+                c.checked = false;
+            }
+        });
+        
+        openModal('editUserModal');
+    }
+
+    function makeAdminAndSubmit() {
+        if (confirm("Are you sure you want to promote this user to FULL ADMIN? They will have access to all pages.")) {
+            document.getElementById('edit_action_input').value = 'make_admin';
+            document.getElementById('editUserForm').submit();
+        }
+    }
+
+    // ✅ NEW JS LOGIC: Instantly unchecks all boxes and saves to revoke access
+    function removeAccessAndSubmit() {
+        if (confirm("Are you sure you want to completely remove this user's access? They will not be able to view any dashboards.")) {
+            let checks = document.querySelectorAll('.perm-check');
+            checks.forEach(c => c.checked = false); // Uncheck every box
+            
+            document.getElementById('edit_action_input').value = 'update_user_access';
+            document.getElementById('editUserForm').submit(); // Save empty permissions
+        }
+    }
+
+    document.getElementById('userSearchInput').addEventListener('keyup', function() {
+        let filter = this.value.toLowerCase();
+        document.querySelectorAll('.user-row').forEach(row => {
+            let targets = row.querySelectorAll('.search-target');
+            let found = false;
+            targets.forEach(t => { if (t.innerText.toLowerCase().includes(filter)) found = true; });
+            row.style.display = found ? "" : "none";
+        });
+    });
+</script>
+
+<style>
+    .modal-overlay { position: fixed; top:0; left:0; right:0; bottom:0; background: rgba(15,23,42,0.6); display:none; justify-content:center; align-items:center; z-index:1001; backdrop-filter: blur(4px); }
+    .modal-content { background:#fff; padding:30px; border-radius:16px; width:90%; max-width:600px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25); }
+    .modal-input { width:100%; padding:12px; margin-bottom:10px; border-radius:8px; border:1px solid var(--border); font-size:14px; box-sizing: border-box; }
+    .modal-label { font-size:11px; font-weight:800; color:#64748b; text-transform:uppercase; display:block; margin-bottom:6px; letter-spacing:0.5px; }
+    .badge { padding:4px 12px; border-radius:20px; font-size:10px; font-weight:800; letter-spacing:0.5px; }
+    .badge.admin { background:#dcfce7; color:#166534; }
+    .badge.user { background:#e0f2fe; color:#0369a1; }
+    .btn.primary { background:#2563eb; color:#fff; border:none; }
+    .btn.primary:hover { background:#1d4ed8; }
+</style>
 {% endblock %}

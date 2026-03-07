@@ -6,10 +6,10 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 
-<div class="card" style="max-width: 900px; margin: 20px auto;">
+<div class="card" style="max-width: 1000px; margin: 20px auto; padding: 24px;">
     <h2 style="margin-bottom: 4px;">Bulk Edit Rate Group #{{ group_id }}</h2>
     
-    <div style="background: #fef3c7; color: #0f172a; padding: 14px 16px; border-radius: 8px; border-left: 4px solid #f59e0b; margin-top: 14px; line-height: 1.5;">
+    <div style="background: #fef3c7; color: #0f172a; padding: 14px 16px; border-radius: 8px; border-left: 4px solid #f59e0b; margin-top: 14px; margin-bottom: 24px; line-height: 1.5;">
         <p style="margin: 0 0 8px 0; font-size: 14px;">
             ⚠️ <b>Bulk Edit Warning:</b> You are updating <b>{{ count }}</b> record(s) at once.
         </p>
@@ -21,14 +21,12 @@
         </p>
     </div>
 
-    <form method="POST" style="margin-top: 24px;">
+    <form method="POST">
         {% csrf_token %}
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 16px;">
+        <div class="form-grid">
             {% for field in form %}
-            <div>
-                <label style="font-size: 12px; font-weight: 700; color: var(--muted); display: block; margin-bottom: 6px; text-transform: uppercase;">
-                    {{ field.label }}
-                </label>
+            <div class="form-group">
+                <label>{{ field.label }}</label>
                 {{ field }}
                 {% if field.errors %}
                     <div style="color: var(--danger); font-size: 12px; margin-top: 4px;">{{ field.errors }}</div>
@@ -37,7 +35,7 @@
             {% endfor %}
         </div>
         
-        <div style="margin-top: 24px; display: flex; gap: 12px; border-top: 1px solid var(--border); padding-top: 16px;">
+        <div class="btn-group">
             <button type="submit" class="btn primary">💾 Save Bulk Changes</button>
             <a href="{% url 'dashboard' %}" class="btn">Cancel</a>
         </div>
@@ -45,69 +43,259 @@
 </div>
 
 <script>
-    $(document).ready(function() {
-        // Find every <select> tag on the page and make it searchable
-        $('select').select2({
-            width: '100%',
-            placeholder: "Search and select..."
-        });
+$(document).ready(function() {
+    
+    // Helper function to inject checkboxes into the dropdown items
+    function formatResult(state) {
+        if (!state.id) { return state.text; }
+        var isChecked = state.selected ? "checked" : "";
+        var $state = $(
+            '<div class="select2-checkbox-item">' +
+                '<input type="checkbox" ' + isChecked + ' class="select2-fake-checkbox" /> ' +
+                '<span>' + state.text + '</span>' +
+            '</div>'
+        );
+        return $state;
+    };
+
+    // Apply the special pill + checkbox styling to ALL the multi-select dropdowns
+    $('.select2-multiple').select2({
+        closeOnSelect: false,
+        templateResult: formatResult,
+        width: '100%',
+        
+        // This sorting function pushes selected items to the top of the list!
+        sorter: data => data.sort((a, b) => {
+            if (a.selected == b.selected) {
+                 return a.text.localeCompare(b.text);
+            }
+            return a.selected ? -1 : 1;
+        })
     });
+    
+    // Automatically re-sort the list instantly upon checking/unchecking a box
+    $('.select2-multiple').on("select2:select select2:unselect", function (e) {
+        var $select = $(this);
+        $select.select2("close");
+        $select.select2("open");
+    });
+    
+    // Default select2 for anything else (like numbers/dates if any)
+    $('select:not(.select2-multiple)').select2({
+        width: '100%'
+    });
+
+});
 </script>
 
 <style>
-    /* Styling to make standard Django forms look modern */
-    form input, form select, form textarea {
-        width: 100%;
-        padding: 10px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        font-family: inherit;
-        background: #fdfdfd;
-        color: var(--text);
-        box-sizing: border-box;
+    /* ✅ FORM LAYOUT */
+    .form-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px 16px;
     }
-    form input:focus, form select:focus, form textarea:focus {
-        outline: none;
-        border-color: var(--brand);
-        box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+    @media (max-width: 900px) {
+        .form-grid { grid-template-columns: repeat(2, 1fr); }
     }
-    form input[type="checkbox"] {
-        width: auto;
-        transform: scale(1.2);
-        margin-top: 10px;
+    @media (max-width: 600px) {
+        .form-grid { grid-template-columns: 1fr; }
     }
 
-    /* ✅ ADDED: Custom styling to make the Select2 dropdowns match your UI */
-    .select2-container--default .select2-selection--single {
-        height: 40px;
+    .form-group {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .form-group label {
+        font-size: 11.5px;
+        font-weight: 700;
+        color: #475569;
+        text-transform: uppercase;
+        margin-bottom: 6px;
+        letter-spacing: 0.5px;
+    }
+
+    /* ✅ STANDARD INPUTS (Text, Numbers) */
+    .form-control, input[type="text"], input[type="number"], input[type="date"] {
+        width: 100%;
+        padding: 10px 12px;
         border: 1px solid var(--border);
         border-radius: 8px;
-        background-color: #fdfdfd;
+        font-size: 14px;
+        color: #334155;
+        background-color: #fff;
+        height: 42px; 
+        box-sizing: border-box;
+        font-family: inherit;
+        transition: all 0.2s ease;
+    }
+    
+    .form-control:focus, input[type="text"]:focus, input[type="number"]:focus, input[type="date"]:focus {
+        outline: none;
+        border-color: #38bdf8;
+        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+    }
+
+    /* ---------------------------------------------------
+       ✅ PROFESSIONAL MULTI-SELECT "PILL" UI
+       --------------------------------------------------- */
+    
+    /* The outer box containing the pills */
+    .select2-container--default .select2-selection--multiple {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        min-height: 42px; 
+        padding: 4px; 
+        background-color: #fff;
+        cursor: pointer;
+        display: flex;
+        flex-wrap: wrap; 
+        align-items: center;
+        transition: all 0.2s ease;
+    }
+    
+    .select2-container--default.select2-container--focus .select2-selection--multiple {
+        border-color: #38bdf8;
+        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+    }
+
+    /* Reset Select2's default list styles that break flexbox */
+    .select2-container--default .select2-selection--multiple .select2-selection__rendered {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px; 
+        padding: 0;
+        margin: 0;
+        width: 100%;
+        box-sizing: border-box;
+        list-style: none;
+    }
+
+    /* The actual selected item (The "Pill") */
+    .select2-container--default .select2-selection--multiple .select2-selection__choice {
+        background-color: #f1f5f9; 
+        border: 1px solid #e2e8f0; 
+        border-radius: 16px; 
+        color: #334155; 
+        padding: 4px 10px;
+        margin: 0 !important; 
+        font-size: 13px;
+        font-weight: 600;
+        display: inline-flex;
+        flex-direction: row-reverse; 
+        align-items: center;
+        gap: 6px; 
+        box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        transition: all 0.2s ease;
+    }
+    
+    .select2-container--default .select2-selection--multiple .select2-selection__choice:hover {
+        background-color: #e2e8f0;
+    }
+
+    /* Clean up the text inside the pill */
+    .select2-container--default .select2-selection--multiple .select2-selection__choice__display {
+        padding: 0 !important; 
+        margin: 0 !important;
+    }
+
+    /* The 'X' delete button inside the pill */
+    .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
+        color: #94a3b8;
+        border: none;
+        background: transparent;
+        padding: 0;
+        margin: 0;
+        font-weight: bold;
+        font-size: 14px;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: color 0.15s ease;
+    }
+    
+    .select2-container--default .select2-selection--multiple .select2-selection__choice__remove:hover {
+        background-color: transparent;
+        color: #ef4444; 
+    }
+
+    /* The typing cursor area inside the box */
+    .select2-container .select2-search--inline {
+        margin: 0;
         display: flex;
         align-items: center;
     }
-    .select2-container--default .select2-selection--single .select2-selection__rendered {
-        color: var(--text);
-        padding-left: 10px;
-        line-height: normal;
+    .select2-container .select2-search--inline .select2-search__field {
+        margin: 0;
+        padding: 4px;
+        font-family: inherit;
+        color: #334155;
+        font-size: 13px;
     }
-    .select2-container--default .select2-selection--single .select2-selection__arrow {
-        height: 38px;
-        right: 8px;
-    }
-    .select2-container--default.select2-container--focus .select2-selection--single {
-        border-color: var(--brand);
-        box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
-        outline: none;
-    }
+
+    /* ---------------------------------------------------
+       ✅ PROFESSIONAL DROPDOWN MENU WITH CHECKBOXES
+       --------------------------------------------------- */
     .select2-dropdown {
-        border: 1px solid var(--brand);
+        border: 1px solid #cbd5e1;
         border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        z-index: 9999;
+        overflow: hidden;
+        padding: 4px;
     }
-    .select2-search__field {
-        border-radius: 4px !important;
-        padding: 6px !important;
+    
+    /* Checkbox layout inside the list */
+    .select2-checkbox-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .select2-fake-checkbox {
+        width: 15px;
+        height: 15px;
+        accent-color: #0284c7;
+        pointer-events: none; 
+        border-radius: 3px;
+    }
+    
+    /* Option rows */
+    .select2-results__option {
+        padding: 8px 12px;
+        font-size: 13px;
+        border-radius: 6px;
+        margin-bottom: 2px;
+        transition: background-color 0.1s ease;
+    }
+    
+    /* Hovering over an option */
+    .select2-container--default .select2-results__option--highlighted.select2-results__option--selectable {
+        background-color: #f1f5f9; 
+        color: #0f172a;
+    }
+    
+    /* Items that are already selected */
+    .select2-container--default .select2-results__option[aria-selected=true] {
+        background-color: #f8fafc;
+        color: #0284c7;
+        font-weight: 600;
+    }
+
+    /* Action Buttons */
+    .btn-group {
+        display: flex;
+        gap: 12px;
+        margin-top: 30px;
+        padding-top: 20px;
+        border-top: 1px solid var(--border);
+    }
+    .btn-group button, .btn-group a {
+        padding: 12px 24px;
+        font-size: 14px;
+        min-width: 120px;
+        text-align: center;
     }
 </style>
 {% endblock %}

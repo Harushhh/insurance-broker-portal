@@ -4,14 +4,31 @@
 
 {% block content %}
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/momentjs/latest/moment.min.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 
 <div class="card">
   <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-    <div>
-      <h2 style="margin:0;">Rate Master Dashboard</h2>
-      <div class="subtext"><b>Total Groups:</b> {{ total }}</div>
+    <div style="display:flex; gap:20px; align-items:center;">
+      <div>
+        <h2 style="margin:0;">Rate Master Dashboard</h2>
+        <div class="subtext"><b>Total Groups:</b> {{ total }}</div>
+      </div>
+      
+      <div style="display:flex; gap:10px; background:#f8fafc; padding:10px 15px; border-radius:12px; border:1px solid #e2e8f0;">
+         <div style="text-align:center;">
+            <div style="font-size:10px; font-weight:800; color:#64748b; text-transform:uppercase;">Unlocked</div>
+            <div style="font-size:16px; font-weight:800; color:#15803d;">{{ unlocked_count|default:"-" }}</div>
+         </div>
+         <div style="width:1px; background:#e2e8f0; margin:0 5px;"></div>
+         <div style="text-align:center;">
+            <div style="font-size:10px; font-weight:800; color:#64748b; text-transform:uppercase;">Locked</div>
+            <div style="font-size:16px; font-weight:800; color:#b91c1c;">{{ locked_count|default:"-" }}</div>
+         </div>
+      </div>
     </div>
 
     <a class="btn primary" href="{% url 'export_rates_xlsx' %}?{{ request.GET.urlencode }}">
@@ -22,6 +39,11 @@
   <form method="GET" class="card" style="margin-top:14px; padding:14px;">
     <div class="filters-grid">
       
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Validity Date Range</div>
+        <input type="text" name="date_range" placeholder="YYYY-MM-DD - YYYY-MM-DD" value="{{ selected.date_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; cursor:pointer;" autocomplete="off">
+      </div>
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">Search Group ID</div>
         <input type="text" name="q" placeholder="e.g. 2410, 2382" value="{{ selected.q|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -89,16 +111,6 @@
       </div>
       
       <div>
-        <div class="subtext" style="margin:0 0 6px;">From Date (>=)</div>
-        <input type="date" name="from_date" value="{{ selected.from_date|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
-      </div>
-
-      <div>
-        <div class="subtext" style="margin:0 0 6px;">To Date (<=)</div>
-        <input type="date" name="to_date" value="{{ selected.to_date|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
-      </div>
-
-      <div>
         <div class="subtext" style="margin:0 0 6px;">Age (Min-Max)</div>
         <input type="text" name="age_range" placeholder="e.g. 0-4.01" value="{{ selected.age_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
@@ -142,13 +154,13 @@
           {% endfor %}
         </select>
       </div>
-      
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">Status</div>
         <select name="status" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
           <option value="">All</option>
-          <option value="ACTIVE" {% if selected.status == 'ACTIVE' %}selected{% endif %}>ACTIVE</option>
-          <option value="INACTIVE" {% if selected.status == 'INACTIVE' %}selected{% endif %}>INACTIVE</option>
+          <option value="UNLOCKED" {% if selected.status == 'UNLOCKED' or selected.status == 'ACTIVE' %}selected{% endif %}>🔓 UNLOCKED</option>
+          <option value="LOCKED" {% if selected.status == 'LOCKED' or selected.status == 'INACTIVE' %}selected{% endif %}>🔒 LOCKED</option>
         </select>
       </div>
 
@@ -159,6 +171,11 @@
           <option value="NO" {% if selected.is_deleted == 'NO' %}selected{% endif %}>NO (In Use)</option>
           <option value="YES" {% if selected.is_deleted == 'YES' %}selected{% endif %}>YES (Deleted)</option>
         </select>
+      </div>
+
+      <div>
+        <div class="subtext" style="margin:0 0 6px;">Created Date</div>
+        <input type="date" name="created_date" value="{{ selected.created_date|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
 
     </div>
@@ -189,50 +206,65 @@
     {% if data %}
       <div class="table-wrap">
         <table class="styled-table">
-          <tr>
-            {% if request.user|has_group:"ADMIN" %}
-              <th>
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <input type="checkbox" id="selectAllCheckbox" style="transform:scale(1.2); cursor:pointer;">
-                  <span>ACTION</span>
-                </div>
-              </th>
-            {% endif %}
-            
-            {% for field in field_names %}
-              <th>{{ field }}</th>
-            {% endfor %}
-          </tr>
-
-          {% for row in data %}
+          <thead>
             <tr>
               {% if request.user|has_group:"ADMIN" %}
-                <td>
-                  <div style="display:flex; align-items:center; gap:10px;">
-                    <input type="checkbox" class="row-checkbox" name="selected_groups" value="{{ row.display_group_id|default:row.id }}" style="transform:scale(1.2); cursor:pointer;">
-                    <a href="{% url 'edit_rate' row.display_group_id %}" class="btn primary" style="padding: 4px 10px; font-size: 11px; height: auto;">
-                      ✏️ Edit
-                    </a>
+                <th>
+                  <div style="display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" id="selectAllCheckbox" style="transform:scale(1.2); cursor:pointer;">
+                    <span>ACTION</span>
                   </div>
-                </td>
+                </th>
               {% endif %}
-
+              
               {% for field in field_names %}
-                {% with val=row|get_attr:field %}
-                <td {% if field == 'display_rto_list' or field == 'new_vehicle_makes' or field == 'add_tnc' %}class="wrap-text"{% endif %}>
-                  {% if val is None %}
-                  {% else %}
-                    {% if field == "remarks" %}
-                      <details><summary>Show Remarks</summary><div class="full">{{ val|display_value }}</div></details>
-                    {% else %}
-                      {{ val|display_value }}
-                    {% endif %}
-                  {% endif %}
-                </td>
-                {% endwith %}
+                <th>{{ field|cut:"_"|title }}</th>
               {% endfor %}
             </tr>
-          {% endfor %}
+          </thead>
+          <tbody>
+            {% for row in data %}
+              <tr>
+                {% if request.user|has_group:"ADMIN" %}
+                  <td>
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      <input type="checkbox" class="row-checkbox" name="selected_groups" value="{{ row.display_group_id|default:row.id }}" style="transform:scale(1.2); cursor:pointer;">
+                      <a href="{% url 'edit_rate' row.display_group_id %}" class="btn primary" style="padding: 4px 10px; font-size: 11px; height: auto;">
+                        ✏️ Edit
+                      </a>
+                    </div>
+                  </td>
+                {% endif %}
+
+                {% for field in field_names %}
+                  {% with val=row|get_attr:field %}
+                  <td {% if field == 'display_rto_list' or field == 'new_vehicle_makes' or field == 'add_tnc' %}class="wrap-text"{% endif %}>
+                    
+                    {% if field == 'status' %}
+                      {% if val == 'LOCKED' or val == 'INACTIVE' %}
+                          <span style="display:inline-block; background:#fee2e2; color:#b91c1c; border:1px solid #fecaca; padding:4px 10px; border-radius:20px; font-size:10px; font-weight:800; letter-spacing:0.5px;">
+                              🔒 LOCKED
+                          </span>
+                      {% else %}
+                          <span style="display:inline-block; background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; padding:4px 10px; border-radius:20px; font-size:10px; font-weight:800; letter-spacing:0.5px;">
+                              🔓 UNLOCKED
+                          </span>
+                      {% endif %}
+                    
+                    {% elif val is None %}
+                    {% else %}
+                      {% if field == "remarks" %}
+                        <details><summary>Show Remarks</summary><div class="full">{{ val|display_value }}</div></details>
+                      {% else %}
+                        {{ val|display_value }}
+                      {% endif %}
+                    {% endif %}
+                  </td>
+                  {% endwith %}
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
         </table>
       </div>
     {% else %}
@@ -244,14 +276,14 @@
     <div id="bulkModal" class="modal-overlay">
       <div class="modal-content card">
         <h3 style="margin-top:0;">📝 Bulk Update Column</h3>
-        <p class="subtext">Select a column to update and enter the new value. This will modify ALL selected rows instantly.</p>
+        <p class="subtext">Select a column to update and enter the new value. (Enter LOCKED or UNLOCKED for status).</p>
         
         <div style="margin-bottom:14px;">
           <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:4px; display:block;">Select Field to Change</label>
           <select class="modal-select2" name="update_field" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border);">
             {% for field in field_names %}
               {% if field != "display_group_id" and field != "records_in_group" and field != "age_range" and field != "cc_range" and field != "sc_range" %}
-                <option value="{{ field }}">{{ field }}</option>
+                <option value="{{ field }}">{{ field|cut:"_"|title }}</option>
               {% endif %}
             {% endfor %}
           </select>
@@ -259,7 +291,7 @@
 
         <div style="margin-bottom:20px;">
           <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:4px; display:block;">New Value</label>
-          <input type="text" name="update_value" placeholder="Enter new value..." style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border);">
+          <input type="text" name="update_value" placeholder="e.g. UNLOCKED or NO" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border);">
         </div>
 
         <div style="display:flex; justify-content:flex-end; gap:10px;">
@@ -273,95 +305,71 @@
 
 <script>
   $(document).ready(function() {
+      $('input[name="date_range"]').daterangepicker({
+          autoUpdateInput: false,
+          locale: { format: 'YYYY-MM-DD', cancelLabel: 'Clear' }
+      });
+      $('input[name="date_range"]').on('apply.daterangepicker', function(ev, picker) {
+          $(this).val(picker.startDate.format('YYYY-MM-DD') + ' - ' + picker.endDate.format('YYYY-MM-DD'));
+      });
+      $('input[name="date_range"]').on('cancel.daterangepicker', function(ev, picker) {
+          $(this).val('');
+      });
+
       $('.filters-grid select').select2({ width: '100%', placeholder: "Search..." });
       $('.modal-select2').select2({ width: '100%', dropdownParent: $('#bulkModal') });
 
-      // STATIC MAPPING FOR PRODUCT TO MAKE_MODEL_CLASS
       const productClassMap = {
-          "TW": ["Scooter", "Bike"],
-          "Private Car": ["Car"],
+          "TW": ["Scooter", "Bike"], "Private Car": ["Car"],
           "GCV 4W": ["Truck", "Pick Up Van", "Dumper Tipper", "Trailer", "Tanker", "Goods Carrying Tractor"],
-          "GCV 3W": ["Goods Carrying Rickshaw"],
-          "PCV 3W": ["Passenger Carrying Rickshaw"],
-          "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
-          "MISCD": ["MISCD-Tractor", "MISCD-Others"]
+          "GCV 3W": ["Goods Carrying Rickshaw"], "PCV 3W": ["Passenger Carrying Rickshaw"],
+          "PCV 4W": ["Taxi", "School Bus", "Other Bus"], "MISCD": ["MISCD-Tractor", "MISCD-Others"]
       };
 
       const productSelect = $('select[name="product"]');
       const classSelect = $('select[name="make_model_class"]');
-      
-      // Backup original options
       const allClassOptions = classSelect.find('option').clone();
       const initialClass = "{{ selected.make_model_class|escapejs }}";
 
       function updateClassDropdown() {
           const selectedProductText = productSelect.find('option:selected').text().trim();
           const currentClassVal = classSelect.val() || initialClass;
-          
           classSelect.empty();
-          
-          // Always keep All and NA
-          classSelect.append(allClassOptions.filter(function() {
-              return $(this).val() === "" || $(this).val() === "NA";
-          }));
-
-          // Filter Make Model Class based on selected Product
+          classSelect.append(allClassOptions.filter(function() { return $(this).val() === "" || $(this).val() === "NA"; }));
           if (selectedProductText && selectedProductText !== "All" && productClassMap[selectedProductText]) {
               const allowedClasses = productClassMap[selectedProductText];
-              classSelect.append(allClassOptions.filter(function() {
-                  return allowedClasses.includes($(this).text().trim());
-              }));
+              classSelect.append(allClassOptions.filter(function() { return allowedClasses.includes($(this).text().trim()); }));
           } else {
-              classSelect.append(allClassOptions.filter(function() {
-                  return $(this).val() !== "" && $(this).val() !== "NA";
-              }));
+              classSelect.append(allClassOptions.filter(function() { return $(this).val() !== "" && $(this).val() !== "NA"; }));
           }
-
-          // Restore previous selection if it's still valid
-          if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) {
-              classSelect.val(currentClassVal);
-          } else {
-              classSelect.val('');
-          }
+          if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) { classSelect.val(currentClassVal); } 
+          else { classSelect.val(''); }
           classSelect.trigger('change.select2');
       }
 
-      // Initialize dropdown state based on URL params
       updateClassDropdown();
       productSelect.on('change', updateClassDropdown);
   });
 
   const masterCheck = document.getElementById('selectAllCheckbox');
   const rowChecks = document.querySelectorAll('.row-checkbox');
-
   if(masterCheck) {
-    masterCheck.addEventListener('change', function() {
-        rowChecks.forEach(cb => cb.checked = masterCheck.checked);
-    });
+    masterCheck.addEventListener('change', function() { rowChecks.forEach(cb => cb.checked = masterCheck.checked); });
   }
 
   function openBulkModal() {
-      const selected = Array.from(rowChecks).filter(cb => cb.checked);
-      if (selected.length === 0) { alert("Please select at least one row!"); return; }
+      if (Array.from(rowChecks).filter(cb => cb.checked).length === 0) { alert("Please select rows!"); return; }
       document.getElementById('bulkModal').style.display = 'flex';
   }
-
-  function closeBulkModal() {
-      document.getElementById('bulkModal').style.display = 'none';
-  }
+  function closeBulkModal() { document.getElementById('bulkModal').style.display = 'none'; }
 
   let currentFont = 13;
   let currentPadV = 12;
   let currentPadH = 16;
-
   function zoomTable(direction) {
-      currentFont += (direction * 1.5);
-      currentPadV += (direction * 1.0);
-      currentPadH += (direction * 1.5);
-
+      currentFont += (direction * 1.5); currentPadV += (direction * 1.0); currentPadH += (direction * 1.5);
       if (currentFont < 8) { currentFont = 8; currentPadV = 6; currentPadH = 8; }
       if (currentFont > 22) { currentFont = 22; currentPadV = 18; currentPadH = 26; }
-
       document.documentElement.style.setProperty('--tb-font', currentFont + 'px');
       document.documentElement.style.setProperty('--tb-pad', `${currentPadV}px ${currentPadH}px`);
   }
@@ -390,11 +398,12 @@
 
   .select2-container--default .select2-selection--single { height: 38px; border: 1px solid var(--border); border-radius: 8px; background-color: #fff; display: flex; align-items: center; }
   .select2-container--default .select2-selection--single .select2-selection__rendered { color: var(--text); padding-left: 10px; font-size:14px; }
-  .select2-container--default .select2-selection--single .select2-selection__arrow { height: 36px; right: 8px; }
-  .select2-dropdown { border: 1px solid var(--brand); border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 99999 !important; }
-  .select2-search__field { border-radius: 4px !important; }
-
   .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(4px); display: none; justify-content: center; align-items: center; z-index: 99999; }
   .modal-content { width: 100%; max-width: 450px; background: #fff; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.15); border-radius: 16px; }
+
+  /* ✅专业 DATERANGEPICKER 样式保持不变 */
+  .daterangepicker { font-family: inherit; border: 1px solid var(--border) !important; border-radius: 12px !important; box-shadow: 0 10px 25px rgba(0,0,0,0.1) !important; padding: 8px; }
+  .daterangepicker td.active { background-color: #0284c7 !important; color: #fff !important; }
+  .daterangepicker td.in-range { background-color: #e0f2fe !important; color: #0284c7 !important; }
 </style>
 {% endblock %}

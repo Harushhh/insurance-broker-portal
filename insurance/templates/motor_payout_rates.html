@@ -96,17 +96,6 @@
       </div>
 
       <div>
-        <div class="subtext">Status Filter</div>
-        <select name="status" class="form-input">
-          <option value="ALL" {% if selected.status == 'ALL' or not selected.status %}selected{% endif %}>All (Active & Inactive)</option>
-          <option value="ACTIVE" {% if selected.status == 'ACTIVE' %}selected{% endif %}>ACTIVE Only</option>
-          <option value="INACTIVE" {% if selected.status == 'INACTIVE' %}selected{% endif %}>INACTIVE Only</option>
-        </select>
-      </div>
-      
-      <div></div>
-
-      <div>
         <div class="subtext">Zero Dep (ZD)</div>
         <div class="segmented-control">
           <label>
@@ -157,9 +146,9 @@
       </div>
       
       <div style="display:flex; gap:8px; align-items:center;">
-        <span style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase;">Table Zoom</span>
-        <button type="button" class="btn" onclick="zoomTable(1)" style="height:32px; width:32px; padding:0; border-radius:6px; background: #fff;" title="Zoom In">🔍+</button>
-        <button type="button" class="btn" onclick="zoomTable(-1)" style="height:32px; width:32px; padding:0; border-radius:6px; background: #fff;" title="Zoom Out">🔍-</button>
+        <span style="font-size:11px; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:0.05em;">Table Zoom</span>
+        <button type="button" class="btn" onclick="zoomTable(1)" style="height:34px; width:34px; padding:0; border-radius:8px; background: #fff; border: 1px solid #cbd5e1;" title="Zoom In">🔍+</button>
+        <button type="button" class="btn" onclick="zoomTable(-1)" style="height:34px; width:34px; padding:0; border-radius:8px; background: #fff; border: 1px solid #cbd5e1;" title="Zoom Out">🔍-</button>
       </div>
     </div>
   </form>
@@ -167,41 +156,48 @@
   {% if data %}
     <div class="table-wrap">
       <table class="styled-table">
-        <tr>
-          {% for field in field_names %}
-            <th>{{ field }}</th>
-          {% endfor %}
-        </tr>
-
-        {% for row in data %}
-          <tr class="{% if row.status == 'INACTIVE' %}inactive-row{% endif %}">
+        <thead>
+          <tr>
             {% for field in field_names %}
-              {% with val=row|get_attr:field %}
-              <td {% if field == 'new_rto_list' or field == 'new_vehicle_makes' or field == 'add_tnc' %}class="wrap-text"{% endif %}>
-                
-                {% if field == 'status' %}
-                    {% if val == 'INACTIVE' %}
-                        <span style="display:inline-block; background:#fee2e2; color:#e11d48; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:700; letter-spacing:0.5px;">⚠️ INACTIVE</span>
-                    {% else %}
-                        <span style="display:inline-block; background:#dcfce7; color:#059669; padding:4px 8px; border-radius:6px; font-size:11px; font-weight:700; letter-spacing:0.5px;">✅ ACTIVE</span>
-                    {% endif %}
-                {% elif val is None or val == "" %}
-                {% else %}
-                  {{ val|display_value }}
-                {% endif %}
-
-              </td>
-              {% endwith %}
+              <th>{{ field|cut:"_"|title }}</th>
             {% endfor %}
           </tr>
-        {% endfor %}
+        </thead>
+        <tbody>
+          {% for row in data %}
+            <tr class="{% if row.status == 'LOCKED' or row.status == 'INACTIVE' %}inactive-row{% endif %}">
+              {% for field in field_names %}
+                {% with val=row|get_attr:field %}
+                <td {% if field == 'new_rto_list' or field == 'new_vehicle_makes' or field == 'add_tnc' %}class="wrap-text"{% endif %}>
+                  
+                  {% if field == 'status' %}
+                      {% if val == 'LOCKED' or val == 'INACTIVE' %}
+                          <span style="display:inline-block; background:#fee2e2; color:#b91c1c; border:1px solid #fecaca; padding:4px 10px; border-radius:20px; font-size:10px; font-weight:800; letter-spacing:0.5px;">
+                              🔒 LOCKED
+                          </span>
+                      {% else %}
+                          <span style="display:inline-block; background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; padding:4px 10px; border-radius:20px; font-size:10px; font-weight:800; letter-spacing:0.5px;">
+                              🔓 UNLOCKED
+                          </span>
+                      {% endif %}
+                  {% elif val is None or val == "" %}
+                  {% else %}
+                    {{ val|display_value }}
+                  {% endif %}
+
+                </td>
+                {% endwith %}
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
       </table>
     </div>
   {% else %}
     <div class="card" style="margin-top:20px; text-align:center; padding: 50px; color:#64748b; background: #f8fafc; border: 1px dashed #cbd5e1;">
       <div style="font-size: 30px; margin-bottom: 10px;">📋</div>
       <b style="font-size: 16px;">No eligible payout records found for this combination.</b>
-      <p style="margin-top: 5px; font-size: 13px;">Try adjusting your filters or date.</p>
+      <p style="margin-top: 5px; font-size: 13px;">Try adjusting your filters or vehicle details.</p>
     </div>
   {% endif %}
 </div>
@@ -210,7 +206,6 @@
   $(document).ready(function() {
       $('.filters-grid select').select2({ width: '100%', placeholder: "Select..." });
 
-      // STATIC MAPPING FOR PRODUCT TO MAKE_MODEL_CLASS
       const productClassMap = {
           "TW": ["Scooter", "Bike"],
           "Private Car": ["Car"],
@@ -221,7 +216,6 @@
           "MISCD": ["MISCD-Tractor", "MISCD-Others"]
       };
 
-      // DEPENDENT DROPDOWN LOGIC
       const classMakesMapping = {{ class_makes_mapping_json|safe }};
       const allMakes = {{ all_makes_json|safe }};
       
@@ -229,7 +223,6 @@
       const classSelect = $('select[name="make_model_class"]');
       const makeSelect = $('select[name="make_names"]');
 
-      // Backup original options
       const allClassOptions = classSelect.find('option').clone();
       const initialClass = "{{ selected.make_model_class|escapejs }}";
       const selectedMake = "{{ selected.make_names|escapejs }}";
@@ -237,14 +230,10 @@
       function updateClassDropdown() {
           const selectedProductText = productSelect.find('option:selected').text().trim();
           const currentClassVal = classSelect.val() || initialClass;
-          
           classSelect.empty();
-          
-          // Always keep All and NA
           classSelect.append(allClassOptions.filter(function() {
               return $(this).val() === "" || $(this).val() === "NA";
           }));
-
           if (selectedProductText && selectedProductText !== "All" && productClassMap[selectedProductText]) {
               const allowedClasses = productClassMap[selectedProductText];
               classSelect.append(allClassOptions.filter(function() {
@@ -255,46 +244,32 @@
                   return $(this).val() !== "" && $(this).val() !== "NA";
               }));
           }
-
-          // Restore selection if it exists in the newly filtered list
           if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) {
               classSelect.val(currentClassVal);
           } else {
               classSelect.val('');
           }
           classSelect.trigger('change.select2');
-          
-          // Chain update to makes
           updateMakesDropdown();
       }
 
       function updateMakesDropdown() {
           const selectedClass = classSelect.val();
-          
           makeSelect.empty();
           makeSelect.append(new Option('All', ''));
-
           let makesToShow = allMakes;
-
           if (selectedClass && selectedClass !== "NA" && classMakesMapping[selectedClass]) {
               makesToShow = classMakesMapping[selectedClass];
           }
-
           makesToShow.forEach(function(make) {
               const opt = new Option(make, make);
-              if (make === selectedMake) {
-                  opt.selected = true;
-              }
+              if (make === selectedMake) opt.selected = true;
               makeSelect.append(opt);
           });
-
           makeSelect.trigger('change.select2');
       }
 
-      // Initialize
       updateClassDropdown();
-
-      // Listen for changes
       productSelect.on('change', updateClassDropdown);
       classSelect.on('change', updateMakesDropdown);
   });
@@ -319,83 +294,69 @@
   
   .filters-grid { 
     display:grid; 
-    grid-template-columns: repeat(4, 1fr); 
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); 
     gap:20px 16px; 
     align-items:start; 
   }
-  
-  @media (max-width: 1200px){ .filters-grid{ grid-template-columns: repeat(3, 1fr); } }
-  @media (max-width: 900px){ .filters-grid{ grid-template-columns: repeat(2, 1fr); } }
-  @media (max-width: 600px){ .filters-grid{ grid-template-columns: 1fr; } }
 
-  .subtext { margin: 0 0 6px 0; font-weight: 600; color: #475569; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em;}
+  .subtext { margin: 0 0 6px 0; font-weight: 700; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;}
   .form-input {
     width: 100%; 
     padding: 10px 12px; 
-    border: 1px solid var(--border); 
-    border-radius: 8px;
+    border: 1px solid #cbd5e1; 
+    border-radius: 10px;
     height: 42px;
     background-color: #fff;
     box-sizing: border-box;
     font-family: inherit;
     font-size: 14px;
+    transition: border-color 0.2s;
   }
+  .form-input:focus { border-color: #38bdf8; outline: none; box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.1); }
 
-  .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 20px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
+  .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 12px; margin-top: 20px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05); background: #fff; }
   .styled-table { width: 100%; border-collapse: collapse; min-width: max-content; }
-  .styled-table th, .styled-table td { border: 1px solid #e2e8f0; padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; vertical-align: middle; white-space: nowrap; line-height: 1.4; transition: all 0.15s ease; }
-  .wrap-text { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 380px; }
-  .styled-table th { background-color: #f1f5f9; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #475569; position: sticky; top:0; z-index:10; }
+  .styled-table th, .styled-table td { border-bottom: 1px solid #f1f5f9; padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; vertical-align: middle; white-space: nowrap; transition: all 0.1s ease; }
+  .wrap-text { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 400px; }
+  .styled-table th { background-color: #f8fafc; font-weight: 800; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; color: #475569; border-bottom: 2px solid #e2e8f0; position: sticky; top:0; z-index:10; }
   
-  /* ✅ INACTIVE ROW CSS */
+  /* ✅ INACTIVE/LOCKED ROW STYLING */
   .inactive-row { background-color: #fff1f2 !important; }
   .inactive-row:hover { background-color: #ffe4e6 !important; }
   
-  .styled-table tr { background-color: #ffffff; }
-  .styled-table tr:nth-child(even) { background-color: #f8fafc; }
-  .styled-table tr:hover { background-color: #e2e8f0; }
+  .styled-table tr:hover { background-color: #f1f5f9; }
 
-  .select2-container--default .select2-selection--single { height: 42px; border: 1px solid var(--border); border-radius: 8px; background-color: #fff; display: flex; align-items: center; }
-  .select2-container--default .select2-selection--single .select2-selection__rendered { color: var(--text); padding-left: 12px; font-size:14px; line-height: 40px;}
+  .select2-container--default .select2-selection--single { height: 42px; border: 1px solid #cbd5e1; border-radius: 10px; background-color: #fff; display: flex; align-items: center; }
+  .select2-container--default .select2-selection--single .select2-selection__rendered { color: #1e293b; padding-left: 12px; font-size:14px; }
   .select2-container--default .select2-selection--single .select2-selection__arrow { height: 40px; right: 8px; }
   
   .segmented-control {
     display: flex;
     width: 100%;
     height: 42px; 
-    background: #fff;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
+    background: #f1f5f9;
+    padding: 3px;
+    border-radius: 10px;
+    box-sizing: border-box;
   }
-  .segmented-control label {
-    flex: 1;
-    cursor: pointer;
-    position: relative;
-    margin: 0;
-  }
-  .segmented-control input[type="radio"] {
-    position: absolute;
-    opacity: 0;
-  }
+  .segmented-control label { flex: 1; margin: 0; }
+  .segmented-control input[type="radio"] { position: absolute; opacity: 0; }
   .segmented-control span {
     display: flex;
     align-items: center;
     justify-content: center;
     height: 100%;
     width: 100%;
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--muted);
-    border-right: 1px solid var(--border);
-    transition: background 0.15s, color 0.15s;
-  }
-  .segmented-control label:last-child span {
-    border-right: none;
+    font-size: 12px;
+    font-weight: 700;
+    color: #64748b;
+    border-radius: 8px;
+    transition: all 0.2s ease;
   }
   .segmented-control input[type="radio"]:checked + span {
-    background: linear-gradient(135deg, var(--brand), var(--brand2));
-    color: #fff;
+    background: #fff;
+    color: #2563eb;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
   }
 </style>
 {% endblock %}

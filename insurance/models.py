@@ -1,3 +1,4 @@
+from django.contrib.auth.models import User
 from django.db import models
 import uuid
 
@@ -96,8 +97,11 @@ class RateMaster(models.Model):
     policy_type = models.ForeignKey(PolicyTypeMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="policy_type_id")
     fuel_type = models.ForeignKey(FuelTypeMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="fuel_type_id")
     make_model_class = models.ForeignKey(MakeModelClassMaster, on_delete=models.SET_NULL, null=True, blank=True, db_column="make_model_class_id")
-    status = models.CharField(max_length=20, default="INACTIVE", choices=[("ACTIVE", "Active"), ("INACTIVE", "Inactive")])
+    
+    # ✅ Kept your original choices for safety, visual updates handled in template
+    status = models.CharField(max_length=20, default="INACTIVE", choices=[("ACTIVE", "Active"), ("INACTIVE", "Inactive"), ("UNLOCKED", "Unlocked"), ("LOCKED", "Locked")])
     is_deleted = models.CharField(max_length=10, default="NO", choices=[("YES", "Yes"), ("NO", "No")])
+    
     # ✅ CHANGED TO FLOAT
     vehicle_age_min = models.FloatField(null=True, blank=True)
     vehicle_age_max = models.FloatField(null=True, blank=True)
@@ -162,3 +166,23 @@ class MakeModelMaster(models.Model):
 
     def __str__(self):
         return self.make_model_name
+
+class UserProfile(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    contact_number = models.CharField(max_length=20, blank=True, null=True)
+    designation = models.CharField(max_length=100, blank=True, null=True)
+    
+    def __str__(self):
+        return self.user.username
+
+# ==========================================
+# ✅ NEW: SECURITY & COMPLIANCE AUDIT LOG
+# ==========================================
+class AuditLog(models.Model):
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    action = models.CharField(max_length=100)
+    details = models.TextField()
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user} | {self.action} | {self.timestamp}"

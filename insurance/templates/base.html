@@ -242,6 +242,10 @@
             {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Dashboard" %}
               <a class="dd-item" href="{% url 'dashboard' %}">📊 Dashboard</a>
             {% endif %}
+
+            {% if request.user|has_group:"ADMIN" %}
+              <a class="dd-item" href="{% url 'business_analysis' %}" style="color: #6d28d9;">📈 Analysis</a>
+            {% endif %}
             
             {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Motor_Payout_Rates" %}
               <a class="dd-item" href="{% url 'motor_payout_rates' %}">💰 Motor Payout Rates</a>
@@ -264,6 +268,7 @@
               
               {% if request.user|has_group:"ADMIN" %}
                 <a class="dd-item" href="{% url 'user_management' %}">👥 User Management</a>
+                <a class="dd-item" href="{% url 'audit_logs' %}" style="color: #ef4444;">🕵️‍♂️ Audit Log</a>
               {% endif %}
 
               <div class="dd-muted">Account</div>

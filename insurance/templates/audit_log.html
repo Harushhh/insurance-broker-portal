@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Security Audit Log{% endblock %}
+
+{% block content %}
+<div class="card" style="margin-bottom: 20px; padding: 24px; background: #fff; border: 1px solid #e2e8f0; border-top: 4px solid #ef4444;">
+    <h2 style="margin:0; color:#0f172a;">🕵️‍♂️ Security Audit & History Log</h2>
+    <p style="color:#64748b; margin:8px 0 0; font-size: 14px;">
+        Strict compliance tracking. All bulk updates and edits are permanently recorded here.
+    </p>
+</div>
+
+<div class="table-wrap card" style="padding:0; overflow:hidden;">
+    <table class="styled-table" style="margin:0; width: 100%;">
+        <thead style="background: #0f172a;">
+            <tr>
+                <th style="color:#fff; padding: 12px;">Date & Time</th>
+                <th style="color:#fff; padding: 12px;">User / Employee</th>
+                <th style="color:#fff; padding: 12px;">Action Type</th>
+                <th style="color:#fff; padding: 12px;">System Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+                <td style="font-size:12px; color:#475569; padding: 12px;">{{ log.timestamp|date:"M d, Y - h:i A" }}</td>
+                <td style="font-weight:700; color:#0284c7; padding: 12px;">{{ log.user.username|default:"System" }}</td>
+                <td style="padding: 12px;">
+                    <span style="background:#f1f5f9; border:1px solid #cbd5e1; padding:4px 8px; border-radius:6px; font-size:10px; font-weight:800; color:#475569;">
+                        {{ log.action }}
+                    </span>
+                </td>
+                <td style="white-space:normal; font-size:13px; color:#334155; padding: 12px; max-width: 400px;">{{ log.details }}</td>
+            </tr>
+            {% empty %}
+            <tr><td colspan="4" style="text-align:center; padding:30px; color: #64748b; font-weight: 600;">No audit records found yet. Try bulk updating a record!</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
