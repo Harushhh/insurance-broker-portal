@@ -6,6 +6,8 @@ from django.utils.encoding import force_bytes
 from django.shortcuts import render, redirect
 from django.http import HttpResponse
 from django.db.models import Q, F, Count, Avg
+from django.core.mail import send_mail  
+from django.conf import settings 
 from .models import RTOMaster, MakeModelMaster
 from django import forms
 import csv
@@ -14,6 +16,7 @@ import re
 from datetime import datetime
 from collections import defaultdict
 import hashlib
+import threading  # ✅ NEW: IMPORTED THREADING FOR BACKGROUND EMAILS
 
 from openpyxl import Workbook
 
@@ -21,7 +24,7 @@ from .models import (
     RateMaster, YesNoNAMaster,
     ProductMaster, SubProductMaster, PolicyTypeMaster,
     FuelTypeMaster, MakeModelClassMaster,
-    RateGroup, AuditLog
+    RateGroup, AuditLog, GridDocument  
 )
 
 # =========================================================
@@ -29,18 +32,24 @@ from .models import (
 # =========================================================
 PAGE_GROUPS = [
     "Can_View_Dashboard",
+    "Can_View_Analysis",
     "Can_View_Motor_Payout_Rates",
     "Can_Upload_CSV",
     "Can_View_RTO_Dashboard",
-    "Can_View_Make_Model_Dashboard"
+    "Can_View_Make_Model_Dashboard",
+    "Can_View_Audit_Log",
+    "Can_View_Grid_Management"  
 ]
 
 def is_admin(user): return user.is_superuser or user.groups.filter(name="ADMIN").exists()
 def can_view_dashboard(user): return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Dashboard"]).exists()
+def can_view_analysis(user): return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Analysis"]).exists()
 def can_view_motor_payout(user): return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Motor_Payout_Rates"]).exists()
 def can_upload(user): return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_Upload_CSV"]).exists()
 def can_view_rto(user): return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_RTO_Dashboard"]).exists()
 def can_view_make_model(user): return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Make_Model_Dashboard"]).exists()
+def can_view_audit_log(user): return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Audit_Log"]).exists()
+def can_view_grid_management(user): return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Grid_Management"]).exists() 
 
 # =========================================================
 # ✅ NA MEANS THESE MAKE_MODEL_CLASS VALUES (PER PRODUCT)
@@ -414,8 +423,11 @@ def dashboard(request):
         if len(dates) == 2:
             d_from = dates[0].strip()
             d_to = dates[1].strip()
-            if d_from: qs = qs.filter(from_date__gte=d_from)
-            if d_to: qs = qs.filter(from_date__lte=d_to)
+            if d_from and d_to:
+                qs = qs.filter(
+                    (Q(from_date__lte=d_to) | Q(from_date__isnull=True)) &
+                    (Q(to_date__gte=d_from) | Q(to_date__isnull=True))
+                )
             
     if insurance_company: qs = qs.filter(insurance_company=insurance_company)
     if product: qs = qs.filter(product_id=product)
@@ -461,31 +473,32 @@ def dashboard(request):
     matching_gids_set = set()
     ordered_gids = []
 
-    for row in qs:
+    for row in qs.iterator(chunk_size=2000):
         if rto_code and matching_rto_names:
             if not row.new_rto_list: continue
             row_rtos = [x.strip().upper() for x in row.new_rto_list.split(',')]
-            if not any(x in matching_rto_names for x in row_rtos):
-                continue
+            if not any(x in matching_rto_names for x in row_rtos): continue
                 
         if make_model_code and matching_make_names:
             if not row.new_vehicle_makes: continue
             row_makes = [x.strip().upper() for x in row.new_vehicle_makes.split(',')]
-            if not any(x in matching_make_names for x in row_makes):
-                continue
+            if not any(x in matching_make_names for x in row_makes): continue
 
         gid = row.group_id if row.group_id is not None else row.id
         if gid not in matching_gids_set:
             matching_gids_set.add(gid)
             ordered_gids.append(gid)
+            
+        if len(ordered_gids) >= 200:
+            break
 
     buckets = defaultdict(list)
-    if matching_gids_set:
+    if ordered_gids:
         full_group_qs = RateMaster.objects.select_related(
             "group", "product", "sub_product", "policy_type", "fuel_type", "make_model_class", "is_ncb", "is_cpa", "is_zd"
-        ).filter(Q(group_id__in=matching_gids_set) | Q(id__in=matching_gids_set))
+        ).filter(Q(group_id__in=ordered_gids) | Q(id__in=ordered_gids))
         
-        for row in full_group_qs:
+        for row in full_group_qs.iterator(chunk_size=2000):
             gid = row.group_id if row.group_id is not None else row.id
             buckets[gid].append(row)
 
@@ -530,7 +543,7 @@ def dashboard(request):
         "status", "is_deleted"
     ]
 
-    insurance_company_list = RateMaster.objects.values_list("insurance_company", flat=True).distinct().order_by("insurance_company")
+    insurance_company_list = RateMaster.objects.exclude(insurance_company="").values_list("insurance_company", flat=True).distinct().order_by("insurance_company")
     product_list = ProductMaster.objects.all().order_by("name")
     fuel_list = FuelTypeMaster.objects.all().order_by("name")
     sub_product_list = SubProductMaster.objects.all().order_by("name")
@@ -560,13 +573,13 @@ def dashboard(request):
     })
 
 # -------------------------
-# Export UNGROUPED to Excel (FILTERED)
+# Export UNGROUPED to Excel 
 # -------------------------
 @login_required
 @user_passes_test(can_view_dashboard)
 def export_rates_xlsx(request):
     qs = RateMaster.objects.select_related(
-        "group", "product", "sub_product", "policy_type", "fuel_type", "make_model_class", "is_ncb", "is_cpa", "is_zd"
+        "product", "sub_product", "policy_type", "fuel_type", "make_model_class", "is_ncb", "is_cpa", "is_zd"
     ).all()
 
     q = (request.GET.get("q") or "").strip()
@@ -609,8 +622,11 @@ def export_rates_xlsx(request):
         if len(dates) == 2:
             d_from = dates[0].strip()
             d_to = dates[1].strip()
-            if d_from: qs = qs.filter(from_date__gte=d_from)
-            if d_to: qs = qs.filter(from_date__lte=d_to)
+            if d_from and d_to:
+                qs = qs.filter(
+                    (Q(from_date__lte=d_to) | Q(from_date__isnull=True)) &
+                    (Q(to_date__gte=d_from) | Q(to_date__isnull=True))
+                )
             
     if insurance_company: qs = qs.filter(insurance_company=insurance_company)
     if product: qs = qs.filter(product_id=product)
@@ -649,28 +665,6 @@ def export_rates_xlsx(request):
     if is_cpa: qs = qs.filter(is_cpa__code=is_cpa)
 
     qs = qs.order_by("-id")  
-    
-    matching_gids_set = set()
-    for row in qs:
-        if rto_code and matching_rto_names:
-            if not row.new_rto_list: continue
-            row_rtos = [x.strip().upper() for x in row.new_rto_list.split(',')]
-            if not any(x in matching_rto_names for x in row_rtos): continue
-                
-        if make_model_code and matching_make_names:
-            if not row.new_vehicle_makes: continue
-            row_makes = [x.strip().upper() for x in row.new_vehicle_makes.split(',')]
-            if not any(x in matching_make_names for x in row_makes): continue
-                
-        gid = row.group_id if row.group_id is not None else row.id
-        matching_gids_set.add(gid)
-
-    valid_rows = []
-    if matching_gids_set:
-        full_group_qs = RateMaster.objects.select_related(
-            "product", "sub_product", "policy_type", "fuel_type", "make_model_class", "is_ncb", "is_cpa", "is_zd"
-        ).filter(Q(group_id__in=matching_gids_set) | Q(id__in=matching_gids_set)).order_by("-id")
-        valid_rows = list(full_group_qs)
 
     wb = Workbook()
     ws = wb.active
@@ -687,7 +681,17 @@ def export_rates_xlsx(request):
     ]
     ws.append(headers)
 
-    for r in valid_rows:
+    for r in qs.iterator(chunk_size=2000):
+        if rto_code and matching_rto_names:
+            if not r.new_rto_list: continue
+            row_rtos = [x.strip().upper() for x in r.new_rto_list.split(',')]
+            if not any(x in matching_rto_names for x in row_rtos): continue
+                
+        if make_model_code and matching_make_names:
+            if not r.new_vehicle_makes: continue
+            row_makes = [x.strip().upper() for x in r.new_vehicle_makes.split(',')]
+            if not any(x in matching_make_names for x in row_makes): continue
+
         age_min_val = r.vehicle_age_min if r.vehicle_age_min is not None else ""
         age_max_val = r.vehicle_age_max if r.vehicle_age_max is not None else ""
         cc_min_val = r.cc_min if r.cc_min is not None else ""
@@ -798,6 +802,17 @@ def user_management(request):
             u.groups.clear()
             u.groups.add(Group.objects.get(name="ADMIN"))
             msg = f"✅ User '{u.username}' promoted to Full Admin."
+            
+        elif action == "delete_user" and user_id:
+            u = User.objects.get(id=user_id)
+            if u.is_superuser:
+                error = "⚠️ You cannot delete a Super Admin account."
+            elif u == request.user:
+                error = "⚠️ You cannot delete your own account."
+            else:
+                uname = u.username
+                u.delete()
+                msg = f"🗑️ User '{uname}' has been completely removed from the system."
 
     users = User.objects.select_related('profile').all().order_by("-is_superuser", "username")
     user_rows = []
@@ -970,21 +985,22 @@ def edit_make_model(request, pk):
 # -------------------------
 class RateForm(forms.ModelForm):
     new_rto_list = forms.MultipleChoiceField(required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select RTOs...'}))
-    insurance_company = forms.MultipleChoiceField(required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select Company...'}))
     new_vehicle_makes = forms.MultipleChoiceField(required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select Makes...'}))
-    insurer_vertical = forms.MultipleChoiceField(required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select Vertical...'}))
     
-    product = forms.ModelMultipleChoiceField(queryset=ProductMaster.objects.all(), required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select Product...'}))
-    sub_product = forms.ModelMultipleChoiceField(queryset=SubProductMaster.objects.all(), required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select Sub Product...'}))
-    policy_type = forms.ModelMultipleChoiceField(queryset=PolicyTypeMaster.objects.all(), required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select Policy Type...'}))
-    fuel_type = forms.ModelMultipleChoiceField(queryset=FuelTypeMaster.objects.all(), required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select Fuel Type...'}))
-    make_model_class = forms.ModelMultipleChoiceField(queryset=MakeModelClassMaster.objects.all(), required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select Make Model Class...'}))
-    is_ncb = forms.ModelMultipleChoiceField(queryset=YesNoNAMaster.objects.all(), required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select NCB...'}))
-    is_cpa = forms.ModelMultipleChoiceField(queryset=YesNoNAMaster.objects.all(), required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select CPA...'}))
-    is_zd = forms.ModelMultipleChoiceField(queryset=YesNoNAMaster.objects.all(), required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select ZD...'}))
+    insurance_company = forms.ChoiceField(required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select Company...'}))
+    insurer_vertical = forms.ChoiceField(required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select Vertical...'}))
     
-    status = forms.MultipleChoiceField(choices=[("LOCKED", "Locked"), ("UNLOCKED", "Unlocked")], required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select Status...'}))
-    is_deleted = forms.MultipleChoiceField(choices=[("YES", "Yes"), ("NO", "No")], required=False, widget=forms.SelectMultiple(attrs={'class': 'select2-multiple', 'data-placeholder': 'Select Deletion Status...'}))
+    product = forms.ModelChoiceField(queryset=ProductMaster.objects.all(), required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select Product...'}))
+    sub_product = forms.ModelChoiceField(queryset=SubProductMaster.objects.all(), required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select Sub Product...'}))
+    policy_type = forms.ModelChoiceField(queryset=PolicyTypeMaster.objects.all(), required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select Policy Type...'}))
+    fuel_type = forms.ModelChoiceField(queryset=FuelTypeMaster.objects.all(), required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select Fuel Type...'}))
+    make_model_class = forms.ModelChoiceField(queryset=MakeModelClassMaster.objects.all(), required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select Make Model Class...'}))
+    is_ncb = forms.ModelChoiceField(queryset=YesNoNAMaster.objects.all(), required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select NCB...'}))
+    is_cpa = forms.ModelChoiceField(queryset=YesNoNAMaster.objects.all(), required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select CPA...'}))
+    is_zd = forms.ModelChoiceField(queryset=YesNoNAMaster.objects.all(), required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select ZD...'}))
+    
+    status = forms.ChoiceField(choices=[("LOCKED", "Locked"), ("UNLOCKED", "Unlocked")], required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select Status...'}))
+    is_deleted = forms.ChoiceField(choices=[("YES", "Yes"), ("NO", "No")], required=False, widget=forms.Select(attrs={'class': 'select2-single', 'data-placeholder': 'Select Deletion Status...'}))
 
     class Meta:
         model = RateMaster
@@ -995,7 +1011,7 @@ class RateForm(forms.ModelForm):
         
         companies = list(RateMaster.objects.exclude(insurance_company__isnull=True).exclude(insurance_company__exact='').values_list('insurance_company', flat=True).distinct().order_by('insurance_company'))
         if self.instance and self.instance.insurance_company and self.instance.insurance_company not in companies: companies.append(self.instance.insurance_company)
-        self.fields['insurance_company'].choices = [(c, c) for c in companies]
+        self.fields['insurance_company'].choices = [("", "---------")] + [(c, c) for c in companies]
 
         makes = list(MakeModelMaster.objects.values_list('make_model_name', flat=True).order_by('make_model_name'))
         initial_makes = kwargs.get('initial', {}).get('new_vehicle_makes', [])
@@ -1007,7 +1023,7 @@ class RateForm(forms.ModelForm):
 
         verticals = list(RateMaster.objects.exclude(insurer_vertical__isnull=True).exclude(insurer_vertical__exact='').values_list('insurer_vertical', flat=True).distinct().order_by('insurer_vertical'))
         if self.instance and self.instance.insurer_vertical and self.instance.insurer_vertical not in verticals: verticals.append(self.instance.insurer_vertical)
-        self.fields['insurer_vertical'].choices = [(v, v) for v in verticals]
+        self.fields['insurer_vertical'].choices = [("", "---------")] + [(v, v) for v in verticals]
 
         rtos = list(RTOMaster.objects.values_list('rto_name', flat=True).order_by('rto_name'))
         initial_rtos = kwargs.get('initial', {}).get('new_rto_list', [])
@@ -1024,36 +1040,6 @@ class RateForm(forms.ModelForm):
     def clean_new_vehicle_makes(self):
         data = self.cleaned_data.get('new_vehicle_makes')
         return ", ".join(data) if data else ""
-
-    def clean_insurance_company(self):
-        data = self.cleaned_data.get('insurance_company')
-        return data[0] if data else ""
-        
-    def clean_insurer_vertical(self):
-        data = self.cleaned_data.get('insurer_vertical')
-        return data[0] if data else ""
-
-    def clean_status(self):
-        data = self.cleaned_data.get('status')
-        return data[0] if data else "UNLOCKED"
-        
-    def clean_is_deleted(self):
-        data = self.cleaned_data.get('is_deleted')
-        return data[0] if data else "NO"
-
-    def _clean_fk(self, field_name):
-        data = self.cleaned_data.get(field_name)
-        if data: return data.first() 
-        return None
-
-    def clean_product(self): return self._clean_fk('product')
-    def clean_sub_product(self): return self._clean_fk('sub_product')
-    def clean_policy_type(self): return self._clean_fk('policy_type')
-    def clean_fuel_type(self): return self._clean_fk('fuel_type')
-    def clean_make_model_class(self): return self._clean_fk('make_model_class')
-    def clean_is_ncb(self): return self._clean_fk('is_ncb')
-    def clean_is_cpa(self): return self._clean_fk('is_cpa')
-    def clean_is_zd(self): return self._clean_fk('is_zd')
 
 @login_required
 @user_passes_test(is_admin)
@@ -1080,19 +1066,19 @@ def edit_rate(request, group_id):
     initial_data = {
         'new_rto_list': unique_rto_list,
         'new_vehicle_makes': unique_makes_list,
-        'insurance_company': list(set([r.insurance_company for r in records if r.insurance_company])),
-        'insurer_vertical': list(set([r.insurer_vertical for r in records if r.insurer_vertical])),
-        'status': list(set(mapped_statuses)),
-        'is_deleted': list(set([r.is_deleted for r in records if r.is_deleted])),
+        'insurance_company': first_record.insurance_company,
+        'insurer_vertical': first_record.insurer_vertical,
+        'status': mapped_statuses[0] if mapped_statuses else "UNLOCKED",
+        'is_deleted': first_record.is_deleted,
         
-        'product': list(records.values_list('product_id', flat=True).distinct()),
-        'sub_product': list(records.values_list('sub_product_id', flat=True).distinct()),
-        'policy_type': list(records.values_list('policy_type_id', flat=True).distinct()),
-        'fuel_type': list(records.values_list('fuel_type_id', flat=True).distinct()),
-        'make_model_class': list(records.values_list('make_model_class_id', flat=True).distinct()),
-        'is_ncb': list(records.values_list('is_ncb_id', flat=True).distinct()),
-        'is_cpa': list(records.values_list('is_cpa_id', flat=True).distinct()),
-        'is_zd': list(records.values_list('is_zd_id', flat=True).distinct()),
+        'product': first_record.product_id,
+        'sub_product': first_record.sub_product_id,
+        'policy_type': first_record.policy_type_id,
+        'fuel_type': first_record.fuel_type_id,
+        'make_model_class': first_record.make_model_class_id,
+        'is_ncb': first_record.is_ncb_id,
+        'is_cpa': first_record.is_cpa_id,
+        'is_zd': first_record.is_zd_id,
     }
 
     if request.method == "POST":
@@ -1101,7 +1087,6 @@ def edit_rate(request, group_id):
             update_data = {field: value for field, value in form.cleaned_data.items()}
             records.update(**update_data)
             
-            # ✅ NEW: AUDIT TRAIL LOGGING FOR MANUAL EDITS
             AuditLog.objects.create(
                 user=request.user,
                 action="MANUAL EDIT",
@@ -1142,7 +1127,6 @@ def bulk_update_rates(request):
 
         records.update(**{field_name: parsed_value})
         
-        # ✅ NEW: AUDIT TRAIL LOGGING
         AuditLog.objects.create(
             user=request.user,
             action="BULK UPDATE",
@@ -1250,7 +1234,7 @@ def motor_payout_rates(request):
     results = []
     seen_groups = set()
     
-    for row in qs:
+    for row in qs.iterator(chunk_size=2000):
         if rto_code and matching_rto_names:
             if not row.new_rto_list: continue
             row_rtos = [x.strip().upper() for x in row.new_rto_list.split(',')]
@@ -1313,13 +1297,10 @@ def direct_password_reset(request):
         user = User.objects.filter(email=email).first()
         
         if user:
-            # Generate the secure token behind the scenes
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
-            # Redirect the user straight to the new password typing screen!
             return redirect('password_reset_confirm', uidb64=uid, token=token)
         else:
-            # If they type an email that doesn't exist, show an error
             return render(request, "password_reset.html", {"error": "We could not find an account with that email address."})
             
     return render(request, "password_reset.html")
@@ -1328,7 +1309,7 @@ def direct_password_reset(request):
 # EXECUTIVE ANALYSIS DASHBOARD
 # -------------------------
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_view_analysis)
 def business_analysis(request):
     qs = RateMaster.objects.filter(
         is_deleted="NO", 
@@ -1343,12 +1324,11 @@ def business_analysis(request):
         count=Count('id')
     ).order_by('-count')
     
-    # RTO Geographic Analysis
     rto_data = defaultdict(lambda: {'total_payout': 0, 'count': 0})
-    for row in qs:
-        po_rate = max(row.po_net_rate or 0, row.po_od_rate or 0, row.po_tp_rate or 0)
-        if po_rate > 0 and row.new_rto_list:
-            rtos = [rto.strip().upper() for rto in row.new_rto_list.split(',') if rto.strip()]
+    for row in qs.values('new_rto_list', 'po_net_rate', 'po_od_rate', 'po_tp_rate').iterator(chunk_size=5000):
+        po_rate = max(row['po_net_rate'] or 0, row['po_od_rate'] or 0, row['po_tp_rate'] or 0)
+        if po_rate > 0 and row['new_rto_list']:
+            rtos = [rto.strip().upper() for rto in row['new_rto_list'].split(',') if rto.strip()]
             for rto in rtos:
                 rto_data[rto]['total_payout'] += po_rate
                 rto_data[rto]['count'] += 1
@@ -1368,7 +1348,67 @@ def business_analysis(request):
 # AUDIT TRAIL LOGS
 # -------------------------
 @login_required
-@user_passes_test(is_admin)
+@user_passes_test(can_view_audit_log)
 def audit_logs(request):
     logs = AuditLog.objects.all().order_by('-timestamp')[:200]
     return render(request, "audit_log.html", {"logs": logs})
+
+# -------------------------
+# ✅ HELPER FUNCTION: SEND EMAIL IN BACKGROUND
+# -------------------------
+def send_email_background(subject, message, recipient_list):
+    try:
+        send_mail(
+            subject=subject,
+            message=message,
+            from_email=settings.EMAIL_HOST_USER,
+            recipient_list=recipient_list,
+            fail_silently=False, 
+        )
+        print("✅ Background email sent successfully!")
+    except Exception as e:
+        print(f"\n❌ BACKGROUND EMAIL FAILED: {e}\n")
+
+# -------------------------
+# GRID MANAGEMENT (File Uploads)
+# -------------------------
+@login_required
+@user_passes_test(can_view_grid_management)
+def grid_management(request):
+    if request.method == "POST":
+        insurer_name = request.POST.get("insurer_name")
+        remarks = request.POST.get("remarks")
+        uploaded_file = request.FILES.get("uploaded_file")
+
+        if insurer_name and uploaded_file:
+            # 1. Save the file instantly
+            GridDocument.objects.create(
+                insurer_name=insurer_name,
+                remarks=remarks,
+                uploaded_file=uploaded_file,
+                uploaded_by=request.user
+            )
+            
+            # 2. TRIGGER THE EMAIL IN THE BACKGROUND
+            uploader_name = request.user.username
+            subject = f"🔔 New Grid Uploaded: {insurer_name}"
+            message = (
+                f"Hello,\n\n"
+                f"A new provider grid has just been uploaded to the Insurance Portal.\n\n"
+                f"• Insurer: {insurer_name}\n"
+                f"• Uploaded By: {uploader_name}\n"
+                f"• Remarks: {remarks or 'No remarks provided.'}\n\n"
+                f"Please log in to the portal to download it."
+            )
+            
+            # This fires the email off in a separate thread so your page loads instantly
+            email_thread = threading.Thread(
+                target=send_email_background, 
+                args=(subject, message, ['harsh.t@arhamsecure.com'])
+            )
+            email_thread.start()
+
+            return redirect('grid_management')
+
+    documents = GridDocument.objects.all().order_by('-uploaded_date')
+    return render(request, "grid_management.html", {"documents": documents})

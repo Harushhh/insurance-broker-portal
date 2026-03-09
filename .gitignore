@@ -22,3 +22,15 @@ Thumbs.db
 
 # Migrations cache (optional but safe)
 *.sqlite3
+
+# Media uploads
+media/
+
+# Static collected files
+staticfiles/
+
+# Backups
+*.json
+
+# Environment variables
+.env

@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -23,8 +24,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = 'django-insecure-&0p&3ir95cytwgx9z!5wmf*cwqd(_(8vst_bqb@eu+4=(1h9he'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = False  # ✅ SET TO FALSE FOR PRODUCTION SECURITY
 
+# ✅ ALLOWED HOSTS (Add your Ubuntu server's IP address here if you want to restrict it later)
 ALLOWED_HOSTS = ['*']
 
 
@@ -121,9 +123,28 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+# ✅ REQUIRED FOR PRODUCTION/NGINX TO SERVE CSS
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/dashboard/"
 LOGOUT_REDIRECT_URL = "/login/"
 
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# ==========================================
+# ✅ REAL EMAIL CONFIGURATION (Sends actual emails)
+# ==========================================
+EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST = 'smtp.office365.com'  # Use smtp.office365.com if using Outlook/Office365
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+# ⚠️ Replace these with the actual email account that will SEND the notifications
+EMAIL_HOST_USER = 'harsh.t@arhamsecure.com' 
+EMAIL_HOST_PASSWORD = 'Pehal@2001' 
+
+
+# ==========================================
+# MEDIA FILES (User Uploaded Files like Grids)
+# ==========================================
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')

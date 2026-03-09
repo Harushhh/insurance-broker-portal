@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Grid Management{% endblock %}
+
+{% block content %}
+<div class="card" style="padding: 30px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 25px;">
+        <div>
+            <h2 style="margin:0; color:#0f172a;">📁 Grid Management</h2>
+            <p class="subtext" style="margin:6px 0 0;">Upload and manage raw Excel grids from insurance providers.</p>
+        </div>
+        <button class="btn primary" onclick="openModal('uploadGridModal')" style="padding:12px 24px; font-weight:600; border-radius:10px;">
+            + Upload New Grid
+        </button>
+    </div>
+
+    <div style="overflow-x:auto; border:1px solid var(--border); border-radius:12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
+        <table class="styled-table" style="width:100%; text-align:left; border-collapse:collapse;">
+            <thead>
+                <tr style="background:#f8fafc; color:#475569; font-size:12px; text-transform:uppercase;">
+                    <th style="padding:16px;">Insurer Name</th>
+                    <th style="padding:16px;">Remarks</th>
+                    <th style="padding:16px;">Uploaded By</th>
+                    <th style="padding:16px;">Date & Time</th>
+                    <th style="padding:16px; text-align:right;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for doc in documents %}
+                <tr style="border-bottom:1px solid var(--border); background:#fff; transition: background 0.2s;">
+                    <td style="padding:16px; font-weight:600; color:#0f172a;">{{ doc.insurer_name }}</td>
+                    <td style="padding:16px; color:#475569;">{{ doc.remarks|default:"-" }}</td>
+                    <td style="padding:16px; color:#475569;">{{ doc.uploaded_by.username|default:"System" }}</td>
+                    <td style="padding:16px; color:#475569;">{{ doc.uploaded_date|date:"d M Y, h:i A" }}</td>
+                    <td style="padding:16px; text-align:right;">
+                        <a href="{{ doc.uploaded_file.url }}" target="_blank" class="btn" style="background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; text-decoration:none;">
+                            ⬇️ Download
+                        </a>
+                    </td>
+                </tr>
+                {% empty %}
+                <tr>
+                    <td colspan="5" style="padding:40px; text-align:center; color:#64748b;">
+                        No grids uploaded yet. Click the upload button to add your first file!
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div id="uploadGridModal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.6); backdrop-filter:blur(4px); z-index:1000; justify-content:center; align-items:center;">
+    <div class="modal-content" style="background:#fff; width:100%; max-width:450px; padding:30px; border-radius:16px; box-shadow:0 25px 50px rgba(0,0,0,0.2);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+            <h3 style="margin:0; color:#0f172a;">Upload Provider Grid</h3>
+            <button type="button" onclick="closeModal('uploadGridModal')" style="background:none; border:none; font-size:24px; cursor:pointer; color:#94a3b8;">&times;</button>
+        </div>
+        
+        <form method="POST" enctype="multipart/form-data">
+            {% csrf_token %}
+            
+            <label style="font-size:12px; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:6px; display:block;">Insurer Name *</label>
+            <input type="text" name="insurer_name" required placeholder="e.g. Reliance General" style="width:100%; padding:12px; border:1px solid #cbd5e1; border-radius:10px; margin-bottom:16px; font-family:inherit; box-sizing:border-box;">
+            
+            <label style="font-size:12px; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:6px; display:block;">Select File (Excel, PDF, Zip) *</label>
+            <input type="file" name="uploaded_file" required style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:10px; margin-bottom:16px; background:#f8fafc; font-family:inherit; box-sizing:border-box;">
+
+            <label style="font-size:12px; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:6px; display:block;">Remarks (Optional)</label>
+            <textarea name="remarks" placeholder="Add notes about this grid..." rows="3" style="width:100%; padding:12px; border:1px solid #cbd5e1; border-radius:10px; margin-bottom:24px; font-family:inherit; box-sizing:border-box; resize:vertical;"></textarea>
+
+            <div style="display:flex; gap:12px;">
+                <button type="submit" class="btn primary" style="flex:2; padding:14px; border-radius:10px; font-size:15px; border:none; background:linear-gradient(135deg, #2563eb, #0ea5e9); color:white; font-weight:600;">Upload File</button>
+                <button type="button" class="btn" onclick="closeModal('uploadGridModal')" style="flex:1; padding:14px; border-radius:10px; font-size:15px; border:1px solid #cbd5e1; background:#f8fafc;">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function openModal(id) { document.getElementById(id).style.display = 'flex'; }
+    function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+</script>
+{% endblock %}

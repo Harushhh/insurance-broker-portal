@@ -6,45 +6,68 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 
-<div class="card" style="max-width: 1000px; margin: 20px auto; padding: 24px;">
-    <h2 style="margin-bottom: 4px;">Bulk Edit Rate Group #{{ group_id }}</h2>
-    
-    <div style="background: #fef3c7; color: #0f172a; padding: 14px 16px; border-radius: 8px; border-left: 4px solid #f59e0b; margin-top: 14px; margin-bottom: 24px; line-height: 1.5;">
-        <p style="margin: 0 0 8px 0; font-size: 14px;">
-            ⚠️ <b>Bulk Edit Warning:</b> You are updating <b>{{ count }}</b> record(s) at once.
-        </p>
-        <p style="margin: 0 0 8px 0; font-size: 14px;">
-            <b>📍 RTOs in this Group:</b> <span style="color: #b45309; font-weight: 600;">{{ rto_display|default:"None" }}</span>
-        </p>
-        <p style="margin: 0; font-size: 12.5px; color: #78350f;">
-            <i>Any changes made below will be applied to ALL {{ count }} records in this group simultaneously.</i>
-        </p>
-    </div>
-
-    <form method="POST">
-        {% csrf_token %}
-        <div class="form-grid">
-            {% for field in form %}
-            <div class="form-group">
-                <label>{{ field.label }}</label>
-                {{ field }}
-                {% if field.errors %}
-                    <div style="color: var(--danger); font-size: 12px; margin-top: 4px;">{{ field.errors }}</div>
-                {% endif %}
-            </div>
-            {% endfor %}
-        </div>
+<div class="edit-wrapper">
+    <div class="edit-card">
         
-        <div class="btn-group">
-            <button type="submit" class="btn primary">💾 Save Bulk Changes</button>
-            <a href="{% url 'dashboard' %}" class="btn">Cancel</a>
+        <div class="edit-header">
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <div class="header-icon">
+                    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h2 style="margin: 0; color: #0f172a; font-size: 22px;">Bulk Edit Rate Group #{{ group_id }}</h2>
+                    <p style="margin: 4px 0 0; color: #64748b; font-size: 13.5px;">Update parameters for interconnected rate records.</p>
+                </div>
+            </div>
+            <a href="{% url 'dashboard' %}" class="btn-back">&larr; Back to Dashboard</a>
         </div>
-    </form>
+
+        <div class="warning-banner">
+            <div class="warning-icon">
+                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+            </div>
+            <div class="warning-content">
+                <h4 style="margin: 0 0 6px; color: #92400e; font-size: 14.5px;">Bulk Edit Warning</h4>
+                <p style="margin: 0 0 8px; color: #b45309; font-size: 13.5px;">
+                    You are updating <strong>{{ count }} record(s)</strong> at once. Any changes made below will be applied to ALL {{ count }} records simultaneously.
+                </p>
+                <div class="rto-badge">
+                    <span>📍 RTOs in this Group:</span> {{ rto_display|default:"None" }}
+                </div>
+            </div>
+        </div>
+
+        <form method="POST">
+            {% csrf_token %}
+            <div class="form-grid">
+                {% for field in form %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="error-text">{{ field.errors|striptags }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" class="btn-submit">
+                    <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" style="width: 18px; height: 18px;" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    Save Bulk Changes
+                </button>
+                <a href="{% url 'dashboard' %}" class="btn-cancel">Cancel</a>
+            </div>
+        </form>
+    </div>
 </div>
 
 <script>
 $(document).ready(function() {
-    
     // Helper function to inject checkboxes into the dropdown items
     function formatResult(state) {
         if (!state.id) { return state.text; }
@@ -52,7 +75,7 @@ $(document).ready(function() {
         var $state = $(
             '<div class="select2-checkbox-item">' +
                 '<input type="checkbox" ' + isChecked + ' class="select2-fake-checkbox" /> ' +
-                '<span>' + state.text + '</span>' +
+                '<span class="select2-item-text">' + state.text + '</span>' +
             '</div>'
         );
         return $state;
@@ -84,218 +107,106 @@ $(document).ready(function() {
     $('select:not(.select2-multiple)').select2({
         width: '100%'
     });
-
 });
 </script>
 
 <style>
-    /* ✅ FORM LAYOUT */
-    .form-grid {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 20px 16px;
-    }
-    @media (max-width: 900px) {
-        .form-grid { grid-template-columns: repeat(2, 1fr); }
-    }
-    @media (max-width: 600px) {
-        .form-grid { grid-template-columns: 1fr; }
-    }
-
-    .form-group {
-        display: flex;
-        flex-direction: column;
-    }
+    /* ✅ OVERALL LAYOUT */
+    .edit-wrapper { max-width: 1150px; margin: 0 auto; padding: 20px 15px 40px; }
+    .edit-card { background: #ffffff; border-radius: 20px; box-shadow: 0 10px 40px -10px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; padding: 40px; }
     
-    .form-group label {
-        font-size: 11.5px;
-        font-weight: 700;
-        color: #475569;
-        text-transform: uppercase;
-        margin-bottom: 6px;
-        letter-spacing: 0.5px;
-    }
+    .edit-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 24px; margin-bottom: 24px; }
+    .header-icon { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; background: #eff6ff; color: #2563eb; border-radius: 12px; box-shadow: 0 4px 6px rgba(37,99,235,0.1); }
+    .btn-back { padding: 10px 16px; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1; border-radius: 10px; text-decoration: none; font-size: 13.5px; font-weight: 600; transition: all 0.2s; }
+    .btn-back:hover { background: #f1f5f9; color: #0f172a; }
 
-    /* ✅ STANDARD INPUTS (Text, Numbers) */
-    .form-control, input[type="text"], input[type="number"], input[type="date"] {
-        width: 100%;
-        padding: 10px 12px;
-        border: 1px solid var(--border);
-        border-radius: 8px;
-        font-size: 14px;
-        color: #334155;
-        background-color: #fff;
-        height: 42px; 
-        box-sizing: border-box;
-        font-family: inherit;
-        transition: all 0.2s ease;
-    }
-    
-    .form-control:focus, input[type="text"]:focus, input[type="number"]:focus, input[type="date"]:focus {
-        outline: none;
-        border-color: #38bdf8;
-        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
-    }
+    /* ✅ SMART WARNING BANNER */
+    .warning-banner { display: flex; gap: 16px; background: linear-gradient(to right, #fffbeb, #fef3c7); border-left: 5px solid #f59e0b; padding: 20px 24px; border-radius: 12px; margin-bottom: 35px; box-shadow: 0 4px 10px rgba(245, 158, 11, 0.05); }
+    .warning-icon { color: #d97706; margin-top: 2px; }
+    .warning-icon svg { width: 26px; height: 26px; }
+    .rto-badge { display: inline-block; background: rgba(253, 230, 138, 0.6); color: #92400e; padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; border: 1px solid rgba(245, 158, 11, 0.2); margin-top: 4px; }
+    .rto-badge span { color: #b45309; margin-right: 4px; }
 
-    /* ---------------------------------------------------
-       ✅ PROFESSIONAL MULTI-SELECT "PILL" UI
-       --------------------------------------------------- */
-    
-    /* The outer box containing the pills */
-    .select2-container--default .select2-selection--multiple {
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        min-height: 42px; 
-        padding: 4px; 
-        background-color: #fff;
+    /* ✅ FORM GRID */
+    .form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px 20px; }
+    @media (max-width: 950px) { .form-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 650px) { .form-grid { grid-template-columns: 1fr; } }
+
+    .form-group { display: flex; flex-direction: column; }
+    .form-group label { font-size: 11.5px; font-weight: 800; color: #475569; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px; }
+    .error-text { color: #ef4444; font-size: 12px; margin-top: 6px; font-weight: 600; background: #fef2f2; padding: 6px 8px; border-radius: 6px; border: 1px solid #fecaca; }
+
+    /* ✅ STANDARD INPUTS */
+    .form-control, input[type="text"], input[type="number"], input[type="date"] { width: 100%; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 14px; color: #0f172a; background-color: #f8fafc; height: 46px; box-sizing: border-box; font-family: inherit; transition: all 0.2s ease; }
+    .form-control:focus, input[type="text"]:focus, input[type="number"]:focus, input[type="date"]:focus { outline: none; border-color: #2563eb; background-color: #ffffff; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1); }
+
+    /* ✅ PREMIUM SELECT2 OVERRIDES */
+    .select2-container--default .select2-selection--multiple,
+    .select2-container--default .select2-selection--single {
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 10px !important;
+        min-height: 46px !important;
+        padding: 4px 6px !important;
+        background-color: #f8fafc !important;
         cursor: pointer;
         display: flex;
         flex-wrap: wrap; 
         align-items: center;
-        transition: all 0.2s ease;
+        transition: all 0.2s ease !important;
     }
     
-    .select2-container--default.select2-container--focus .select2-selection--multiple {
-        border-color: #38bdf8;
-        box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.15);
+    .select2-container--default.select2-container--focus .select2-selection--multiple,
+    .select2-container--default.select2-container--open .select2-selection--single {
+        border-color: #2563eb !important;
+        background-color: #ffffff !important;
+        box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1) !important;
     }
 
-    /* Reset Select2's default list styles that break flexbox */
-    .select2-container--default .select2-selection--multiple .select2-selection__rendered {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 6px; 
-        padding: 0;
-        margin: 0;
-        width: 100%;
-        box-sizing: border-box;
-        list-style: none;
-    }
+    .select2-container--default .select2-selection--multiple .select2-selection__rendered { display: flex; flex-wrap: wrap; gap: 6px; padding: 0; margin: 0; list-style: none; }
 
-    /* The actual selected item (The "Pill") */
+    /* The "Pills" */
     .select2-container--default .select2-selection--multiple .select2-selection__choice {
-        background-color: #f1f5f9; 
-        border: 1px solid #e2e8f0; 
-        border-radius: 16px; 
-        color: #334155; 
-        padding: 4px 10px;
-        margin: 0 !important; 
-        font-size: 13px;
-        font-weight: 600;
+        background-color: #ffffff !important;
+        border: 1px solid #e2e8f0 !important;
+        border-radius: 8px !important;
+        color: #334155 !important;
+        padding: 6px 10px !important;
+        margin: 0 !important;
+        font-size: 13px !important;
+        font-weight: 600 !important;
         display: inline-flex;
         flex-direction: row-reverse; 
         align-items: center;
-        gap: 6px; 
-        box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        gap: 8px; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02) !important;
         transition: all 0.2s ease;
     }
-    
-    .select2-container--default .select2-selection--multiple .select2-selection__choice:hover {
-        background-color: #e2e8f0;
-    }
+    .select2-container--default .select2-selection--multiple .select2-selection__choice:hover { background-color: #f1f5f9 !important; border-color: #cbd5e1 !important; }
 
-    /* Clean up the text inside the pill */
-    .select2-container--default .select2-selection--multiple .select2-selection__choice__display {
-        padding: 0 !important; 
-        margin: 0 !important;
-    }
+    /* The 'X' remove button */
+    .select2-container--default .select2-selection--multiple .select2-selection__choice__remove { color: #94a3b8 !important; border: none !important; padding: 0 !important; font-weight: bold !important; font-size: 15px !important; margin: 0 !important; transition: color 0.15s ease !important; }
+    .select2-container--default .select2-selection--multiple .select2-selection__choice__remove:hover { background: transparent !important; color: #ef4444 !important; }
 
-    /* The 'X' delete button inside the pill */
-    .select2-container--default .select2-selection--multiple .select2-selection__choice__remove {
-        color: #94a3b8;
-        border: none;
-        background: transparent;
-        padding: 0;
-        margin: 0;
-        font-weight: bold;
-        font-size: 14px;
-        line-height: 1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: color 0.15s ease;
-    }
-    
-    .select2-container--default .select2-selection--multiple .select2-selection__choice__remove:hover {
-        background-color: transparent;
-        color: #ef4444; 
-    }
+    /* Fix search cursor area */
+    .select2-container .select2-search--inline { margin: 0; display: flex; align-items: center; }
+    .select2-container .select2-search--inline .select2-search__field { margin: 0; padding: 4px; font-family: inherit; color: #0f172a; font-size: 14px; margin-top: 4px;}
 
-    /* The typing cursor area inside the box */
-    .select2-container .select2-search--inline {
-        margin: 0;
-        display: flex;
-        align-items: center;
-    }
-    .select2-container .select2-search--inline .select2-search__field {
-        margin: 0;
-        padding: 4px;
-        font-family: inherit;
-        color: #334155;
-        font-size: 13px;
-    }
+    /* ✅ DROPDOWN MENU WITH CHECKBOXES */
+    .select2-dropdown { border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.15); padding: 8px; z-index: 9999; }
+    .select2-checkbox-item { display: flex; align-items: center; gap: 12px; }
+    .select2-fake-checkbox { width: 16px; height: 16px; accent-color: #2563eb; pointer-events: none; border-radius: 4px; cursor: pointer; }
+    .select2-item-text { font-size: 13.5px; font-weight: 500; color: #334155; }
+    
+    .select2-results__option { padding: 10px 12px; border-radius: 8px; margin-bottom: 2px; transition: background-color 0.1s ease; }
+    .select2-container--default .select2-results__option--highlighted.select2-results__option--selectable { background-color: #f1f5f9; color: #0f172a; }
+    .select2-container--default .select2-results__option[aria-selected=true] { background-color: #eff6ff; }
+    .select2-container--default .select2-results__option[aria-selected=true] .select2-item-text { font-weight: 700; color: #1e40af; }
 
-    /* ---------------------------------------------------
-       ✅ PROFESSIONAL DROPDOWN MENU WITH CHECKBOXES
-       --------------------------------------------------- */
-    .select2-dropdown {
-        border: 1px solid #cbd5e1;
-        border-radius: 8px;
-        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
-        z-index: 9999;
-        overflow: hidden;
-        padding: 4px;
-    }
-    
-    /* Checkbox layout inside the list */
-    .select2-checkbox-item {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-    .select2-fake-checkbox {
-        width: 15px;
-        height: 15px;
-        accent-color: #0284c7;
-        pointer-events: none; 
-        border-radius: 3px;
-    }
-    
-    /* Option rows */
-    .select2-results__option {
-        padding: 8px 12px;
-        font-size: 13px;
-        border-radius: 6px;
-        margin-bottom: 2px;
-        transition: background-color 0.1s ease;
-    }
-    
-    /* Hovering over an option */
-    .select2-container--default .select2-results__option--highlighted.select2-results__option--selectable {
-        background-color: #f1f5f9; 
-        color: #0f172a;
-    }
-    
-    /* Items that are already selected */
-    .select2-container--default .select2-results__option[aria-selected=true] {
-        background-color: #f8fafc;
-        color: #0284c7;
-        font-weight: 600;
-    }
-
-    /* Action Buttons */
-    .btn-group {
-        display: flex;
-        gap: 12px;
-        margin-top: 30px;
-        padding-top: 20px;
-        border-top: 1px solid var(--border);
-    }
-    .btn-group button, .btn-group a {
-        padding: 12px 24px;
-        font-size: 14px;
-        min-width: 120px;
-        text-align: center;
-    }
+    /* ✅ ACTION BUTTONS */
+    .form-actions { display: flex; gap: 16px; margin-top: 40px; padding-top: 30px; border-top: 2px solid #f1f5f9; }
+    .btn-submit { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px 28px; background: linear-gradient(135deg, #2563eb, #0ea5e9); color: #ffffff; border: none; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2); }
+    .btn-submit:hover { box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3); transform: translateY(-1px); }
+    .btn-cancel { display: flex; align-items: center; justify-content: center; padding: 14px 28px; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1; border-radius: 12px; font-size: 15px; font-weight: 600; text-decoration: none; transition: all 0.2s; }
+    .btn-cancel:hover { background: #f1f5f9; color: #0f172a; border-color: #94a3b8; }
 </style>
 {% endblock %}

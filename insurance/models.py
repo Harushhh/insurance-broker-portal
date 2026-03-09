@@ -176,7 +176,7 @@ class UserProfile(models.Model):
         return self.user.username
 
 # ==========================================
-# ✅ NEW: SECURITY & COMPLIANCE AUDIT LOG
+# ✅ SECURITY & COMPLIANCE AUDIT LOG
 # ==========================================
 class AuditLog(models.Model):
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
@@ -186,3 +186,17 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.user} | {self.action} | {self.timestamp}"
+
+# ==========================================
+# ✅ NEW: GRID MANAGEMENT (File Uploads)
+# ==========================================
+class GridDocument(models.Model):
+    insurer_name = models.CharField(max_length=255)
+    remarks = models.TextField(blank=True, null=True)
+    # This automatically saves files into a folder organized by year and month
+    uploaded_file = models.FileField(upload_to='grid_documents/%Y/%m/')
+    uploaded_date = models.DateTimeField(auto_now_add=True)
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.insurer_name} - {self.uploaded_date.strftime('%Y-%m-%d')}"

@@ -222,7 +222,7 @@
       ✅ Remove topbar/menu on login page
     {% endcomment %}
     {% with p=request.path %}
-    {% if p != "/" and p != "/login/" and p != "/accounts/login/" %}
+    {% if p != "/" and p != "/login/" and p != "/accounts/login/" and "password-reset" not in p and "reset/" not in p %}
     <div class="topbar">
       <div class="brand">
         <div class="brand-badge"></div>
@@ -243,7 +243,7 @@
               <a class="dd-item" href="{% url 'dashboard' %}">📊 Dashboard</a>
             {% endif %}
 
-            {% if request.user|has_group:"ADMIN" %}
+            {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Analysis" %}
               <a class="dd-item" href="{% url 'business_analysis' %}" style="color: #6d28d9;">📈 Analysis</a>
             {% endif %}
             
@@ -262,12 +262,19 @@
             {% if request.user.is_authenticated %}
               <div class="dd-muted">Admin Area</div>
               
+              {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Grid_Management" %}
+                <a class="dd-item" href="{% url 'grid_management' %}">📁 Grid Management</a>
+              {% endif %}
+
               {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_Upload_CSV" %}
                 <a class="dd-item" href="{% url 'upload' %}">⬆️ Upload CSV</a>
               {% endif %}
               
               {% if request.user|has_group:"ADMIN" %}
                 <a class="dd-item" href="{% url 'user_management' %}">👥 User Management</a>
+              {% endif %}
+
+              {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Audit_Log" %}
                 <a class="dd-item" href="{% url 'audit_logs' %}" style="color: #ef4444;">🕵️‍♂️ Audit Log</a>
               {% endif %}
 

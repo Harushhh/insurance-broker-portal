@@ -17,11 +17,14 @@ urlpatterns = [
     path('make-model/edit/<int:pk>/', views.edit_make_model, name='edit_make_model'),
     path("user-management/", views.user_management, name="user_management"),
     path("analysis/", views.business_analysis, name="business_analysis"),
-    path("analysis/", views.business_analysis, name="business_analysis"),
     path("audit-log/", views.audit_logs, name="audit_logs"),
     path("export/", views.export_rates_xlsx, name="export_rates_xlsx"),
     path("rto-dashboard/", views.rto_dashboard, name="rto_dashboard"),
     path("make-model-dashboard/", views.make_model_dashboard, name="make_model_dashboard"),
+    
+    # ✅ NEW: GRID MANAGEMENT
+    path("grid-management/", views.grid_management, name="grid_management"),
+
     # PASSWORD RESET URLS
     path('password-reset/', views.direct_password_reset, name='password_reset'),
     path('password-reset/done/', auth_views.PasswordResetDoneView.as_view(template_name='password_reset_done.html'), name='password_reset_done'),

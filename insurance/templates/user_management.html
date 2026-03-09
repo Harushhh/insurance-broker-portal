@@ -54,7 +54,14 @@
                             <div style="display:flex; flex-wrap:wrap; gap:6px;">
                                 {% for page in u.pages %}
                                     <span style="padding:4px 8px; background:#eff6ff; color:#1e40af; border:1px solid #dbeafe; border-radius:6px; font-size:11px; font-weight:600;">
-                                        {{ page|cut:"Can_View_"|cut:"Can_Upload_"|cut:"_"|title }}
+                                        {% if page == 'Can_View_Dashboard' %} 📊 Dashboard
+                                        {% elif page == 'Can_View_Analysis' %} 📈 Analysis
+                                        {% elif page == 'Can_View_Motor_Payout_Rates' %} 💰 Motor Payout Rates
+                                        {% elif page == 'Can_Upload_CSV' %} ⬆️ Upload CSV
+                                        {% elif page == 'Can_View_RTO_Dashboard' %} 🗺️ RTO Dashboard
+                                        {% elif page == 'Can_View_Make_Model_Dashboard' %} 🏷️ Make/Model Dashboard
+                                        {% elif page == 'Can_View_Audit_Log' %} 🕵️‍♂️ Audit Log
+                                        {% else %} {{ page }} {% endif %}
                                     </span>
                                 {% empty %}
                                     <span style="padding:4px 8px; background:#fee2e2; color:#991b1b; border:1px solid #fecaca; border-radius:6px; font-size:11px; font-weight:600;">
@@ -140,9 +147,16 @@
             <label class="modal-label">Page Permissions</label>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid var(--border); margin-bottom:20px;">
                 {% for pg in page_groups %}
-                <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; padding:4px 0;">
                     <input type="checkbox" name="pages_EDIT" value="{{ pg }}" class="perm-check">
-                    {{ pg|cut:"Can_View_"|cut:"Can_Upload_"|cut:"_"|title }}
+                    {% if pg == 'Can_View_Dashboard' %} 📊 Dashboard
+                    {% elif pg == 'Can_View_Analysis' %} 📈 Analysis
+                    {% elif pg == 'Can_View_Motor_Payout_Rates' %} 💰 Motor Payout Rates
+                    {% elif pg == 'Can_Upload_CSV' %} ⬆️ Upload CSV
+                    {% elif pg == 'Can_View_RTO_Dashboard' %} 🗺️ RTO Dashboard
+                    {% elif pg == 'Can_View_Make_Model_Dashboard' %} 🏷️ Make/Model Dashboard
+                    {% elif pg == 'Can_View_Audit_Log' %} 🕵️‍♂️ Audit Log
+                    {% else %} {{ pg }} {% endif %}
                 </label>
                 {% endfor %}
             </div>
@@ -154,11 +168,15 @@
                     👑 Make Admin
                 </button>
                 
-                <button type="button" class="btn" onclick="removeAccessAndSubmit()" style="background:#ef4444; color:white; border:none; width:100%;">
+                <button type="button" class="btn" onclick="removeAccessAndSubmit()" style="background:#f59e0b; color:white; border:none; width:100%;">
                     🚫 Remove All Access
                 </button>
+
+                <button type="button" class="btn" onclick="deleteUserAndSubmit()" style="background:#ef4444; color:white; border:none; width:100%;">
+                    🗑️ Delete User
+                </button>
                 
-                <button type="button" class="btn" onclick="closeModal('editUserModal')" style="width:100%;">Cancel</button>
+                <button type="button" class="btn" onclick="closeModal('editUserModal')" style="grid-column: span 2; width:100%;">Cancel</button>
             </div>
         </form>
     </div>
@@ -198,14 +216,21 @@
         }
     }
 
-    // ✅ NEW JS LOGIC: Instantly unchecks all boxes and saves to revoke access
     function removeAccessAndSubmit() {
         if (confirm("Are you sure you want to completely remove this user's access? They will not be able to view any dashboards.")) {
             let checks = document.querySelectorAll('.perm-check');
-            checks.forEach(c => c.checked = false); // Uncheck every box
+            checks.forEach(c => c.checked = false);
             
             document.getElementById('edit_action_input').value = 'update_user_access';
-            document.getElementById('editUserForm').submit(); // Save empty permissions
+            document.getElementById('editUserForm').submit();
+        }
+    }
+
+    // ✅ NEW DELETE FUNCTION
+    function deleteUserAndSubmit() {
+        if (confirm("🚨 CRITICAL WARNING: Are you sure you want to completely delete this user from the system? This action cannot be undone.")) {
+            document.getElementById('edit_action_input').value = 'delete_user';
+            document.getElementById('editUserForm').submit();
         }
     }
 

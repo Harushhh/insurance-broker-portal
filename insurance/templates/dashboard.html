@@ -386,7 +386,7 @@
   .styled-table th, .styled-table td { border: 1px solid #e2e8f0; padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; vertical-align: middle; white-space: nowrap; line-height: 1.4; transition: all 0.15s ease; }
   .wrap-text { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 380px; }
   
-  .styled-table th { background-color: #f1f5f9; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #475569; position: sticky; top:0; z-index:10; }
+  .styled-table th { background-color: #f1f5f9; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #475569; position: sticky; top:0; z-index:9; }
   .styled-table tr { background-color: #ffffff; }
   .styled-table tr:nth-child(even) { background-color: #f8fafc; }
   .styled-table tr:hover { background-color: #e2e8f0; }
@@ -401,9 +401,104 @@
   .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(4px); display: none; justify-content: center; align-items: center; z-index: 99999; }
   .modal-content { width: 100%; max-width: 450px; background: #fff; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.15); border-radius: 16px; }
 
-  /* ✅专业 DATERANGEPICKER 样式保持不变 */
-  .daterangepicker { font-family: inherit; border: 1px solid var(--border) !important; border-radius: 12px !important; box-shadow: 0 10px 25px rgba(0,0,0,0.1) !important; padding: 8px; }
-  .daterangepicker td.active { background-color: #0284c7 !important; color: #fff !important; }
-  .daterangepicker td.in-range { background-color: #e0f2fe !important; color: #0284c7 !important; }
+  /* =========================================
+     ✨ PREMIUM DATE PICKER OVERRIDES ✨
+     ========================================= */
+  .daterangepicker {
+      border-radius: 16px !important;
+      border: 1px solid #e2e8f0 !important;
+      box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.15) !important;
+      font-family: inherit !important;
+      padding: 12px !important;
+      margin-top: 8px !important;
+      z-index: 9999 !important;
+  }
+  .daterangepicker table thead th {
+      background: transparent !important;
+      color: #64748b !important;
+      font-weight: 700 !important;
+      text-transform: uppercase !important;
+      font-size: 11px !important;
+      letter-spacing: 0.5px !important;
+      border: none !important;
+  }
+  .daterangepicker table thead th.month {
+      color: #0f172a !important;
+      font-size: 15px !important;
+      text-transform: none !important;
+      letter-spacing: 0 !important;
+      padding-bottom: 12px !important;
+  }
+  .daterangepicker td.available {
+      border-radius: 8px !important;
+      font-size: 13px !important;
+      font-weight: 500 !important;
+      color: #334155 !important;
+      transition: all 0.2s ease !important;
+  }
+  .daterangepicker td.available:hover {
+      background-color: #eff6ff !important;
+      color: #2563eb !important;
+  }
+  .daterangepicker td.in-range {
+      background-color: #f8fafc !important;
+      color: #0f172a !important;
+      border-radius: 0 !important; 
+  }
+  .daterangepicker td.active, 
+  .daterangepicker td.active:hover {
+      background: linear-gradient(135deg, #2563eb, #0ea5e9) !important;
+      color: #ffffff !important;
+      border-radius: 8px !important;
+      font-weight: 700 !important;
+      box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3) !important;
+  }
+  .daterangepicker td.off, 
+  .daterangepicker td.off.in-range, 
+  .daterangepicker td.off.start-date, 
+  .daterangepicker td.off.end-date {
+      background-color: transparent !important;
+      color: #cbd5e1 !important;
+      font-weight: 400 !important;
+      box-shadow: none !important;
+  }
+  .daterangepicker .drp-buttons {
+      border-top: 1px solid #f1f5f9 !important;
+      padding: 16px 8px 4px !important;
+  }
+  .daterangepicker .drp-selected {
+      font-size: 13px !important;
+      font-weight: 600 !important;
+      color: #475569 !important;
+  }
+  .daterangepicker .btn-primary {
+      background: linear-gradient(135deg, #2563eb, #0ea5e9) !important;
+      border: none !important;
+      border-radius: 8px !important;
+      padding: 8px 18px !important;
+      font-size: 13px !important;
+      font-weight: 600 !important;
+      color: white !important;
+      box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2) !important;
+      transition: all 0.2s ease !important;
+  }
+  .daterangepicker .btn-primary:hover {
+      transform: translateY(-1px) !important;
+      box-shadow: 0 6px 14px rgba(37, 99, 235, 0.3) !important;
+  }
+  .daterangepicker .btn-default {
+      background: #f8fafc !important;
+      border: 1px solid #cbd5e1 !important;
+      color: #475569 !important;
+      border-radius: 8px !important;
+      padding: 8px 18px !important;
+      font-size: 13px !important;
+      font-weight: 600 !important;
+      transition: all 0.2s ease !important;
+  }
+  .daterangepicker .btn-default:hover {
+      background: #f1f5f9 !important;
+      color: #0f172a !important;
+  }
 </style>
 {% endblock %}
