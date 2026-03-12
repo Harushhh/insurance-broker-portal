@@ -12,22 +12,22 @@
 
 <div class="card">
   <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
-    <div style="display:flex; gap:20px; align-items:center;">
+    <div style="display:flex; gap:20px; align-items:center; flex-wrap:wrap;">
       <div>
         <h2 style="margin:0;">Rate Master Dashboard</h2>
-        <div class="subtext"><b>Total Groups:</b> {{ total }}</div>
+        <div class="subtext"><b>Total Groups:</b> {{ total|default:0 }}</div>
       </div>
-      
+
       <div style="display:flex; gap:10px; background:#f8fafc; padding:10px 15px; border-radius:12px; border:1px solid #e2e8f0;">
-         <div style="text-align:center;">
-            <div style="font-size:10px; font-weight:800; color:#64748b; text-transform:uppercase;">Unlocked</div>
-            <div style="font-size:16px; font-weight:800; color:#15803d;">{{ unlocked_count|default:"-" }}</div>
-         </div>
-         <div style="width:1px; background:#e2e8f0; margin:0 5px;"></div>
-         <div style="text-align:center;">
-            <div style="font-size:10px; font-weight:800; color:#64748b; text-transform:uppercase;">Locked</div>
-            <div style="font-size:16px; font-weight:800; color:#b91c1c;">{{ locked_count|default:"-" }}</div>
-         </div>
+        <div style="text-align:center;">
+          <div style="font-size:10px; font-weight:800; color:#64748b; text-transform:uppercase;">Unlocked</div>
+          <div style="font-size:16px; font-weight:800; color:#15803d;">{{ unlocked_count|default:"-" }}</div>
+        </div>
+        <div style="width:1px; background:#e2e8f0; margin:0 5px;"></div>
+        <div style="text-align:center;">
+          <div style="font-size:10px; font-weight:800; color:#64748b; text-transform:uppercase;">Locked</div>
+          <div style="font-size:16px; font-weight:800; color:#b91c1c;">{{ locked_count|default:"-" }}</div>
+        </div>
       </div>
     </div>
 
@@ -36,12 +36,21 @@
     </a>
   </div>
 
-  <form method="GET" class="card" style="margin-top:14px; padding:14px;">
+  <form id="dashboardFilterForm" method="GET" class="card" style="margin-top:14px; padding:14px;">
+    <input type="hidden" name="auto_loaded_today" id="auto_loaded_today" value="{{ request.GET.auto_loaded_today|default_if_none:'' }}">
+
     <div class="filters-grid">
-      
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">Validity Date Range</div>
-        <input type="text" name="date_range" placeholder="YYYY-MM-DD - YYYY-MM-DD" value="{{ selected.date_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; cursor:pointer;" autocomplete="off">
+        <input
+          type="text"
+          id="date_range"
+          name="date_range"
+          placeholder="YYYY-MM-DD - YYYY-MM-DD"
+          value="{{ selected.date_range|default_if_none:'' }}"
+          style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px; cursor:pointer;"
+          autocomplete="off">
       </div>
 
       <div>
@@ -51,7 +60,7 @@
 
       <div>
         <div class="subtext" style="margin:0 0 6px;">Product</div>
-        <select name="product" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <select name="product" style="width:100%;">
           <option value="">All</option>
           {% for p in product_list %}
             <option value="{{ p.id }}" {% if selected.product|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
@@ -61,7 +70,7 @@
 
       <div>
         <div class="subtext" style="margin:0 0 6px;">Make Model Class</div>
-        <select name="make_model_class" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <select name="make_model_class" style="width:100%;">
           <option value="">All</option>
           <option value="NA" {% if selected.make_model_class == "NA" %}selected{% endif %}>NA</option>
           {% for mmc in make_model_class_list %}
@@ -72,7 +81,7 @@
 
       <div>
         <div class="subtext" style="margin:0 0 6px;">Insurance Company</div>
-        <select name="insurance_company" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <select name="insurance_company" style="width:100%;">
           <option value="">All</option>
           {% for c in insurance_company_list %}
             <option value="{{ c }}" {% if selected.insurance_company == c %}selected{% endif %}>{{ c }}</option>
@@ -82,7 +91,7 @@
 
       <div>
         <div class="subtext" style="margin:0 0 6px;">Sub Product</div>
-        <select name="sub_product" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <select name="sub_product" style="width:100%;">
           <option value="">All</option>
           {% for sp in sub_product_list %}
             <option value="{{ sp.id }}" {% if selected.sub_product|stringformat:"s" == sp.id|stringformat:"s" %}selected{% endif %}>{{ sp.name }}</option>
@@ -99,17 +108,17 @@
         <div class="subtext" style="margin:0 0 6px;">RTO Code</div>
         <input type="text" name="rto_code" placeholder="e.g. MH03" value="{{ selected.rto_code|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
-      
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">Fuel</div>
-        <select name="fuel" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <select name="fuel" style="width:100%;">
           <option value="">All</option>
           {% for f in fuel_list %}
             <option value="{{ f.id }}" {% if selected.fuel|stringformat:"s" == f.id|stringformat:"s" %}selected{% endif %}>{{ f.name }}</option>
           {% endfor %}
         </select>
       </div>
-      
+
       <div>
         <div class="subtext" style="margin:0 0 6px;">Age (Min-Max)</div>
         <input type="text" name="age_range" placeholder="e.g. 0-4.01" value="{{ selected.age_range|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
@@ -127,7 +136,7 @@
 
       <div>
         <div class="subtext" style="margin:0 0 6px;">Zero Dep (ZD)</div>
-        <select name="is_zd" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <select name="is_zd" style="width:100%;">
           <option value="">All</option>
           {% for y in yes_no_na_list %}
             <option value="{{ y.code }}" {% if selected.is_zd == y.code %}selected{% endif %}>{{ y.code }}</option>
@@ -137,7 +146,7 @@
 
       <div>
         <div class="subtext" style="margin:0 0 6px;">CPA</div>
-        <select name="is_cpa" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <select name="is_cpa" style="width:100%;">
           <option value="">All</option>
           {% for y in yes_no_na_list %}
             <option value="{{ y.code }}" {% if selected.is_cpa == y.code %}selected{% endif %}>{{ y.code }}</option>
@@ -147,7 +156,7 @@
 
       <div>
         <div class="subtext" style="margin:0 0 6px;">NCB</div>
-        <select name="is_ncb" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <select name="is_ncb" style="width:100%;">
           <option value="">All</option>
           {% for y in yes_no_na_list %}
             <option value="{{ y.code }}" {% if selected.is_ncb == y.code %}selected{% endif %}>{{ y.code }}</option>
@@ -157,7 +166,7 @@
 
       <div>
         <div class="subtext" style="margin:0 0 6px;">Status</div>
-        <select name="status" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <select name="status" style="width:100%;">
           <option value="">All</option>
           <option value="UNLOCKED" {% if selected.status == 'UNLOCKED' or selected.status == 'ACTIVE' %}selected{% endif %}>🔓 UNLOCKED</option>
           <option value="LOCKED" {% if selected.status == 'LOCKED' or selected.status == 'INACTIVE' %}selected{% endif %}>🔒 LOCKED</option>
@@ -166,7 +175,7 @@
 
       <div>
         <div class="subtext" style="margin:0 0 6px;">Is Deleted?</div>
-        <select name="is_deleted" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <select name="is_deleted" style="width:100%;">
           <option value="">All</option>
           <option value="NO" {% if selected.is_deleted == 'NO' %}selected{% endif %}>NO (In Use)</option>
           <option value="YES" {% if selected.is_deleted == 'YES' %}selected{% endif %}>YES (Deleted)</option>
@@ -175,16 +184,21 @@
 
       <div>
         <div class="subtext" style="margin:0 0 6px;">Created Date</div>
-        <input type="date" name="created_date" value="{{ selected.created_date|default_if_none:'' }}" style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
+        <input
+          type="date"
+          id="created_date"
+          name="created_date"
+          value="{{ selected.created_date|default_if_none:'' }}"
+          style="width:100%; padding:10px; border:1px solid var(--border); border-radius:10px;">
       </div>
 
     </div>
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; flex-wrap:wrap; gap:10px;">
-      <div style="display:flex; gap:10px;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
         <button class="btn primary" type="submit">Apply</button>
         <a class="btn" href="{% url 'dashboard' %}">Reset</a>
-        
+
         {% if request.user|has_group:"ADMIN" %}
           <button type="button" class="btn primary" onclick="openBulkModal()" style="background: linear-gradient(135deg, #10b981, #059669);">
             📝 Bulk Update Selected
@@ -203,7 +217,7 @@
   <form id="bulkActionForm" method="POST" action="{% url 'bulk_update_rates' %}">
     {% csrf_token %}
 
-    {% if data %}
+    {% if total|default:0 > 0 %}
       <div class="table-wrap">
         <table class="styled-table">
           <thead>
@@ -216,7 +230,7 @@
                   </div>
                 </th>
               {% endif %}
-              
+
               {% for field in field_names %}
                 <th>{{ field|cut:"_"|title }}</th>
               {% endfor %}
@@ -229,7 +243,7 @@
                   <td>
                     <div style="display:flex; align-items:center; gap:10px;">
                       <input type="checkbox" class="row-checkbox" name="selected_groups" value="{{ row.display_group_id|default:row.id }}" style="transform:scale(1.2); cursor:pointer;">
-                      <a href="{% url 'edit_rate' row.display_group_id %}" class="btn primary" style="padding: 4px 10px; font-size: 11px; height: auto;">
+                      <a href="{% url 'edit_rate' row.display_group_id|default:row.id %}" class="btn primary" style="padding:4px 10px; font-size:11px; height:auto;">
                         ✏️ Edit
                       </a>
                     </div>
@@ -238,28 +252,30 @@
 
                 {% for field in field_names %}
                   {% with val=row|get_attr:field %}
-                  <td {% if field == 'display_rto_list' or field == 'new_vehicle_makes' or field == 'add_tnc' %}class="wrap-text"{% endif %}>
-                    
-                    {% if field == 'status' %}
-                      {% if val == 'LOCKED' or val == 'INACTIVE' %}
+                    <td {% if field == 'display_rto_list' or field == 'new_vehicle_makes' or field == 'add_tnc' or field == 'remarks' %}class="wrap-text"{% endif %}>
+                      {% if field == 'status' %}
+                        {% if val == 'LOCKED' or val == 'INACTIVE' %}
                           <span style="display:inline-block; background:#fee2e2; color:#b91c1c; border:1px solid #fecaca; padding:4px 10px; border-radius:20px; font-size:10px; font-weight:800; letter-spacing:0.5px;">
-                              🔒 LOCKED
+                            🔒 LOCKED
                           </span>
-                      {% else %}
+                        {% else %}
                           <span style="display:inline-block; background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; padding:4px 10px; border-radius:20px; font-size:10px; font-weight:800; letter-spacing:0.5px;">
-                              🔓 UNLOCKED
+                            🔓 UNLOCKED
                           </span>
-                      {% endif %}
-                    
-                    {% elif val is None %}
-                    {% else %}
-                      {% if field == "remarks" %}
-                        <details><summary>Show Remarks</summary><div class="full">{{ val|display_value }}</div></details>
+                        {% endif %}
+                      {% elif val is None %}
+                        -
                       {% else %}
-                        {{ val|display_value }}
+                        {% if field == "remarks" %}
+                          <details>
+                            <summary>Show Remarks</summary>
+                            <div class="full">{{ val|display_value }}</div>
+                          </details>
+                        {% else %}
+                          {{ val|display_value }}
+                        {% endif %}
                       {% endif %}
-                    {% endif %}
-                  </td>
+                    </td>
                   {% endwith %}
                 {% endfor %}
               </tr>
@@ -276,13 +292,13 @@
     <div id="bulkModal" class="modal-overlay">
       <div class="modal-content card">
         <h3 style="margin-top:0;">📝 Bulk Update Column</h3>
-        <p class="subtext">Select a column to update and enter the new value. (Enter LOCKED or UNLOCKED for status).</p>
-        
+        <p class="subtext">Select a column to update and enter the new value.</p>
+
         <div style="margin-bottom:14px;">
           <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:4px; display:block;">Select Field to Change</label>
-          <select class="modal-select2" name="update_field" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border);">
+          <select class="modal-select2" name="update_field" style="width:100%;">
             {% for field in field_names %}
-              {% if field != "display_group_id" and field != "records_in_group" and field != "age_range" and field != "cc_range" and field != "sc_range" %}
+              {% if field != "display_group_id" and field != "records_in_group" and field != "age_range" and field != "cc_range" and field != "sc_range" and field != "display_rto_list" and field != "display_fuel_types" and field != "display_make_model_class" %}
                 <option value="{{ field }}">{{ field|cut:"_"|title }}</option>
               {% endif %}
             {% endfor %}
@@ -291,7 +307,7 @@
 
         <div style="margin-bottom:20px;">
           <label style="font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:4px; display:block;">New Value</label>
-          <input type="text" name="update_value" placeholder="e.g. UNLOCKED or NO" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border);">
+          <input type="text" name="update_value" placeholder="e.g. LOCKED / UNLOCKED / NO" style="width:100%; padding:10px; border-radius:8px; border:1px solid var(--border);">
         </div>
 
         <div style="display:flex; justify-content:flex-end; gap:10px;">
@@ -304,201 +320,410 @@
 </div>
 
 <script>
-  $(document).ready(function() {
-      $('input[name="date_range"]').daterangepicker({
-          autoUpdateInput: false,
-          locale: { format: 'YYYY-MM-DD', cancelLabel: 'Clear' }
-      });
-      $('input[name="date_range"]').on('apply.daterangepicker', function(ev, picker) {
-          $(this).val(picker.startDate.format('YYYY-MM-DD') + ' - ' + picker.endDate.format('YYYY-MM-DD'));
-      });
-      $('input[name="date_range"]').on('cancel.daterangepicker', function(ev, picker) {
-          $(this).val('');
-      });
+  $(document).ready(function () {
+    $('input[name="date_range"]').daterangepicker({
+      autoUpdateInput: false,
+      locale: { format: 'YYYY-MM-DD', cancelLabel: 'Clear' }
+    });
 
-      $('.filters-grid select').select2({ width: '100%', placeholder: "Search..." });
-      $('.modal-select2').select2({ width: '100%', dropdownParent: $('#bulkModal') });
+    $('input[name="date_range"]').on('apply.daterangepicker', function (ev, picker) {
+      $(this).val(
+        picker.startDate.format('YYYY-MM-DD') + ' - ' + picker.endDate.format('YYYY-MM-DD')
+      );
+    });
 
-      const productClassMap = {
-          "TW": ["Scooter", "Bike"], "Private Car": ["Car"],
-          "GCV 4W": ["Truck", "Pick Up Van", "Dumper Tipper", "Trailer", "Tanker", "Goods Carrying Tractor"],
-          "GCV 3W": ["Goods Carrying Rickshaw"], "PCV 3W": ["Passenger Carrying Rickshaw"],
-          "PCV 4W": ["Taxi", "School Bus", "Other Bus"], "MISCD": ["MISCD-Tractor", "MISCD-Others"]
-      };
+    $('input[name="date_range"]').on('cancel.daterangepicker', function () {
+      $(this).val('');
+    });
 
-      const productSelect = $('select[name="product"]');
-      const classSelect = $('select[name="make_model_class"]');
-      const allClassOptions = classSelect.find('option').clone();
-      const initialClass = "{{ selected.make_model_class|escapejs }}";
+    $('.filters-grid select').select2({
+      width: '100%',
+      placeholder: "Search..."
+    });
 
-      function updateClassDropdown() {
-          const selectedProductText = productSelect.find('option:selected').text().trim();
-          const currentClassVal = classSelect.val() || initialClass;
-          classSelect.empty();
-          classSelect.append(allClassOptions.filter(function() { return $(this).val() === "" || $(this).val() === "NA"; }));
-          if (selectedProductText && selectedProductText !== "All" && productClassMap[selectedProductText]) {
-              const allowedClasses = productClassMap[selectedProductText];
-              classSelect.append(allClassOptions.filter(function() { return allowedClasses.includes($(this).text().trim()); }));
-          } else {
-              classSelect.append(allClassOptions.filter(function() { return $(this).val() !== "" && $(this).val() !== "NA"; }));
-          }
-          if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) { classSelect.val(currentClassVal); } 
-          else { classSelect.val(''); }
-          classSelect.trigger('change.select2');
+    $('.modal-select2').select2({
+      width: '100%',
+      dropdownParent: $('#bulkModal')
+    });
+
+    const productClassMap = {
+      "TW": ["Scooter", "Bike"],
+      "Private Car": ["Car"],
+      "GCV 4W": ["Truck", "Pick Up Van", "Dumper Tipper", "Trailer", "Tanker", "Goods Carrying Tractor"],
+      "GCV 3W": ["Goods Carrying Rickshaw"],
+      "PCV 3W": ["Passenger Carrying Rickshaw"],
+      "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
+      "MISCD": ["MISCD-Tractor", "MISCD-Others"]
+    };
+
+    const productSelect = $('select[name="product"]');
+    const classSelect = $('select[name="make_model_class"]');
+    const allClassOptions = classSelect.find('option').clone();
+    const initialClass = "{{ selected.make_model_class|escapejs }}";
+
+    function updateClassDropdown() {
+      const selectedProductText = productSelect.find('option:selected').text().trim();
+      const currentClassVal = classSelect.val() || initialClass;
+
+      classSelect.empty();
+      classSelect.append(
+        allClassOptions.filter(function () {
+          return $(this).val() === "" || $(this).val() === "NA";
+        })
+      );
+
+      if (selectedProductText && selectedProductText !== "All" && productClassMap[selectedProductText]) {
+        const allowedClasses = productClassMap[selectedProductText];
+        classSelect.append(
+          allClassOptions.filter(function () {
+            return allowedClasses.includes($(this).text().trim());
+          })
+        );
+      } else {
+        classSelect.append(
+          allClassOptions.filter(function () {
+            return $(this).val() !== "" && $(this).val() !== "NA";
+          })
+        );
       }
 
-      updateClassDropdown();
-      productSelect.on('change', updateClassDropdown);
+      if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) {
+        classSelect.val(currentClassVal);
+      } else {
+        classSelect.val('');
+      }
+
+      classSelect.trigger('change.select2');
+    }
+
+    updateClassDropdown();
+    productSelect.on('change', updateClassDropdown);
+
+    // Auto-load today's records ONLY using Validity Date Range
+    const form = document.getElementById("dashboardFilterForm");
+    const dateRangeInput = document.getElementById("date_range");
+    const autoLoadedFlag = document.getElementById("auto_loaded_today");
+    const createdDateInput = document.getElementById("created_date");
+
+    const today = moment().format("YYYY-MM-DD");
+    const todayRange = `${today} - ${today}`;
+
+    const hasDateRange = dateRangeInput && dateRangeInput.value.trim() !== "";
+    const alreadyAutoLoaded = autoLoadedFlag && autoLoadedFlag.value === "1";
+
+    if (dateRangeInput && !hasDateRange && !alreadyAutoLoaded) {
+      dateRangeInput.value = todayRange;
+
+      // Keep Created Date untouched
+      if (createdDateInput && !createdDateInput.value) {
+        createdDateInput.value = "";
+      }
+
+      if (autoLoadedFlag) {
+        autoLoadedFlag.value = "1";
+      }
+
+      form.submit();
+    }
   });
 
   const masterCheck = document.getElementById('selectAllCheckbox');
   const rowChecks = document.querySelectorAll('.row-checkbox');
-  if(masterCheck) {
-    masterCheck.addEventListener('change', function() { rowChecks.forEach(cb => cb.checked = masterCheck.checked); });
+
+  if (masterCheck) {
+    masterCheck.addEventListener('change', function () {
+      rowChecks.forEach(cb => cb.checked = masterCheck.checked);
+    });
   }
 
   function openBulkModal() {
-      if (Array.from(rowChecks).filter(cb => cb.checked).length === 0) { alert("Please select rows!"); return; }
-      document.getElementById('bulkModal').style.display = 'flex';
+    if (Array.from(rowChecks).filter(cb => cb.checked).length === 0) {
+      alert("Please select rows!");
+      return;
+    }
+    document.getElementById('bulkModal').style.display = 'flex';
   }
-  function closeBulkModal() { document.getElementById('bulkModal').style.display = 'none'; }
+
+  function closeBulkModal() {
+    document.getElementById('bulkModal').style.display = 'none';
+  }
 
   let currentFont = 13;
   let currentPadV = 12;
   let currentPadH = 16;
+
   function zoomTable(direction) {
-      currentFont += (direction * 1.5); currentPadV += (direction * 1.0); currentPadH += (direction * 1.5);
-      if (currentFont < 8) { currentFont = 8; currentPadV = 6; currentPadH = 8; }
-      if (currentFont > 22) { currentFont = 22; currentPadV = 18; currentPadH = 26; }
-      document.documentElement.style.setProperty('--tb-font', currentFont + 'px');
-      document.documentElement.style.setProperty('--tb-pad', `${currentPadV}px ${currentPadH}px`);
+    currentFont += (direction * 1.5);
+    currentPadV += (direction * 1.0);
+    currentPadH += (direction * 1.5);
+
+    if (currentFont < 8) {
+      currentFont = 8;
+      currentPadV = 6;
+      currentPadH = 8;
+    }
+
+    if (currentFont > 22) {
+      currentFont = 22;
+      currentPadV = 18;
+      currentPadH = 26;
+    }
+
+    document.documentElement.style.setProperty('--tb-font', currentFont + 'px');
+    document.documentElement.style.setProperty('--tb-pad', `${currentPadV}px ${currentPadH}px`);
   }
 </script>
 
 <style>
-  :root { --tb-font: 13px; --tb-pad: 12px 16px; }
-  .filters-grid { display:grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap:12px; align-items:end; }
-  @media (max-width: 1100px){ .filters-grid{ grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
-  @media (max-width: 650px){ .filters-grid{ grid-template-columns: 1fr; } }
+  :root {
+    --tb-font: 13px;
+    --tb-pad: 12px 16px;
+  }
 
-  .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 14px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
-  .styled-table { width: 100%; border-collapse: collapse; min-width: max-content; }
-  .styled-table th, .styled-table td { border: 1px solid #e2e8f0; padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; vertical-align: middle; white-space: nowrap; line-height: 1.4; transition: all 0.15s ease; }
-  .wrap-text { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 380px; }
-  
-  .styled-table th { background-color: #f1f5f9; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; color: #475569; position: sticky; top:0; z-index:9; }
-  .styled-table tr { background-color: #ffffff; }
-  .styled-table tr:nth-child(even) { background-color: #f8fafc; }
-  .styled-table tr:hover { background-color: #e2e8f0; }
+  .filters-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(180px, 1fr));
+    gap: 12px;
+    align-items: end;
+  }
+
+  @media (max-width: 1100px) {
+    .filters-grid {
+      grid-template-columns: repeat(2, minmax(180px, 1fr));
+    }
+  }
+
+  @media (max-width: 650px) {
+    .filters-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    margin-top: 14px;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+  }
+
+  .styled-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: max-content;
+  }
+
+  .styled-table th,
+  .styled-table td {
+    border: 1px solid #e2e8f0;
+    padding: var(--tb-pad);
+    font-size: var(--tb-font);
+    color: #334155;
+    vertical-align: middle;
+    white-space: nowrap;
+    line-height: 1.4;
+    transition: all 0.15s ease;
+  }
+
+  .wrap-text {
+    white-space: normal !important;
+    word-wrap: break-word;
+    min-width: 250px;
+    max-width: 380px;
+  }
+
+  .styled-table th {
+    background-color: #f1f5f9;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: #475569;
+    position: sticky;
+    top: 0;
+    z-index: 9;
+  }
+
+  .styled-table tr {
+    background-color: #ffffff;
+  }
+
+  .styled-table tr:nth-child(even) {
+    background-color: #f8fafc;
+  }
+
+  .styled-table tr:hover {
+    background-color: #e2e8f0;
+  }
 
   {% if request.user|has_group:"ADMIN" %}
-    .styled-table th:first-child { position: sticky; left: 0; background-color: #f1f5f9; z-index: 11; border-right: 2px solid #cbd5e1; }
-    .styled-table td:first-child { position: sticky; left: 0; background-color: inherit; z-index: 5; border-right: 2px solid #cbd5e1; }
+  .styled-table th:first-child {
+    position: sticky;
+    left: 0;
+    background-color: #f1f5f9;
+    z-index: 11;
+    border-right: 2px solid #cbd5e1;
+  }
+
+  .styled-table td:first-child {
+    position: sticky;
+    left: 0;
+    background-color: inherit;
+    z-index: 5;
+    border-right: 2px solid #cbd5e1;
+  }
   {% endif %}
 
-  .select2-container--default .select2-selection--single { height: 38px; border: 1px solid var(--border); border-radius: 8px; background-color: #fff; display: flex; align-items: center; }
-  .select2-container--default .select2-selection--single .select2-selection__rendered { color: var(--text); padding-left: 10px; font-size:14px; }
-  .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(15, 23, 42, 0.4); backdrop-filter: blur(4px); display: none; justify-content: center; align-items: center; z-index: 99999; }
-  .modal-content { width: 100%; max-width: 450px; background: #fff; padding: 24px; box-shadow: 0 20px 40px rgba(0,0,0,0.15); border-radius: 16px; }
+  .select2-container--default .select2-selection--single {
+    height: 38px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background-color: #fff;
+    display: flex;
+    align-items: center;
+  }
 
-  /* =========================================
-     ✨ PREMIUM DATE PICKER OVERRIDES ✨
-     ========================================= */
+  .select2-container--default .select2-selection--single .select2-selection__rendered {
+    color: var(--text);
+    padding-left: 10px;
+    font-size: 14px;
+    line-height: 36px;
+  }
+
+  .select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 36px;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(15, 23, 42, 0.4);
+    backdrop-filter: blur(4px);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 99999;
+  }
+
+  .modal-content {
+    width: 100%;
+    max-width: 450px;
+    background: #fff;
+    padding: 24px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+    border-radius: 16px;
+  }
+
   .daterangepicker {
-      border-radius: 16px !important;
-      border: 1px solid #e2e8f0 !important;
-      box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.15) !important;
-      font-family: inherit !important;
-      padding: 12px !important;
-      margin-top: 8px !important;
-      z-index: 9999 !important;
+    border-radius: 16px !important;
+    border: 1px solid #e2e8f0 !important;
+    box-shadow: 0 20px 40px -12px rgba(0, 0, 0, 0.15) !important;
+    font-family: inherit !important;
+    padding: 12px !important;
+    margin-top: 8px !important;
+    z-index: 9999 !important;
   }
+
   .daterangepicker table thead th {
-      background: transparent !important;
-      color: #64748b !important;
-      font-weight: 700 !important;
-      text-transform: uppercase !important;
-      font-size: 11px !important;
-      letter-spacing: 0.5px !important;
-      border: none !important;
+    background: transparent !important;
+    color: #64748b !important;
+    font-weight: 700 !important;
+    text-transform: uppercase !important;
+    font-size: 11px !important;
+    letter-spacing: 0.5px !important;
+    border: none !important;
   }
+
   .daterangepicker table thead th.month {
-      color: #0f172a !important;
-      font-size: 15px !important;
-      text-transform: none !important;
-      letter-spacing: 0 !important;
-      padding-bottom: 12px !important;
+    color: #0f172a !important;
+    font-size: 15px !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+    padding-bottom: 12px !important;
   }
+
   .daterangepicker td.available {
-      border-radius: 8px !important;
-      font-size: 13px !important;
-      font-weight: 500 !important;
-      color: #334155 !important;
-      transition: all 0.2s ease !important;
+    border-radius: 8px !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+    color: #334155 !important;
+    transition: all 0.2s ease !important;
   }
+
   .daterangepicker td.available:hover {
-      background-color: #eff6ff !important;
-      color: #2563eb !important;
+    background-color: #eff6ff !important;
+    color: #2563eb !important;
   }
+
   .daterangepicker td.in-range {
-      background-color: #f8fafc !important;
-      color: #0f172a !important;
-      border-radius: 0 !important; 
+    background-color: #f8fafc !important;
+    color: #0f172a !important;
+    border-radius: 0 !important;
   }
-  .daterangepicker td.active, 
+
+  .daterangepicker td.active,
   .daterangepicker td.active:hover {
-      background: linear-gradient(135deg, #2563eb, #0ea5e9) !important;
-      color: #ffffff !important;
-      border-radius: 8px !important;
-      font-weight: 700 !important;
-      box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3) !important;
+    background: linear-gradient(135deg, #2563eb, #0ea5e9) !important;
+    color: #ffffff !important;
+    border-radius: 8px !important;
+    font-weight: 700 !important;
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.3) !important;
   }
-  .daterangepicker td.off, 
-  .daterangepicker td.off.in-range, 
-  .daterangepicker td.off.start-date, 
+
+  .daterangepicker td.off,
+  .daterangepicker td.off.in-range,
+  .daterangepicker td.off.start-date,
   .daterangepicker td.off.end-date {
-      background-color: transparent !important;
-      color: #cbd5e1 !important;
-      font-weight: 400 !important;
-      box-shadow: none !important;
+    background-color: transparent !important;
+    color: #cbd5e1 !important;
+    font-weight: 400 !important;
+    box-shadow: none !important;
   }
+
   .daterangepicker .drp-buttons {
-      border-top: 1px solid #f1f5f9 !important;
-      padding: 16px 8px 4px !important;
+    border-top: 1px solid #f1f5f9 !important;
+    padding: 16px 8px 4px !important;
   }
+
   .daterangepicker .drp-selected {
-      font-size: 13px !important;
-      font-weight: 600 !important;
-      color: #475569 !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: #475569 !important;
   }
+
   .daterangepicker .btn-primary {
-      background: linear-gradient(135deg, #2563eb, #0ea5e9) !important;
-      border: none !important;
-      border-radius: 8px !important;
-      padding: 8px 18px !important;
-      font-size: 13px !important;
-      font-weight: 600 !important;
-      color: white !important;
-      box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2) !important;
-      transition: all 0.2s ease !important;
+    background: linear-gradient(135deg, #2563eb, #0ea5e9) !important;
+    border: none !important;
+    border-radius: 8px !important;
+    padding: 8px 18px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    color: white !important;
+    box-shadow: 0 4px 10px rgba(37, 99, 235, 0.2) !important;
+    transition: all 0.2s ease !important;
   }
+
   .daterangepicker .btn-primary:hover {
-      transform: translateY(-1px) !important;
-      box-shadow: 0 6px 14px rgba(37, 99, 235, 0.3) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 6px 14px rgba(37, 99, 235, 0.3) !important;
   }
+
   .daterangepicker .btn-default {
-      background: #f8fafc !important;
-      border: 1px solid #cbd5e1 !important;
-      color: #475569 !important;
-      border-radius: 8px !important;
-      padding: 8px 18px !important;
-      font-size: 13px !important;
-      font-weight: 600 !important;
-      transition: all 0.2s ease !important;
+    background: #f8fafc !important;
+    border: 1px solid #cbd5e1 !important;
+    color: #475569 !important;
+    border-radius: 8px !important;
+    padding: 8px 18px !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    transition: all 0.2s ease !important;
   }
+
   .daterangepicker .btn-default:hover {
-      background: #f1f5f9 !important;
-      color: #0f172a !important;
+    background: #f1f5f9 !important;
+    color: #0f172a !important;
   }
 </style>
 {% endblock %}

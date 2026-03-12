@@ -9,7 +9,10 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Tom Select -->
+  <link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.css" rel="stylesheet">
 
   <style>
     :root{
@@ -18,71 +21,112 @@
       --text:#0f172a;
       --muted:#64748b;
       --border:#e5e7eb;
-      --shadow: 0 10px 30px rgba(2, 8, 23, .08);
+      --border-soft:#eef2f7;
+      --shadow: 0 12px 30px rgba(2, 8, 23, .08);
+      --shadow-lg: 0 18px 40px rgba(15,23,42,.10);
       --brand:#2563eb;
       --brand2:#0ea5e9;
       --danger:#ef4444;
-      --radius:14px;
+      --success:#059669;
+      --warning:#f59e0b;
+      --info:#2563eb;
+      --dark:#0b1220;
+      --radius:18px;
     }
 
     *{ box-sizing:border-box; }
+
+    html{
+      scroll-behavior:smooth;
+    }
+
     body{
       margin:0;
       font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-      background: radial-gradient(1200px 600px at 20% -10%, rgba(37,99,235,.12), transparent 60%),
-                  radial-gradient(900px 500px at 80% 0%, rgba(14,165,233,.12), transparent 55%),
-                  var(--bg);
+      background:
+        radial-gradient(1200px 600px at 20% -10%, rgba(37,99,235,.12), transparent 60%),
+        radial-gradient(900px 500px at 80% 0%, rgba(14,165,233,.12), transparent 55%),
+        var(--bg);
       color:var(--text);
     }
 
+    a{
+      color:inherit;
+    }
+
     .container{
-      max-width: 1200px;
+      max-width: 1320px;
       margin: 0 auto;
       padding: 18px;
     }
 
-    /* TOP NAV */
     .topbar{
       display:flex;
       align-items:center;
       justify-content:space-between;
-      gap:12px;
+      gap:14px;
       padding: 14px 16px;
-      background: rgba(255,255,255,.75);
-      backdrop-filter: blur(10px);
-      border: 1px solid rgba(229,231,235,.8);
-      border-radius: var(--radius);
+      background: rgba(255,255,255,.82);
+      backdrop-filter: blur(14px);
+      border: 1px solid rgba(229,231,235,.85);
+      border-radius: 20px;
       box-shadow: var(--shadow);
       position: sticky;
       top: 12px;
-      z-index: 50;
+      z-index: 100;
     }
 
     .brand{
       display:flex;
       align-items:center;
-      gap:10px;
-      font-weight:800;
-      letter-spacing:.2px;
+      gap:12px;
+      min-width:0;
+      text-decoration:none;
     }
+
     .brand-badge{
-      width:34px;height:34px;
-      border-radius:10px;
+      width:42px;
+      height:42px;
+      border-radius:14px;
       background: linear-gradient(135deg, var(--brand), var(--brand2));
-      box-shadow: 0 8px 18px rgba(37,99,235,.25);
+      box-shadow: 0 10px 22px rgba(37,99,235,.22);
+      flex-shrink:0;
+      position:relative;
+      overflow:hidden;
     }
-    .brand small{
+
+    .brand-badge::after{
+      content:"";
+      position:absolute;
+      inset:0;
+      background: linear-gradient(180deg, rgba(255,255,255,.22), transparent 45%);
+    }
+
+    .brand-text{
+      min-width:0;
+    }
+
+    .brand-title{
+      font-size:16px;
+      font-weight:800;
+      line-height:1.1;
+      color:var(--text);
+    }
+
+    .brand-sub{
       display:block;
-      font-weight:600;
+      margin-top:4px;
+      font-size:12px;
       color:var(--muted);
-      font-size: 12px;
-      margin-top:2px;
+      font-weight:600;
+      line-height:1.2;
     }
 
     .actions{
       display:flex;
       align-items:center;
       gap:10px;
+      flex-shrink:0;
     }
 
     .btn{
@@ -90,108 +134,201 @@
       align-items:center;
       justify-content:center;
       gap:8px;
-      height: 38px;
-      padding: 0 12px;
-      border-radius: 10px;
+      min-height:40px;
+      padding: 0 14px;
+      border-radius: 12px;
       border: 1px solid var(--border);
       background: #fff;
       color: var(--text);
       text-decoration:none;
-      font-weight:600;
+      font-weight:700;
       cursor:pointer;
-      transition: transform .08s ease, box-shadow .15s ease, background .15s ease;
+      transition: transform .08s ease, box-shadow .15s ease, background .15s ease, border-color .15s ease;
       user-select:none;
+      font-family: inherit;
+      font-size: 14px;
     }
-    .btn:hover{ box-shadow: 0 10px 22px rgba(2,8,23,.08); }
-    .btn:active{ transform: translateY(1px); }
+
+    .btn:hover{
+      box-shadow: 0 10px 22px rgba(2,8,23,.08);
+      border-color:#d7dde7;
+    }
+
+    .btn:active{
+      transform: translateY(1px);
+    }
 
     .btn.primary{
       background: linear-gradient(135deg, var(--brand), var(--brand2));
       border: none;
       color:#fff;
     }
+
     .btn.danger{
       background:#fff;
       border:1px solid rgba(239,68,68,.35);
       color: var(--danger);
     }
 
-    /* MENU DROPDOWN */
-    .menu-wrap{ position:relative; }
+    .menu-wrap{
+      position:relative;
+    }
 
     .dropdown{
       position:absolute;
       right:0;
-      top: 44px;
-      width: 220px;
-      background: #fff;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      box-shadow: var(--shadow);
-      padding: 8px;
+      top:50px;
+      width:320px;
+      max-height:78vh;
+      overflow-y:auto;
+      background:#fff;
+      border:1px solid var(--border);
+      border-radius:18px;
+      box-shadow: var(--shadow-lg);
+      padding:10px;
       display:none;
-      z-index: 9999;
+      z-index:9999;
     }
-    .dropdown.show{ display:block; }
+
+    .dropdown.show{
+      display:block;
+    }
+
+    .dd-muted{
+      color: var(--muted);
+      font-weight:800;
+      font-size:11px;
+      padding: 8px 10px 6px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
     .dd-item{
       display:flex;
       align-items:center;
       gap:10px;
-      padding: 10px 10px;
-      border-radius: 10px;
+      padding: 11px 12px;
+      border-radius: 12px;
       text-decoration:none;
       color: var(--text);
-      font-weight:600;
+      font-weight:700;
+      line-height:1.25;
+      transition: background .15s ease, color .15s ease, transform .1s ease;
     }
-    .dd-item:hover{ background:#f3f4f6; }
-    .dd-muted{ color: var(--muted); font-weight:600; font-size: 12px; padding: 6px 10px; }
 
-    /* PAGE CONTENT */
+    .dd-item:hover{
+      background:#f3f4f6;
+    }
+
+    .dd-item.active-link{
+      background: linear-gradient(135deg, rgba(37,99,235,.10), rgba(14,165,233,.08));
+      color:#1d4ed8;
+    }
+
+    .menu-divider{
+      height:1px;
+      background:#edf2f7;
+      margin:8px 4px;
+    }
+
+    .messages{
+      margin-top:14px;
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+    }
+
+    .alert{
+      padding: 13px 15px;
+      border-radius: 14px;
+      font-size:14px;
+      font-weight:700;
+      border:1px solid transparent;
+      box-shadow: 0 6px 20px rgba(15,23,42,.05);
+    }
+
+    .alert-success{
+      background:#ecfdf5;
+      color:#065f46;
+      border-color:#a7f3d0;
+    }
+
+    .alert-error,
+    .alert-danger{
+      background:#fef2f2;
+      color:#991b1b;
+      border-color:#fecaca;
+    }
+
+    .alert-warning{
+      background:#fffbeb;
+      color:#92400e;
+      border-color:#fde68a;
+    }
+
+    .alert-info{
+      background:#eff6ff;
+      color:#1d4ed8;
+      border-color:#bfdbfe;
+    }
+
     .card{
-      background: rgba(255,255,255,.90);
-      border: 1px solid rgba(229,231,235,.85);
+      background: rgba(255,255,255,.92);
+      border: 1px solid rgba(229,231,235,.88);
       border-radius: var(--radius);
       box-shadow: var(--shadow);
-      padding: 16px;
+      padding: 18px;
       margin-top: 14px;
     }
 
-    h1,h2,h3{ margin:0 0 10px 0; }
-    .subtext{ color:var(--muted); font-size: 13px; margin-bottom: 12px; }
+    h1,h2,h3,h4{
+      margin:0 0 10px 0;
+    }
 
-    /* tables (dashboard) */
+    .subtext{
+      color:var(--muted);
+      font-size:13px;
+      margin-bottom:12px;
+    }
+
     .table-wrap{
       overflow:auto;
-      border: 1px solid var(--border);
-      border-radius: 12px;
+      border:1px solid var(--border);
+      border-radius:14px;
       background:#fff;
-      max-height: 72vh;
+      max-height:72vh;
     }
+
     table{
       width:100%;
       border-collapse: collapse;
       font-size: 12.5px;
     }
+
     th{
       position: sticky;
       top:0;
       z-index: 5;
-      background: #0b1220;
-      color: #fff;
+      background: var(--dark);
+      color:#fff;
       text-align:left;
-      padding: 10px 10px;
-      font-size: 11px;
+      padding: 11px 10px;
+      font-size:11px;
       letter-spacing:.35px;
       text-transform: uppercase;
       white-space: nowrap;
     }
+
     td{
       padding: 10px 10px;
-      border-bottom: 1px solid #eef2f7;
+      border-bottom: 1px solid var(--border-soft);
       vertical-align: top;
       white-space: nowrap;
     }
-    tr:hover td{ background:#f7fbff; }
+
+    tr:hover td{
+      background:#f7fbff;
+    }
 
     details summary{
       cursor:pointer;
@@ -199,7 +336,11 @@
       font-weight:700;
       list-style:none;
     }
-    details summary::-webkit-details-marker{ display:none; }
+
+    details summary::-webkit-details-marker{
+      display:none;
+    }
+
     .full{
       margin-top:6px;
       white-space: normal;
@@ -212,25 +353,148 @@
       color:#0f172a;
       line-height:1.45;
     }
+
+    /* global Tom Select styling */
+    .ts-wrapper{
+      width:100%;
+      font-size:14px;
+    }
+
+    .ts-wrapper.single .ts-control{
+      min-height:46px;
+      border:1px solid #dbe2ea;
+      border-radius:12px;
+      background:#fff;
+      box-shadow:none;
+      padding:10px 14px;
+      display:flex;
+      align-items:center;
+    }
+
+    .ts-wrapper.single .ts-control .item{
+      font-size:14px;
+      color:#0f172a;
+    }
+
+    .ts-wrapper.single .ts-control input{
+      font-size:14px !important;
+      color:#0f172a !important;
+    }
+
+    .ts-wrapper.focus .ts-control{
+      border-color:#60a5fa !important;
+      box-shadow:0 0 0 4px rgba(37,99,235,.10) !important;
+    }
+
+    .ts-wrapper.single .ts-control:after{
+      border-color:#94a3b8 transparent transparent transparent;
+      right:14px;
+    }
+
+    .ts-dropdown{
+      border:1px solid #dbe2ea !important;
+      border-radius:14px !important;
+      overflow:hidden;
+      margin-top:8px;
+      box-shadow:0 18px 40px rgba(15,23,42,.12);
+      background:#fff;
+      z-index:99999;
+    }
+
+    .ts-dropdown .ts-dropdown-content{
+      max-height:240px;
+      overflow-y:auto;
+      padding:4px;
+    }
+
+    .ts-dropdown .option,
+    .ts-dropdown .create{
+      padding:10px 14px;
+      border-radius:10px;
+      font-size:14px;
+      color:#0f172a;
+      line-height:1.2;
+    }
+
+    .ts-dropdown .option.active{
+      background:#5b82e8;
+      color:#fff;
+    }
+
+    .ts-dropdown .option.selected{
+      background:#eef4ff;
+      color:#1d4ed8;
+      font-weight:700;
+    }
+
+    .ts-dropdown .no-results{
+      padding:12px 14px;
+      color:#64748b;
+      font-size:13px;
+    }
+
+    @media (max-width: 900px){
+      .topbar{
+        padding:12px 14px;
+      }
+
+      .brand-title{
+        font-size:15px;
+      }
+
+      .dropdown{
+        width:min(320px, calc(100vw - 30px));
+      }
+    }
+
+    @media (max-width: 760px){
+      .container{
+        padding:12px;
+      }
+
+      .topbar{
+        gap:10px;
+      }
+
+      .brand-sub{
+        font-size:11px;
+      }
+
+      .btn{
+        min-height:38px;
+        padding:0 12px;
+      }
+    }
+
+    @media (max-width: 560px){
+      .topbar{
+        align-items:flex-start;
+      }
+
+      .actions{
+        width:auto;
+      }
+
+      .brand{
+        max-width: calc(100% - 90px);
+      }
+    }
   </style>
 </head>
 
 <body>
   <div class="container">
 
-    {% comment %}
-      ✅ Remove topbar/menu on login page
-    {% endcomment %}
     {% with p=request.path %}
     {% if p != "/" and p != "/login/" and p != "/accounts/login/" and "password-reset" not in p and "reset/" not in p %}
     <div class="topbar">
-      <div class="brand">
+      <a href="{% url 'dashboard' %}" class="brand">
         <div class="brand-badge"></div>
-        <div>
-          Insurance Portal
-          <small>Rates • Upload • Dashboard</small>
+        <div class="brand-text">
+          <div class="brand-title">Insurance Portal</div>
+          <span class="brand-sub">Rates • Upload • MIS • Policy Locking</span>
         </div>
-      </div>
+      </a>
 
       <div class="actions">
         <div class="menu-wrap">
@@ -240,48 +504,65 @@
             <div class="dd-muted">Navigate</div>
 
             {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Dashboard" %}
-              <a class="dd-item" href="{% url 'dashboard' %}">📊 Dashboard</a>
+              <a class="dd-item {% if request.path == '/dashboard/' %}active-link{% endif %}" href="{% url 'dashboard' %}">📊 Dashboard</a>
             {% endif %}
 
             {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Analysis" %}
-              <a class="dd-item" href="{% url 'business_analysis' %}" style="color: #6d28d9;">📈 Analysis</a>
+              <a class="dd-item {% if request.path == '/analysis/' %}active-link{% endif %}" href="{% url 'business_analysis' %}" style="color:#6d28d9;">📈 Analysis</a>
             {% endif %}
-            
+
             {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Motor_Payout_Rates" %}
-              <a class="dd-item" href="{% url 'motor_payout_rates' %}">💰 Motor Payout Rates</a>
+              <a class="dd-item {% if request.path == '/motor-payout-rates/' %}active-link{% endif %}" href="{% url 'motor_payout_rates' %}">💰 Motor Payout Rates</a>
+              <a class="dd-item {% if request.path == '/policy-lock-checker/' %}active-link{% endif %}" href="{% url 'policy_lock_checker' %}">🔒 Policy Lock Checker</a>
+              <a class="dd-item {% if request.path == '/locked-policy-dashboard/' %}active-link{% endif %}" href="{% url 'locked_policy_dashboard' %}">📌 Locked Policy Dashboard</a>
             {% endif %}
-            
+
             {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_RTO_Dashboard" %}
-              <a class="dd-item" href="{% url 'rto_dashboard' %}">🗺️ RTO Dashboard</a>
+              <a class="dd-item {% if request.path == '/rto-dashboard/' %}active-link{% endif %}" href="{% url 'rto_dashboard' %}">🗺️ RTO Dashboard</a>
             {% endif %}
-            
+
             {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Make_Model_Dashboard" %}
-              <a class="dd-item" href="{% url 'make_model_dashboard' %}">🏷️ Make/Model Dashboard</a>
+              <a class="dd-item {% if request.path == '/make-model-dashboard/' %}active-link{% endif %}" href="{% url 'make_model_dashboard' %}">🏷️ Make/Model Dashboard</a>
+            {% endif %}
+
+            <div class="menu-divider"></div>
+            <div class="dd-muted">Extraction & MIS</div>
+
+            {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Alias_Management" %}
+              <a class="dd-item {% if request.path == '/alias-management/' %}active-link{% endif %}" href="{% url 'alias_management' %}">🧠 Alias Management</a>
             {% endif %}
 
             {% if request.user.is_authenticated %}
-              <div class="dd-muted">Admin Area</div>
-              
-              {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Grid_Management" %}
-                <a class="dd-item" href="{% url 'grid_management' %}">📁 Grid Management</a>
-              {% endif %}
+              <a class="dd-item {% if request.path == '/upload-extract-pdf/' %}active-link{% endif %}" href="{% url 'upload_extract_pdf' %}">📄 Upload & Extract PDF</a>
+              <a class="dd-item {% if request.path == '/my-mis/' %}active-link{% endif %}" href="{% url 'my_mis' %}">🗂️ My MIS</a>
+            {% endif %}
 
-              {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_Upload_CSV" %}
-                <a class="dd-item" href="{% url 'upload' %}">⬆️ Upload CSV</a>
-              {% endif %}
-              
-              {% if request.user|has_group:"ADMIN" %}
-                <a class="dd-item" href="{% url 'user_management' %}">👥 User Management</a>
-              {% endif %}
+            <div class="menu-divider"></div>
+            <div class="dd-muted">Admin Area</div>
 
-              {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Audit_Log" %}
-                <a class="dd-item" href="{% url 'audit_logs' %}" style="color: #ef4444;">🕵️‍♂️ Audit Log</a>
-              {% endif %}
+            {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Grid_Management" %}
+              <a class="dd-item {% if request.path == '/grid-management/' %}active-link{% endif %}" href="{% url 'grid_management' %}">📁 Grid Management</a>
+            {% endif %}
 
-              <div class="dd-muted">Account</div>
+            {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_Upload_CSV" %}
+              <a class="dd-item {% if request.path == '/upload/' %}active-link{% endif %}" href="{% url 'upload' %}">⬆️ Upload CSV</a>
+            {% endif %}
+
+            {% if request.user|has_group:"ADMIN" %}
+              <a class="dd-item {% if request.path == '/user-management/' %}active-link{% endif %}" href="{% url 'user_management' %}">👥 User Management</a>
+            {% endif %}
+
+            {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Audit_Log" %}
+              <a class="dd-item {% if request.path == '/audit-log/' %}active-link{% endif %}" href="{% url 'audit_logs' %}" style="color:#ef4444;">🕵️‍♂️ Audit Log</a>
+            {% endif %}
+
+            <div class="menu-divider"></div>
+            <div class="dd-muted">Account</div>
+
+            {% if request.user.is_authenticated %}
               <form method="post" action="{% url 'logout' %}" style="margin:0;">
                 {% csrf_token %}
-                <button class="dd-item" type="submit" style="width:100%;border:none;background:transparent;text-align:left;cursor:pointer;">
+                <button class="dd-item" type="submit" style="width:100%; border:none; background:transparent; text-align:left; cursor:pointer; font-family:inherit; font-size:14px;">
                   🚪 Logout
                 </button>
               </form>
@@ -295,8 +576,25 @@
     {% endif %}
     {% endwith %}
 
+    {% if messages %}
+      <div class="messages">
+        {% for message in messages %}
+          <div class="alert
+            {% if message.tags == 'success' %}alert-success
+            {% elif message.tags == 'error' %}alert-error
+            {% elif message.tags == 'warning' %}alert-warning
+            {% else %}alert-info
+            {% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+
     {% block content %}{% endblock %}
   </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
 
   <script>
     (function(){
@@ -309,8 +607,10 @@
         drop.classList.toggle("show");
       });
 
-      document.addEventListener("click", function(){
-        drop.classList.remove("show");
+      document.addEventListener("click", function(e){
+        if (!drop.contains(e.target) && e.target !== btn) {
+          drop.classList.remove("show");
+        }
       });
 
       document.addEventListener("keydown", function(e){

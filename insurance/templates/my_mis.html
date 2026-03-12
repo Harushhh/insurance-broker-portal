@@ -1,0 +1,442 @@
+{% extends "base.html" %}
+{% block title %}My MIS{% endblock %}
+
+{% block content %}
+<div class="mis-page">
+  <div class="hero-card">
+    <div class="hero-left">
+      <div class="hero-icon">🧾</div>
+      <div>
+        <h1>My MIS</h1>
+        <p class="hero-sub">
+          View and search extracted MIS policy records.
+        </p>
+      </div>
+    </div>
+
+    <div class="hero-stats">
+      <div class="stat-box">
+        <div class="stat-label">Records</div>
+        <div class="stat-value">{{ records|length }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-card search-card">
+    <div class="panel-header">
+      <div>
+        <h3>Search Filters</h3>
+        <p>Search records by policy number, insured name, or insurer name.</p>
+      </div>
+    </div>
+
+    <form method="GET" class="search-grid">
+      <div class="form-group">
+        <label>Policy Number</label>
+        <input
+          type="text"
+          name="policy_number"
+          value="{{ selected.policy_number|default_if_none:'' }}"
+          placeholder="Enter policy number"
+        >
+      </div>
+
+      <div class="form-group">
+        <label>Insured Name</label>
+        <input
+          type="text"
+          name="insured_name"
+          value="{{ selected.insured_name|default_if_none:'' }}"
+          placeholder="Enter insured name"
+        >
+      </div>
+
+      <div class="form-group">
+        <label>Insurer Name</label>
+        <input
+          type="text"
+          name="insurer_name"
+          value="{{ selected.insurer_name|default_if_none:'' }}"
+          placeholder="Enter insurer name"
+        >
+      </div>
+
+      <div class="search-actions">
+        <button type="submit" class="btn-primary">Apply</button>
+        <a href="{% url 'my_mis' %}" class="btn-secondary">Reset</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="panel-card table-panel">
+    <div class="panel-header">
+      <div>
+        <h3>MIS Records</h3>
+        <p>Latest extracted structured policy data.</p>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table class="modern-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Insurer</th>
+            <th>Policy Number</th>
+            <th>Insured Name</th>
+            <th>Vehicle No</th>
+            <th>Vehicle Make</th>
+            <th>Vehicle Model</th>
+            <th>Fuel Type</th>
+            <th>Gross Premium</th>
+            <th>Net Premium</th>
+            <th>Tax Amount</th>
+            <th>Start Date</th>
+            <th>End Date</th>
+            <th>Issue Date</th>
+            <th>RTO</th>
+            <th>Source File</th>
+            <th>Created At</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in records %}
+            <tr>
+              <td>{{ row.id }}</td>
+              <td>{{ row.insurer_name|default:"-" }}</td>
+              <td>{{ row.policy_number|default:"-" }}</td>
+              <td>{{ row.insured_name|default:"-" }}</td>
+              <td>{{ row.vehicle_registration_number|default:"-" }}</td>
+              <td>{{ row.vehicle_make|default:"-" }}</td>
+              <td>{{ row.vehicle_model|default:"-" }}</td>
+              <td>{{ row.fuel_type|default:"-" }}</td>
+              <td>{{ row.gross_premium|default:"-" }}</td>
+              <td>{{ row.net_premium|default:"-" }}</td>
+              <td>{{ row.tax_amount|default:"-" }}</td>
+              <td>{{ row.policy_start_date|date:"d M Y"|default:"-" }}</td>
+              <td>{{ row.policy_end_date|date:"d M Y"|default:"-" }}</td>
+              <td>{{ row.issue_date|date:"d M Y"|default:"-" }}</td>
+              <td>{{ row.rto_location|default:"-" }}</td>
+              <td>{{ row.source_document.original_filename|default:"-" }}</td>
+              <td>{{ row.created_at|date:"d M Y, h:i A" }}</td>
+            </tr>
+          {% empty %}
+            <tr>
+              <td colspan="17" class="empty-cell">No MIS records found.</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if records %}
+    <div class="panel-card">
+      <div class="panel-header">
+        <div>
+          <h3>Latest Record JSON</h3>
+          <p>Raw extracted JSON from the newest MIS record.</p>
+        </div>
+      </div>
+
+      <div class="json-box">
+        {% with latest=records.0 %}
+          {% if latest.raw_ai_json %}
+            <div class="json-content">
+              {% for key, value in latest.raw_ai_json.items %}
+                <div class="json-row">
+                  <span class="json-key">{{ key }}</span>
+                  <span class="json-sep">:</span>
+                  <span class="json-value">{{ value }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <div class="empty-box">No raw JSON available.</div>
+          {% endif %}
+        {% endwith %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+<style>
+  .mis-page {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .hero-card,
+  .panel-card {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    border: 1px solid #e6edf5;
+    border-radius: 22px;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  }
+
+  .hero-card {
+    padding: 24px 26px;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .hero-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .hero-icon {
+    width: 58px;
+    height: 58px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #059669, #2563eb);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    box-shadow: 0 10px 24px rgba(5, 150, 105, 0.22);
+  }
+
+  .hero-left h1 {
+    margin: 0 0 6px;
+    font-size: 30px;
+    line-height: 1.1;
+    color: #0f172a;
+  }
+
+  .hero-sub {
+    margin: 0;
+    color: #64748b;
+    font-size: 14px;
+  }
+
+  .hero-stats {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .stat-box {
+    min-width: 130px;
+    padding: 14px 18px;
+    border-radius: 18px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    text-align: center;
+  }
+
+  .stat-label {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    margin-bottom: 6px;
+  }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  .panel-card {
+    padding: 20px;
+  }
+
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: 16px;
+    gap: 10px;
+  }
+
+  .panel-header h3 {
+    margin: 0 0 6px;
+    font-size: 20px;
+    color: #0f172a;
+  }
+
+  .panel-header p {
+    margin: 0;
+    color: #64748b;
+    font-size: 13px;
+  }
+
+  .search-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr auto;
+    gap: 14px;
+    align-items: end;
+  }
+
+  .form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .form-group input {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid #dbe4ee;
+    background: #fff;
+    font-size: 14px;
+    color: #0f172a;
+    outline: none;
+  }
+
+  .search-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .btn-primary,
+  .btn-secondary {
+    border: none;
+    cursor: pointer;
+    text-decoration: none;
+    font-weight: 700;
+    transition: all 0.18s ease;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    color: #fff;
+    padding: 12px 18px;
+    border-radius: 14px;
+    box-shadow: 0 10px 20px rgba(37, 99, 235, 0.18);
+  }
+
+  .btn-secondary {
+    background: #eef2f7;
+    color: #334155;
+    padding: 12px 18px;
+    border-radius: 14px;
+    border: 1px solid #d9e2ec;
+  }
+
+  .table-panel {
+    overflow: hidden;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid #e5edf5;
+    border-radius: 18px;
+    background: #fff;
+  }
+
+  .modern-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 1800px;
+  }
+
+  .modern-table thead th {
+    background: #f8fafc;
+    color: #475569;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 800;
+    padding: 14px 16px;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: left;
+  }
+
+  .modern-table tbody td {
+    padding: 14px 16px;
+    border-bottom: 1px solid #eef2f7;
+    color: #334155;
+    font-size: 14px;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  .modern-table tbody tr:hover {
+    background: #f8fbff;
+  }
+
+  .empty-cell {
+    text-align: center;
+    color: #64748b;
+    padding: 28px 16px !important;
+  }
+
+  .json-box,
+  .empty-box {
+    border-radius: 18px;
+    border: 1px solid #e2e8f0;
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    padding: 16px;
+  }
+
+  .json-content {
+    display: grid;
+    gap: 8px;
+  }
+
+  .json-row {
+    display: grid;
+    grid-template-columns: 180px 14px 1fr;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px solid #edf2f7;
+  }
+
+  .json-key {
+    font-weight: 700;
+    color: #1d4ed8;
+    word-break: break-word;
+  }
+
+  .json-sep {
+    text-align: center;
+    color: #64748b;
+    font-weight: 700;
+  }
+
+  .json-value {
+    color: #0f172a;
+    word-break: break-word;
+  }
+
+  @media (max-width: 1100px) {
+    .search-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .hero-card {
+      align-items: flex-start;
+    }
+
+    .hero-stats {
+      width: 100%;
+    }
+
+    .stat-box {
+      flex: 1;
+    }
+
+    .json-row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}

@@ -1,0 +1,720 @@
+{% extends "base.html" %}
+{% load custom_filters %}
+{% block title %}Alias Management{% endblock %}
+
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+<div class="alias-page">
+  <div class="hero-card">
+    <div class="hero-left">
+      <div class="hero-icon">🧠</div>
+      <div>
+        <h1>Alias Management</h1>
+        <p class="hero-sub">
+          Manage standard MIS fields and insurer terminology aliases from one place.
+        </p>
+      </div>
+    </div>
+
+    <div class="hero-stats">
+      <div class="stat-box">
+        <div class="stat-label">Fields</div>
+        <div class="stat-value">{{ fields|length }}</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Aliases</div>
+        <div class="stat-value">{{ aliases|length }}</div>
+      </div>
+    </div>
+  </div>
+
+  {% if msg %}
+    <div class="alert success">{{ msg }}</div>
+  {% endif %}
+
+  {% if error %}
+    <div class="alert error">{{ error }}</div>
+  {% endif %}
+
+  <div class="top-grid">
+    <div class="panel-card">
+      <div class="panel-header">
+        <div>
+          <h3>Add MIS Field</h3>
+          <p>Create a standard field like <b>policy_number</b> or <b>gross_premium</b>.</p>
+        </div>
+      </div>
+
+      <form method="POST" class="form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_field">
+
+        <div class="form-group">
+          <label>Field Key</label>
+          {{ field_form.field_key }}
+          {% if field_form.field_key.errors %}
+            <div class="field-error">{{ field_form.field_key.errors|striptags }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group">
+          <label>Field Label</label>
+          {{ field_form.field_label }}
+          {% if field_form.field_label.errors %}
+            <div class="field-error">{{ field_form.field_label.errors|striptags }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group checkbox-group">
+          <label>{{ field_form.is_active }} Active</label>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn-primary">+ Add Field</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="panel-card">
+      <div class="panel-header">
+        <div>
+          <h3>Add Alias</h3>
+          <p>Add insurer-specific terminology under an MIS field.</p>
+        </div>
+      </div>
+
+      <form method="POST" class="form-grid">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_alias">
+
+        <div class="form-group">
+          <label>Field Master</label>
+          {{ alias_form.field_master }}
+          {% if alias_form.field_master.errors %}
+            <div class="field-error">{{ alias_form.field_master.errors|striptags }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group">
+          <label>Alias Text</label>
+          {{ alias_form.alias_text }}
+          {% if alias_form.alias_text.errors %}
+            <div class="field-error">{{ alias_form.alias_text.errors|striptags }}</div>
+          {% endif %}
+        </div>
+
+        <div class="form-group checkbox-group">
+          <label>{{ alias_form.is_active }} Active</label>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn-primary green">+ Add Alias</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="panel-card search-card">
+    <div class="panel-header">
+      <div>
+        <h3>Search & Filter</h3>
+        <p>Quickly find fields and aliases.</p>
+      </div>
+    </div>
+
+    <form method="GET" class="search-grid">
+      <div class="form-group">
+        <label>Search Field</label>
+        <input
+          type="text"
+          name="field_search"
+          value="{{ selected.field_search|default_if_none:'' }}"
+          placeholder="e.g. policy_number or Policy Number"
+        >
+      </div>
+
+      <div class="form-group">
+        <label>Search Alias</label>
+        <input
+          type="text"
+          name="alias_search"
+          value="{{ selected.alias_search|default_if_none:'' }}"
+          placeholder="e.g. Policy No or Customer Name"
+        >
+      </div>
+
+      <div class="form-group">
+        <label>Status</label>
+        <select name="active_filter">
+          <option value="" {% if not selected.active_filter %}selected{% endif %}>All</option>
+          <option value="active" {% if selected.active_filter == "active" %}selected{% endif %}>Active</option>
+          <option value="inactive" {% if selected.active_filter == "inactive" %}selected{% endif %}>Inactive</option>
+        </select>
+      </div>
+
+      <div class="search-actions">
+        <button type="submit" class="btn-primary">Apply</button>
+        <a href="{% url 'alias_management' %}" class="btn-secondary">Reset</a>
+      </div>
+    </form>
+  </div>
+
+  <div class="content-grid">
+    <div class="panel-card table-panel">
+      <div class="panel-header">
+        <div>
+          <h3>MIS Fields</h3>
+          <p>Standard fields your extraction engine will map into.</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="modern-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Field Key</th>
+              <th>Field Label</th>
+              <th>Status</th>
+              <th>Aliases Count</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for field in fields %}
+              <tr>
+                <td>{{ field.id }}</td>
+                <td><code>{{ field.field_key }}</code></td>
+                <td>{{ field.field_label }}</td>
+                <td>
+                  {% if field.is_active %}
+                    <span class="status-badge active">Active</span>
+                  {% else %}
+                    <span class="status-badge inactive">Inactive</span>
+                  {% endif %}
+                </td>
+                <td>{{ field.aliases.all|length }}</td>
+                <td>
+                  <div class="action-group">
+                    <form method="POST" class="inline-form">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="toggle_field">
+                      <input type="hidden" name="field_id" value="{{ field.id }}">
+                      <button type="submit" class="btn-mini warning">
+                        {% if field.is_active %}Disable{% else %}Enable{% endif %}
+                      </button>
+                    </form>
+
+                    <form method="POST" class="inline-form" onsubmit="return confirm('Delete this field and all aliases under it?');">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="delete_field">
+                      <input type="hidden" name="field_id" value="{{ field.id }}">
+                      <button type="submit" class="btn-mini danger">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="6" class="empty-cell">No MIS fields found.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel-card table-panel">
+      <div class="panel-header">
+        <div>
+          <h3>Aliases</h3>
+          <p>All insurer terms mapped to standard MIS fields.</p>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table class="modern-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Alias Text</th>
+              <th>Mapped Field</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for alias in aliases %}
+              <tr>
+                <td>{{ alias.id }}</td>
+                <td>{{ alias.alias_text }}</td>
+                <td>
+                  <div class="mapped-field">
+                    <span class="mapped-label">{{ alias.field_master.field_label }}</span>
+                    <code>{{ alias.field_master.field_key }}</code>
+                  </div>
+                </td>
+                <td>
+                  {% if alias.is_active %}
+                    <span class="status-badge active">Active</span>
+                  {% else %}
+                    <span class="status-badge inactive">Inactive</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <div class="action-group">
+                    <form method="POST" class="inline-form">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="toggle_alias">
+                      <input type="hidden" name="alias_id" value="{{ alias.id }}">
+                      <button type="submit" class="btn-mini warning">
+                        {% if alias.is_active %}Disable{% else %}Enable{% endif %}
+                      </button>
+                    </form>
+
+                    <form method="POST" class="inline-form" onsubmit="return confirm('Delete this alias?');">
+                      {% csrf_token %}
+                      <input type="hidden" name="action" value="delete_alias">
+                      <input type="hidden" name="alias_id" value="{{ alias.id }}">
+                      <button type="submit" class="btn-mini danger">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% empty %}
+              <tr>
+                <td colspan="5" class="empty-cell">No aliases found.</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  $(document).ready(function () {
+    $('select').select2({
+      width: '100%',
+      placeholder: 'Select option'
+    });
+  });
+</script>
+
+<style>
+  .alias-page {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+
+  .hero-card,
+  .panel-card {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+    border: 1px solid #e6edf5;
+    border-radius: 22px;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
+  }
+
+  .hero-card {
+    padding: 24px 26px;
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  .hero-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .hero-icon {
+    width: 58px;
+    height: 58px;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #2563eb, #60a5fa);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    box-shadow: 0 10px 24px rgba(37, 99, 235, 0.24);
+  }
+
+  .hero-left h1 {
+    margin: 0 0 6px;
+    font-size: 30px;
+    line-height: 1.1;
+    color: #0f172a;
+  }
+
+  .hero-sub {
+    margin: 0;
+    color: #64748b;
+    font-size: 14px;
+  }
+
+  .hero-stats {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .stat-box {
+    min-width: 120px;
+    padding: 14px 18px;
+    border-radius: 18px;
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    text-align: center;
+  }
+
+  .stat-label {
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #64748b;
+    margin-bottom: 6px;
+  }
+
+  .stat-value {
+    font-size: 28px;
+    font-weight: 800;
+    color: #0f172a;
+  }
+
+  .alert {
+    padding: 14px 18px;
+    border-radius: 16px;
+    font-weight: 600;
+    font-size: 14px;
+  }
+
+  .alert.success {
+    background: #ecfdf3;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+  }
+
+  .alert.error {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+  }
+
+  .top-grid,
+  .content-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+  }
+
+  .panel-card {
+    padding: 20px;
+  }
+
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    margin-bottom: 16px;
+    gap: 10px;
+  }
+
+  .panel-header h3 {
+    margin: 0 0 6px;
+    font-size: 20px;
+    color: #0f172a;
+  }
+
+  .panel-header p {
+    margin: 0;
+    color: #64748b;
+    font-size: 13px;
+  }
+
+  .form-grid,
+  .search-grid {
+    display: grid;
+    gap: 14px;
+  }
+
+  .form-group label {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .form-group input,
+  .form-group select,
+  .form-group textarea {
+    width: 100%;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid #dbe4ee;
+    background: #fff;
+    font-size: 14px;
+    color: #0f172a;
+    outline: none;
+    transition: all 0.2s ease;
+  }
+
+  .form-group input:focus,
+  .form-group select:focus,
+  .form-group textarea:focus {
+    border-color: #60a5fa;
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.16);
+  }
+
+  .checkbox-group label {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #334155;
+    text-transform: none;
+    letter-spacing: normal;
+    margin-top: 4px;
+  }
+
+  .field-error {
+    color: #b91c1c;
+    font-size: 12px;
+    margin-top: 6px;
+  }
+
+  .form-actions,
+  .search-actions {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+
+  .btn-primary,
+  .btn-secondary,
+  .btn-mini {
+    border: none;
+    cursor: pointer;
+    text-decoration: none;
+    font-weight: 700;
+    transition: all 0.18s ease;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    color: #fff;
+    padding: 12px 18px;
+    border-radius: 14px;
+    box-shadow: 0 10px 20px rgba(37, 99, 235, 0.18);
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 14px 24px rgba(37, 99, 235, 0.24);
+  }
+
+  .btn-primary.green {
+    background: linear-gradient(135deg, #059669, #10b981);
+    box-shadow: 0 10px 20px rgba(5, 150, 105, 0.18);
+  }
+
+  .btn-secondary {
+    background: #eef2f7;
+    color: #334155;
+    padding: 12px 18px;
+    border-radius: 14px;
+    border: 1px solid #d9e2ec;
+  }
+
+  .btn-secondary:hover {
+    background: #e2e8f0;
+  }
+
+  .search-card {
+    padding-bottom: 18px;
+  }
+
+  .search-grid {
+    grid-template-columns: 1.1fr 1.1fr 0.8fr auto;
+    align-items: end;
+  }
+
+  .table-panel {
+    overflow: hidden;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid #e5edf5;
+    border-radius: 18px;
+    background: #fff;
+  }
+
+  .modern-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 700px;
+  }
+
+  .modern-table thead th {
+    background: #f8fafc;
+    color: #475569;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 800;
+    padding: 14px 16px;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: left;
+  }
+
+  .modern-table tbody td {
+    padding: 14px 16px;
+    border-bottom: 1px solid #eef2f7;
+    color: #334155;
+    font-size: 14px;
+    vertical-align: middle;
+  }
+
+  .modern-table tbody tr:hover {
+    background: #f8fbff;
+  }
+
+  .modern-table code {
+    background: #eff6ff;
+    color: #1d4ed8;
+    padding: 4px 8px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .mapped-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .mapped-label {
+    font-weight: 700;
+    color: #0f172a;
+  }
+
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.03em;
+  }
+
+  .status-badge.active {
+    background: #dcfce7;
+    color: #166534;
+    border: 1px solid #bbf7d0;
+  }
+
+  .status-badge.inactive {
+    background: #fef2f2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+  }
+
+  .action-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .inline-form {
+    display: inline;
+  }
+
+  .btn-mini {
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 12px;
+  }
+
+  .btn-mini.warning {
+    background: #fff7ed;
+    color: #c2410c;
+    border: 1px solid #fdba74;
+  }
+
+  .btn-mini.warning:hover {
+    background: #ffedd5;
+  }
+
+  .btn-mini.danger {
+    background: #fef2f2;
+    color: #b91c1c;
+    border: 1px solid #fca5a5;
+  }
+
+  .btn-mini.danger:hover {
+    background: #fee2e2;
+  }
+
+  .empty-cell {
+    text-align: center;
+    color: #64748b;
+    padding: 28px 16px !important;
+  }
+
+  .select2-container--default .select2-selection--single {
+    height: 46px;
+    border: 1px solid #dbe4ee;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+  }
+
+  .select2-container--default .select2-selection--single .select2-selection__rendered {
+    line-height: 44px;
+    padding-left: 14px;
+    color: #0f172a;
+    font-size: 14px;
+  }
+
+  .select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 44px;
+  }
+
+  @media (max-width: 1100px) {
+    .top-grid,
+    .content-grid,
+    .search-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .hero-card {
+      align-items: flex-start;
+    }
+
+    .hero-stats {
+      width: 100%;
+    }
+
+    .stat-box {
+      flex: 1;
+    }
+  }
+</style>
+{% endblock %}

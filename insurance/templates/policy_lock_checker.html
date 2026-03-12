@@ -1,0 +1,653 @@
+{% extends "base.html" %}
+{% block title %}Policy Lock Checker{% endblock %}
+
+{% block content %}
+<style>
+  .page-card{
+    background: rgba(255,255,255,.92);
+    border: 1px solid rgba(229,231,235,.95);
+    border-radius: 24px;
+    box-shadow: 0 18px 45px rgba(15,23,42,.08);
+    padding: 24px;
+    margin-top: 18px;
+  }
+
+  .hero-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    flex-wrap:wrap;
+    margin-bottom:18px;
+  }
+
+  .hero-title{
+    font-size:30px;
+    font-weight:800;
+    color:#0f172a;
+    margin:0;
+    line-height:1.1;
+  }
+
+  .hero-sub{
+    color:#64748b;
+    font-size:14px;
+    font-weight:600;
+    margin-top:6px;
+  }
+
+  .match-badge{
+    padding:12px 16px;
+    border-radius:16px;
+    background: linear-gradient(135deg, rgba(37,99,235,.08), rgba(14,165,233,.08));
+    color:#1d4ed8;
+    font-weight:800;
+    border:1px solid rgba(37,99,235,.14);
+    font-size:13px;
+    min-width:170px;
+    text-align:center;
+  }
+
+  .search-panel{
+    background: linear-gradient(180deg, #f8fbff, #f3f7ff);
+    border:1px solid #dbeafe;
+    border-radius:22px;
+    padding:22px;
+    margin-bottom:18px;
+  }
+
+  .panel-title{
+    font-size:15px;
+    font-weight:800;
+    color:#2563eb;
+    margin-bottom:16px;
+  }
+
+  .form-grid{
+    display:grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap:16px;
+  }
+
+  .field-group{
+    display:flex;
+    flex-direction:column;
+    gap:7px;
+  }
+
+  .field-group label{
+    font-size:12px;
+    font-weight:800;
+    color:#475569;
+    text-transform:uppercase;
+    letter-spacing:.04em;
+  }
+
+  .field-group input,
+  .field-group select,
+  .field-group .ts-wrapper{
+    width:100%;
+  }
+
+  .field-group input,
+  .field-group select{
+    height:46px;
+    border:1px solid #dbe2ea;
+    border-radius:12px;
+    background:#fff;
+    padding:0 14px;
+    font-size:14px;
+    color:#0f172a;
+    outline:none;
+    transition:border .15s ease, box-shadow .15s ease;
+  }
+
+  .field-group input:focus,
+  .field-group select:focus{
+    border-color:#60a5fa;
+    box-shadow: 0 0 0 4px rgba(37,99,235,.10);
+  }
+
+  /* searchable dropdown like screenshot */
+  .ts-wrapper{
+    font-size:14px;
+  }
+
+  .ts-wrapper.single .ts-control{
+    min-height:46px;
+    border:1px solid #dbe2ea;
+    border-radius:14px;
+    background:#fff;
+    box-shadow:none;
+    padding:10px 14px;
+    display:flex;
+    align-items:center;
+  }
+
+  .ts-wrapper.single .ts-control input{
+    font-size:14px;
+    color:#0f172a;
+  }
+
+  .ts-wrapper.single .ts-control .item{
+    font-size:14px;
+    color:#0f172a;
+  }
+
+  .ts-wrapper.focus .ts-control{
+    border-color:#60a5fa !important;
+    box-shadow:0 0 0 4px rgba(37,99,235,.10) !important;
+  }
+
+  .ts-wrapper.single .ts-control:after{
+    border-color:#94a3b8 transparent transparent transparent;
+    right:14px;
+  }
+
+  .ts-dropdown{
+    border:1px solid #dbe2ea;
+    border-radius:14px;
+    overflow:hidden;
+    margin-top:8px;
+    box-shadow:0 18px 40px rgba(15,23,42,.12);
+    background:#fff;
+    z-index:9999;
+  }
+
+  .ts-dropdown .ts-dropdown-content{
+    max-height:240px;
+    overflow-y:auto;
+    padding:6px;
+  }
+
+  .ts-dropdown .option,
+  .ts-dropdown .create{
+    padding:12px 14px;
+    border-radius:10px;
+    font-size:14px;
+    color:#0f172a;
+    cursor:pointer;
+    line-height:1.2;
+  }
+
+  .ts-dropdown .option.active{
+    background:#5b82e8;
+    color:#fff;
+  }
+
+  .ts-dropdown .option.selected{
+    background:#eef4ff;
+    color:#1d4ed8;
+    font-weight:700;
+  }
+
+  .ts-dropdown .no-results{
+    padding:12px 14px;
+    color:#64748b;
+    font-size:13px;
+  }
+
+  .toggle-group{
+    display:grid;
+    grid-template-columns: 1fr 1fr;
+    gap:10px;
+    background:#edf2f7;
+    border-radius:14px;
+    padding:4px;
+    height:52px;
+    align-items:center;
+  }
+
+  .toggle-group input[type="radio"]{
+    display:none;
+  }
+
+  .toggle-option{
+    height:44px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:12px;
+    font-size:14px !important;
+    font-weight:800 !important;
+    color:#64748b !important;
+    cursor:pointer;
+    transition:all .18s ease;
+    background:transparent;
+    text-transform:none !important;
+    letter-spacing:0 !important;
+  }
+
+  .toggle-group input[type="radio"]:checked + .toggle-option{
+    background:#fff;
+    color:#4361ee !important;
+    box-shadow:0 6px 16px rgba(15,23,42,.08);
+  }
+
+  .button-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin-top:20px;
+    flex-wrap:wrap;
+    padding-top:16px;
+    border-top:1px solid #dbeafe;
+  }
+
+  .btn-group{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+
+  .modern-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    min-height:46px;
+    padding:0 18px;
+    border:none;
+    border-radius:14px;
+    cursor:pointer;
+    font-weight:800;
+    font-size:14px;
+    transition:all .18s ease;
+    text-decoration:none;
+    font-family:inherit;
+  }
+
+  .modern-btn:hover{
+    transform:translateY(-1px);
+    box-shadow:0 10px 20px rgba(15,23,42,.10);
+  }
+
+  .btn-primary{
+    background:linear-gradient(135deg,#2563eb,#0ea5e9);
+    color:#fff;
+  }
+
+  .btn-light{
+    background:#fff;
+    border:1px solid #dbe2ea;
+    color:#0f172a;
+  }
+
+  .table-card{
+    border:1px solid #e5e7eb;
+    border-radius:18px;
+    overflow:hidden;
+    background:#fff;
+  }
+
+  .table-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:10px;
+    padding:14px 16px;
+    border-bottom:1px solid #e5e7eb;
+    background:linear-gradient(180deg,#ffffff,#f8fafc);
+  }
+
+  .table-title{
+    font-size:16px;
+    font-weight:800;
+    color:#0f172a;
+  }
+
+  .table-sub{
+    font-size:12px;
+    color:#64748b;
+    font-weight:600;
+    margin-top:3px;
+  }
+
+  .table-wrap-modern{
+    overflow:auto;
+    max-height:65vh;
+  }
+
+  .table-modern{
+    width:100%;
+    border-collapse:separate;
+    border-spacing:0;
+    min-width:980px;
+  }
+
+  .table-modern thead th{
+    position:sticky;
+    top:0;
+    z-index:2;
+    background:#0f172a;
+    color:#fff;
+    font-size:11px;
+    font-weight:800;
+    text-transform:uppercase;
+    letter-spacing:.05em;
+    padding:14px 12px;
+    text-align:left;
+    white-space:nowrap;
+  }
+
+  .table-modern tbody td{
+    padding:14px 12px;
+    border-bottom:1px solid #eef2f7;
+    font-size:13px;
+    color:#0f172a;
+    vertical-align:middle;
+    white-space:nowrap;
+  }
+
+  .table-modern tbody tr:hover td{
+    background:#f8fbff;
+  }
+
+  .action-stack{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+  }
+
+  .mini-btn{
+    min-height:40px;
+    padding:0 18px;
+    border:none;
+    border-radius:12px;
+    cursor:pointer;
+    font-weight:800;
+    font-size:13px;
+    transition:all .15s ease;
+    font-family:inherit;
+  }
+
+  .mini-btn:hover{
+    transform:translateY(-1px);
+  }
+
+  .mini-lock{
+    background:linear-gradient(135deg,#dc2626,#ef4444);
+    color:#fff;
+  }
+
+  .empty-row{
+    text-align:center;
+    color:#64748b;
+    padding:24px !important;
+    font-weight:600;
+  }
+
+  .alert-msg{
+    padding:14px 16px;
+    border-radius:14px;
+    margin-bottom:16px;
+    font-weight:700;
+    font-size:14px;
+  }
+
+  .alert-danger{
+    background:#fef2f2;
+    border:1px solid #fecaca;
+    color:#991b1b;
+  }
+
+  .alert-success{
+    background:#ecfdf5;
+    border:1px solid #a7f3d0;
+    color:#065f46;
+  }
+
+  @media (max-width: 1100px){
+    .form-grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  @media (max-width: 700px){
+    .form-grid{ grid-template-columns: 1fr; }
+    .hero-head{ align-items:flex-start; }
+    .button-row{ flex-direction:column; align-items:stretch; }
+    .btn-group{ width:100%; }
+  }
+</style>
+
+<div class="page-card">
+
+  <div class="hero-head">
+    <div>
+      <h1 class="hero-title">Policy Lock Checker</h1>
+      <div class="hero-sub">
+        Search matching payout records, then lock a policy for a specific vehicle and policy holder.
+      </div>
+    </div>
+    <div class="match-badge">Valid Matches Found: {{ total_found|default:0 }}</div>
+  </div>
+
+  <div class="search-panel">
+    <div class="panel-title">🔎 Enter policy and vehicle details</div>
+
+    <form method="get">
+      <div class="form-grid">
+        <div class="field-group">
+          <label>Select Date</label>
+          <input type="date" name="target_date" value="{{ selected.target_date }}">
+        </div>
+
+        <div class="field-group">
+          <label>Vehicle No.</label>
+          <input type="text" name="vehicle_no" value="{{ selected.vehicle_no }}" placeholder="e.g. MH01AB1234">
+        </div>
+
+        <div class="field-group">
+          <label>Policy Holder Name</label>
+          <input type="text" name="policy_holder_name" value="{{ selected.policy_holder_name }}" placeholder="Enter policy holder name">
+        </div>
+
+        <div class="field-group">
+          <label>Product</label>
+          <select name="product" class="smart-dropdown" data-placeholder="Select...">
+            <option value="">Select...</option>
+            {% for p in product_list %}
+              <option value="{{ p.id }}" {% if selected.product == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label>Sub Product</label>
+          <select name="sub_product" class="smart-dropdown" data-placeholder="Select...">
+            <option value="">Select...</option>
+            {% for sp in sub_product_list %}
+              <option value="{{ sp.id }}" {% if selected.sub_product == sp.id|stringformat:"s" %}selected{% endif %}>{{ sp.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label>Make Model Class</label>
+          <select name="make_model_class" class="smart-dropdown" data-placeholder="Select...">
+            <option value="">Select...</option>
+            {% for mmc in make_model_class_list %}
+              <option value="{{ mmc.id }}" {% if selected.make_model_class == mmc.id|stringformat:"s" %}selected{% endif %}>{{ mmc.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label>Make Name (Code)</label>
+          <select name="make_names" class="smart-dropdown" data-placeholder="Select...">
+            <option value="" {% if not selected.make_names %}selected{% endif %}>Select...</option>
+            {% for make in make_name_list %}
+              <option value="{{ make }}" {% if selected.make_names == make %}selected{% endif %}>{{ make }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label>RTO Code</label>
+          <input type="text" name="rto_code" value="{{ selected.rto_code }}" placeholder="e.g. MH03">
+        </div>
+
+        <div class="field-group">
+          <label>CC / GVW</label>
+          <input type="text" name="cc" value="{{ selected.cc }}" placeholder="e.g. 1197">
+        </div>
+
+        <div class="field-group">
+          <label>Fuel</label>
+          <select name="fuel" class="smart-dropdown" data-placeholder="Select...">
+            <option value="">Select...</option>
+            {% for f in fuel_list %}
+              <option value="{{ f.id }}" {% if selected.fuel == f.id|stringformat:"s" %}selected{% endif %}>{{ f.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="field-group">
+          <label>Exact SC</label>
+          <input type="text" name="sc" value="{{ selected.sc }}" placeholder="e.g. 4">
+        </div>
+
+        <div class="field-group">
+          <label>Manufacturing Year</label>
+          <input type="text" name="mfg_year" value="{{ selected.mfg_year }}" placeholder="e.g. 2021">
+        </div>
+
+        <div class="field-group">
+          <label>Zero Dep (ZD)</label>
+          <div class="toggle-group">
+            <input type="radio" id="is_zd_yes" name="is_zd" value="YES" {% if selected.is_zd == "YES" %}checked{% endif %}>
+            <label class="toggle-option" for="is_zd_yes">YES</label>
+
+            <input type="radio" id="is_zd_no" name="is_zd" value="NO" {% if selected.is_zd == "NO" or not selected.is_zd %}checked{% endif %}>
+            <label class="toggle-option" for="is_zd_no">NO</label>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label>CPA</label>
+          <div class="toggle-group">
+            <input type="radio" id="is_cpa_yes" name="is_cpa" value="YES" {% if selected.is_cpa == "YES" %}checked{% endif %}>
+            <label class="toggle-option" for="is_cpa_yes">YES</label>
+
+            <input type="radio" id="is_cpa_no" name="is_cpa" value="NO" {% if selected.is_cpa == "NO" or not selected.is_cpa %}checked{% endif %}>
+            <label class="toggle-option" for="is_cpa_no">NO</label>
+          </div>
+        </div>
+
+        <div class="field-group">
+          <label>NCB</label>
+          <div class="toggle-group">
+            <input type="radio" id="is_ncb_yes" name="is_ncb" value="YES" {% if selected.is_ncb == "YES" %}checked{% endif %}>
+            <label class="toggle-option" for="is_ncb_yes">YES</label>
+
+            <input type="radio" id="is_ncb_no" name="is_ncb" value="NO" {% if selected.is_ncb == "NO" or not selected.is_ncb %}checked{% endif %}>
+            <label class="toggle-option" for="is_ncb_no">NO</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="button-row">
+        <div class="btn-group">
+          <button type="submit" class="modern-btn btn-primary">🔍 Check Eligibility</button>
+          <a href="{% url 'policy_lock_checker' %}" class="modern-btn btn-light">Clear</a>
+        </div>
+
+        <div class="btn-group">
+          <a href="{% url 'locked_policy_dashboard' %}" class="modern-btn btn-light">📋 View Locked Dashboard</a>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <div class="table-card">
+    <div class="table-head">
+      <div>
+        <div class="table-title">Eligibility Results</div>
+        <div class="table-sub">Only matching rate records are shown below.</div>
+      </div>
+    </div>
+
+    <div class="table-wrap-modern">
+      <table class="table-modern">
+        <thead>
+          <tr>
+            <th>Group ID</th>
+            <th>Insurance Company</th>
+            <th>PO Type</th>
+            <th>PO Rate</th>
+            <th>PO Flat Amount</th>
+            <th>Add TNC</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in data %}
+          <tr>
+            <td>{{ row.display_group_id }}</td>
+            <td>{{ row.insurance_company }}</td>
+            <td>{{ row.po_type|default:"-" }}</td>
+            <td>{{ row.po_rate|default:"0" }}</td>
+            <td>{{ row.po_flat_amount|default:"0" }}</td>
+            <td>{{ row.add_tnc|default:"-" }}</td>
+            <td>
+              <div class="action-stack">
+                <form method="post" action="{% url 'lock_unlock_policy' row.id %}">
+                  {% csrf_token %}
+                  <input type="hidden" name="rate_id" value="{{ row.id }}">
+                  <input type="hidden" name="action_type" value="LOCK">
+                  <input type="hidden" name="vehicle_no" value="{{ selected.vehicle_no }}">
+                  <input type="hidden" name="policy_holder_name" value="{{ selected.policy_holder_name }}">
+                  <input type="hidden" name="target_date" value="{{ selected.target_date }}">
+                  <input type="hidden" name="product" value="{{ selected.product }}">
+                  <input type="hidden" name="make_model_class" value="{{ selected.make_model_class }}">
+                  <input type="hidden" name="sub_product" value="{{ selected.sub_product }}">
+                  <input type="hidden" name="make_names" value="{{ selected.make_names }}">
+                  <input type="hidden" name="rto_code" value="{{ selected.rto_code }}">
+                  <input type="hidden" name="cc" value="{{ selected.cc }}">
+                  <input type="hidden" name="fuel" value="{{ selected.fuel }}">
+                  <input type="hidden" name="sc" value="{{ selected.sc }}">
+                  <input type="hidden" name="mfg_year" value="{{ selected.mfg_year }}">
+                  <input type="hidden" name="is_zd" value="{{ selected.is_zd|default:'NO' }}">
+                  <input type="hidden" name="is_cpa" value="{{ selected.is_cpa|default:'NO' }}">
+                  <input type="hidden" name="is_ncb" value="{{ selected.is_ncb|default:'NO' }}">
+                  <button type="submit" class="mini-btn mini-lock">Lock</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="7" class="empty-row">No matching records found.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    document.querySelectorAll(".smart-dropdown").forEach(function (el) {
+      if (el.tomselect) return;
+
+      new TomSelect(el, {
+        create: false,
+        maxItems: 1,
+        allowEmptyOption: true,
+        placeholder: el.getAttribute("data-placeholder") || "Select...",
+        searchField: ["text"],
+        sortField: [],
+        dropdownClass: "ts-dropdown",
+        controlInput: "<input>",
+        render: {
+          no_results: function () {
+            return '<div class="no-results">No results found</div>';
+          }
+        }
+      });
+    });
+  });
+</script>
+{% endblock %}

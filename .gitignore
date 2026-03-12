@@ -8,7 +8,7 @@ __pycache__/
 db.sqlite3
 *.log
 
-# Virtual env
+# Virtual environments
 venv/
 env/
 .venv/
@@ -20,13 +20,10 @@ env/
 .DS_Store
 Thumbs.db
 
-# Migrations cache (optional but safe)
-*.sqlite3
-
 # Media uploads
 media/
 
-# Static collected files
+# Collected static files
 staticfiles/
 
 # Backups
