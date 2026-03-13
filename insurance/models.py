@@ -246,6 +246,12 @@ class AuditLog(models.Model):
 
 
 class GridDocument(models.Model):
+    STATUS_CHOICES = (
+        ('PENDING', 'Pending'),
+        ('FOLLOW-UP', 'Follow-up'),
+        ('DONE', 'Done'),
+    )
+
     insurer_name = models.CharField(max_length=255)
     remarks = models.TextField(blank=True, null=True)
     uploaded_file = models.FileField(upload_to="grid_documents/%Y/%m/")
@@ -255,6 +261,11 @@ class GridDocument(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True
+    )
+    status = models.CharField(
+        max_length=20, 
+        choices=STATUS_CHOICES, 
+        default='PENDING'
     )
 
     class Meta:

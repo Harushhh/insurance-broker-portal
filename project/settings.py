@@ -19,6 +19,13 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    
+    # --- SWAGGER & API ---
+    'rest_framework',
+    'drf_spectacular',
+    'rest_framework_api_key',  # ✅ ADDED FOR API KEY SECURITY
+    # -------------------------
+
     'insurance',
     'config',
 ]
@@ -101,3 +108,30 @@ EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# =========================================================
+# DRF & SWAGGER (SPECTACULAR) SETTINGS
+# =========================================================
+REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Insurance Portal API',
+    'DESCRIPTION': 'API documentation for the Insurance Broker Portal',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    # ✅ Tells Swagger UI to show an "Authorize" button for API Keys
+    'SECURITY': [{'ApiKeyAuth': []}],
+    'COMPONENTS': {
+        'securitySchemes': {
+            'ApiKeyAuth': {
+                'type': 'apiKey',
+                'in': 'header',
+                'name': 'Authorization',
+                'description': 'Enter your API key in the format: <b>Api-Key &lt;your-key&gt;</b>'
+            }
+        }
+    },
+}

@@ -59,4 +59,11 @@ urlpatterns = [
         auth_views.PasswordResetCompleteView.as_view(template_name="password_reset_complete.html"),
         name="password_reset_complete"
     ),
+    path('motor-points-logs/', views.motor_points_audit_logs, name='motor_points_audit_logs'),
+    
+    # ==========================================
+    # REST API ENDPOINTS
+    # ==========================================
+    # This is the endpoint the external system will use, and what Swagger will document
+    path('api/v1/export-rates/', views.ExportRatesAPIView.as_view(), name='api-export-rates'),
 ]

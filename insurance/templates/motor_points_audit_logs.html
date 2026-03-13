@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Locked Policy Dashboard{% endblock %}
+{% block title %}Motor Points Search Logs{% endblock %}
 
 {% block content %}
 <style>
@@ -37,23 +37,6 @@
     margin-top: 8px;
     line-height: 1.5;
     max-width: 820px;
-  }
-
-  .summary-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 52px;
-    padding: 0 18px;
-    border-radius: 18px;
-    background: linear-gradient(135deg, rgba(37,99,235,.08), rgba(14,165,233,.12));
-    color: #1d4ed8;
-    font-weight: 800;
-    border: 1px solid rgba(37,99,235,.14);
-    font-size: 13px;
-    min-width: 180px;
-    text-align: center;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,.8);
   }
 
   /* SEARCH PANEL STYLES */
@@ -97,9 +80,10 @@
     line-height: 1.2;
   }
 
-  /* TOMSELECT DROPDOWNS TO MATCH TEXT INPUT HEIGHT */
+  /* FIX TOMSELECT DROPDOWNS TO MATCH TEXT INPUTS */
   .ts-wrapper { height: 48px !important; width: 100%; margin: 0 !important; padding: 0 !important; }
   .ts-wrapper.single .ts-control { height: 48px !important; min-height: 48px !important; border: 1px solid #d7e0ea !important; border-radius: 14px !important; background: #fff !important; padding: 0 36px 0 16px !important; display: flex; align-items: center; box-shadow: inset 0 1px 2px rgba(15,23,42,.02); }
+  .ts-wrapper.single .ts-control input { font-size: 14px; color: #0f172a; height: auto !important; border: none !important; box-shadow: none !important; padding: 0 !important; margin: 0 !important; }
   .ts-wrapper.single .ts-control .item { font-size: 14px; color: #0f172a; line-height: 1; margin-top: 2px; }
   .ts-wrapper.focus .ts-control { border-color: #60a5fa !important; box-shadow: 0 0 0 4px rgba(37,99,235,.10) !important; }
   .ts-wrapper.single .ts-control:after { border-width: 5px 4px 0 4px; border-color: #64748b transparent transparent transparent; right: 16px; margin-top: -2px; }
@@ -132,13 +116,12 @@
     font-size: 14px;
     transition: all .18s ease;
     text-decoration: none;
-    font-family: inherit;
-    white-space: nowrap;
   }
 
   .btn-primary { background: linear-gradient(135deg,#2563eb,#0ea5e9); color: #fff; }
   .btn-light { background: #fff; border: 1px solid #d7e0ea; color: #0f172a; }
 
+  /* TABLE STYLES */
   .table-card {
     border: 1px solid #e5e7eb;
     border-radius: 20px;
@@ -147,34 +130,105 @@
     box-shadow: 0 8px 24px rgba(15,23,42,.04);
   }
 
-  .table-wrap-modern { overflow: auto; max-height: 60vh; }
-  .table-modern { width: 100%; border-collapse: separate; border-spacing: 0; min-width: 1500px; }
-  .table-modern thead th { position: sticky; top: 0; z-index: 2; background: #0f172a; color: #fff; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; padding: 15px 12px; text-align: left; white-space: nowrap; }
-  .table-modern tbody td { padding: 14px 12px; border-bottom: 1px solid #eef2f7; font-size: 13px; color: #0f172a; vertical-align: middle; white-space: nowrap; }
-  .table-modern tbody tr:hover td { background: #f8fbff; }
+  .table-wrap-modern {
+    overflow: auto;
+    max-height: 70vh;
+  }
 
-  .status-pill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 0 12px; border-radius: 999px; font-size: 12px; font-weight: 800; }
-  .status-locked { background: rgba(239,68,68,.10); color: #b91c1c; border: 1px solid rgba(239,68,68,.18); }
-  .status-unlocked { background: rgba(5,150,105,.10); color: #047857; border: 1px solid rgba(5,150,105,.18); }
+  .table-modern {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 1200px;
+  }
 
-  @media (max-width: 1200px) { .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-  @media (max-width: 700px) { .form-grid { grid-template-columns: 1fr; } .button-row { flex-direction: column; align-items: stretch; } }
+  .table-modern thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #0f172a;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: 15px 16px;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .table-modern tbody td {
+    padding: 14px 16px;
+    border-bottom: 1px solid #eef2f7;
+    font-size: 13px;
+    color: #0f172a;
+    vertical-align: middle;
+    white-space: nowrap;
+  }
+
+  .table-modern tbody tr:hover td {
+    background: #f8fbff;
+  }
+
+  .user-badge {
+    background: #e0e7ff;
+    color: #1d4ed8;
+    padding: 4px 10px;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 12px;
+  }
+
+  .addon-badge {
+    display: inline-block;
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #cbd5e1;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    margin-right: 4px;
+    margin-bottom: 4px;
+  }
+
+  .addon-yes {
+    background: #dcfce7;
+    color: #166534;
+    border-color: #86efac;
+  }
+
+  .empty-row {
+    text-align: center;
+    color: #64748b;
+    padding: 40px !important;
+    font-weight: 600;
+  }
+
+  .text-muted {
+    color: #64748b;
+  }
+
+  @media (max-width: 1000px) {
+    .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 600px) {
+    .form-grid { grid-template-columns: 1fr; }
+  }
 </style>
 
 <div class="page-card">
   <div class="hero-head">
     <div>
-      <h1 class="hero-title">Locked Policy Dashboard</h1>
+      <h1 class="hero-title">Motor Points Search Logs</h1>
       <div class="hero-sub">
-        Monitor all saved policy lock actions with vehicle, policy holder, company, user, and timestamp details.
+        A complete audit trail of every time a user clicked "Check Eligibility" on the Motor Points page.
       </div>
     </div>
-    <div class="summary-badge">Total Records: {{ total_records }}</div>
   </div>
 
   <div class="search-panel">
-    <div class="panel-title">📋 Filter locked policy records</div>
-
+    <div class="panel-title">📋 Filter search logs</div>
     <form method="get">
       <div class="form-grid">
         <div class="field-group">
@@ -186,115 +240,121 @@
             {% endfor %}
           </select>
         </div>
-
+        
         <div class="field-group">
           <label>Policy Holder Name</label>
           <select name="policy_holder_name" class="smart-dropdown" data-placeholder="Search holder name">
             <option value="">Search holder name</option>
-            {% for h in unique_holders %}
-              <option value="{{ h }}" {% if selected.policy_holder_name == h %}selected{% endif %}>{{ h }}</option>
+            {% for holder in unique_holders %}
+              <option value="{{ holder }}" {% if selected.policy_holder_name == holder %}selected{% endif %}>{{ holder }}</option>
             {% endfor %}
           </select>
         </div>
 
         <div class="field-group">
-          <label>Insurance Company</label>
-          <select name="insurance_company" class="smart-dropdown" data-placeholder="Search company">
-            <option value="">Search company</option>
-            {% for c in unique_companies %}
-              <option value="{{ c }}" {% if selected.insurance_company == c %}selected{% endif %}>{{ c }}</option>
+          <label>Make-Model Name</label>
+          <select name="insurance_company" class="smart-dropdown" data-placeholder="Search Make-Model...">
+            <option value="">Search Make-Model...</option>
+            {% for make in unique_companies %}
+              <option value="{{ make }}" {% if selected.insurance_company == make %}selected{% endif %}>{{ make }}</option>
             {% endfor %}
           </select>
         </div>
 
         <div class="field-group">
-          <label>Locked By</label>
-          <select name="locked_by_user" class="smart-dropdown" data-placeholder="Search user">
+          <label>User</label>
+          <select name="username" class="smart-dropdown" data-placeholder="Search user">
             <option value="">Search user</option>
             {% for u in unique_users %}
-              <option value="{{ u }}" {% if selected.locked_by_user == u %}selected{% endif %}>{{ u }}</option>
+              <option value="{{ u }}" {% if selected.username == u %}selected{% endif %}>{{ u }}</option>
             {% endfor %}
           </select>
         </div>
       </div>
-
       <div class="button-row">
         <button type="submit" class="modern-btn btn-primary">Apply Filters</button>
-        <a href="{% url 'locked_policy_dashboard' %}" class="modern-btn btn-light">Clear</a>
-        <a href="{% url 'policy_lock_checker' %}" class="modern-btn btn-light">← Back to Motor Points</a>
+        <a href="{% url 'motor_points_audit_logs' %}" class="modern-btn btn-light">Clear</a>
       </div>
     </form>
   </div>
 
   <div class="table-card">
-    <div class="table-head">
-      <div>
-        <div class="table-title">Locked Policy Records</div>
-        <div class="table-sub">Saved lock and unlock actions from Motor Points.</div>
-      </div>
-    </div>
-
     <div class="table-wrap-modern">
       <table class="table-modern">
         <thead>
           <tr>
-            <th>Group ID</th>
+            <th style="width: 60px;">ID</th>
+            <th>User</th>
+            <th>Search Time</th>
+            <th>Target Date</th>
             <th>Vehicle No.</th>
-            <th>Policy Holder Name</th>
-            <th>Insurance Company</th>
-            <th>Product</th>
-            <th>Sub Product</th>
-            <th>PO Type</th>
-            <th>PO Rate</th>
-            <th>PO Flat Amount</th>
-            <th>RTO Code</th>
-            <th>Make Name</th>
-            <th>Fuel</th>
-            <th>CC</th>
-            <th>SC</th>
-            <th>MFG Year</th>
-            <th>Status</th>
-            <th>Locked By</th>
-            <th>Locked At</th>
-            <th>Created At</th>
+            <th>Policy Holder</th>
+            <th>Product / Sub</th>
+            <th>Vehicle Details</th>
+            <th>Add-ons</th>
           </tr>
         </thead>
         <tbody>
-          {% for row in records %}
+          {% for log in logs %}
           <tr>
-            <td><strong>{{ row.source_rate.group_id|default:row.source_rate.id|default:"-" }}</strong></td>
-            <td>{{ row.vehicle_no|default:"-" }}</td>
-            <td>{{ row.policy_holder_name|default:"-" }}</td>
-            <td>{{ row.insurance_company|default:"-" }}</td>
-            <td>{{ row.product_name|default:"-" }}</td>
-            <td>{{ row.sub_product_name|default:"-" }}</td>
-            <td>{{ row.po_type|default:"-" }}</td>
-            <td><span style="color:#059669; font-weight:700;">{{ row.po_rate|default:"0" }}%</span></td>
-            <td>₹{{ row.po_flat_amount|default:"0" }}</td>
-            <td>{{ row.rto_code|default:"-" }}</td>
-            <td>{{ row.make_name|default:"-" }}</td>
-            <td>{{ row.fuel|default:"-" }}</td>
-            <td>{{ row.cc|default:"-" }}</td>
-            <td>{{ row.sc|default:"-" }}</td>
-            <td>{{ row.mfg_year|default:"-" }}</td>
+            <td><strong>#{{ log.id }}</strong></td>
             <td>
-              {% if row.status == "LOCKED" %}
-                <span class="status-pill status-locked">🔒 LOCKED</span>
-              {% else %}
-                <span class="status-pill status-unlocked">🔓 UNLOCKED</span>
+              <span class="user-badge">{{ log.user.username|default:"System" }}</span>
+            </td>
+            <td style="color:#64748b; font-weight:600;">
+              {{ log.timestamp|date:"d M Y, h:i A" }}
+            </td>
+            
+            <td>{{ log.params.target_date|default:"-" }}</td>
+            
+            <td><strong>{{ log.params.vehicle_no|default:"-" }}</strong></td>
+            
+            <td>{{ log.params.policy_holder_name|default:"-" }}</td>
+            
+            <td>
+              {% if log.params.product %}
+                <span class="text-muted">P:</span> {{ log.params.product }}<br>
+              {% endif %}
+              {% if log.params.sub_product %}
+                <span class="text-muted">S:</span> {{ log.params.sub_product }}
+              {% endif %}
+              {% if not log.params.product and not log.params.sub_product %}-{% endif %}
+            </td>
+
+            <td style="white-space: normal;">
+              {% if log.params.make_names %}<b>Make:</b> {{ log.params.make_names }}<br>{% endif %}
+              {% if log.params.make_model_class %}<b>Class:</b> {{ log.params.make_model_class }}<br>{% endif %}
+              
+              {% if log.params.rto_code %}<b>RTO:</b> {{ log.params.rto_code }} &nbsp;|&nbsp; {% endif %}
+              {% if log.params.mfg_year %}<b>Year:</b> {{ log.params.mfg_year }} &nbsp;|&nbsp; {% endif %}
+              {% if log.params.fuel %}<b>Fuel:</b> {{ log.params.fuel }}<br>{% endif %}
+              
+              {% if log.params.cc %}<b>CC:</b> {{ log.params.cc }} &nbsp;|&nbsp; {% endif %}
+              {% if log.params.sc %}<b>SC:</b> {{ log.params.sc }}{% endif %}
+              
+              {% if not log.params.make_names and not log.params.make_model_class and not log.params.rto_code and not log.params.mfg_year and not log.params.cc %}
+                -
               {% endif %}
             </td>
-            <td>
-              {% if row.locked_by %}
-                <span class="user-badge" style="background:#e0e7ff; color:#1d4ed8; padding:4px 10px; border-radius:8px; font-weight:700;">{{ row.locked_by.username }}</span>
-              {% else %}-{% endif %}
+
+            <td style="white-space: normal;">
+              {% if log.params.is_zd == 'YES' %}
+                <span class="addon-badge addon-yes">ZD</span>
+              {% endif %}
+              {% if log.params.is_cpa == 'YES' %}
+                <span class="addon-badge addon-yes">CPA</span>
+              {% endif %}
+              {% if log.params.is_ncb == 'YES' %}
+                <span class="addon-badge addon-yes">NCB</span>
+              {% endif %}
+              {% if log.params.is_zd != 'YES' and log.params.is_cpa != 'YES' and log.params.is_ncb != 'YES' %}
+                -
+              {% endif %}
             </td>
-            <td>{{ row.locked_at|date:"d M Y, h:i A"|default:"-" }}</td>
-            <td>{{ row.created_at|date:"d M Y, h:i A" }}</td>
           </tr>
           {% empty %}
           <tr>
-            <td colspan="19" style="text-align:center; color:#64748b; padding:40px; font-weight:600;">No records found.</td>
+            <td colspan="9" class="empty-row">No search logs found yet.</td>
           </tr>
           {% endfor %}
         </tbody>

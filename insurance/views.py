@@ -6,17 +6,17 @@ from django.utils.http import urlsafe_base64_encode
 from django.utils.encoding import force_bytes
 from django.utils import timezone
 from django.shortcuts import render, redirect, get_object_or_404
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.db.models import Q, F, Count, Avg
 from django.core.mail import send_mail
 from django.conf import settings
 from django import forms
-
 import csv
 import json
 import re
 import hashlib
 import threading
+import ast  # ADDED FOR AUDIT LOG PARSING
 
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -24,6 +24,12 @@ from pathlib import Path
 from collections import defaultdict
 
 from openpyxl import Workbook
+
+# --- DRF & SWAGGER IMPORTS ---
+from rest_framework import generics
+from rest_framework_api_key.permissions import HasAPIKey
+from .serializers import RateMasterSerializer
+# -----------------------------
 
 # Optional extraction libs
 try:
@@ -2064,6 +2070,26 @@ def motor_payout_rates(request):
 @login_required
 @user_passes_test(can_view_motor_payout)
 def policy_lock_checker(request):
+    has_searched = bool(request.GET) # Detects if user clicked 'Check Eligibility'
+
+    # --- UPDATED: Create Audit Log with cleaner dictionary ---
+    if has_searched:
+        # Create a flat dictionary (no lists) of the search parameters
+        flat_params = {}
+        for key in request.GET.keys():
+            val = request.GET.get(key, "").strip()
+            if val and key != "csrfmiddlewaretoken":
+                flat_params[key] = val
+        
+        # Only log if they actually searched with parameters
+        if flat_params:
+            AuditLog.objects.create(
+                user=request.user,
+                action="MOTOR_POINTS_SEARCH",
+                details=str(flat_params) # Save as stringified flat dict
+            )
+    # ---------------------------------------------------------
+
     qs = RateMaster.objects.select_related(
         "product", "sub_product", "policy_type", "fuel_type",
         "make_model_class", "is_ncb", "is_cpa", "is_zd"
@@ -2194,49 +2220,50 @@ def policy_lock_checker(request):
     results = []
     seen_groups = set()
 
-    for row in qs.iterator(chunk_size=2000):
-        if rto_code and matching_rto_names:
-            if not row.new_rto_list:
-                continue
-            row_rtos = [x.strip().upper() for x in row.new_rto_list.split(",")]
-            if not any(x in matching_rto_names for x in row_rtos):
-                continue
+    if has_searched:
+        for row in qs.iterator(chunk_size=2000):
+            if rto_code and matching_rto_names:
+                if not row.new_rto_list:
+                    continue
+                row_rtos = [x.strip().upper() for x in row.new_rto_list.split(",")]
+                if not any(x in matching_rto_names for x in row_rtos):
+                    continue
 
-        if make_names and matching_make_groups:
-            if not row.new_vehicle_makes:
-                continue
-            row_makes = [x.strip().upper() for x in row.new_vehicle_makes.split(",")]
-            if not any(x in matching_make_groups for x in row_makes):
-                continue
+            if make_names and matching_make_groups:
+                if not row.new_vehicle_makes:
+                    continue
+                row_makes = [x.strip().upper() for x in row.new_vehicle_makes.split(",")]
+                if not any(x in matching_make_groups for x in row_makes):
+                    continue
 
-        gid = row.group_id if row.group_id is not None else row.id
-        if gid not in seen_groups:
-            row.display_group_id = gid
+            gid = row.group_id if row.group_id is not None else row.id
+            if gid not in seen_groups:
+                row.display_group_id = gid
 
-            if row.po_net_rate and row.po_net_rate > 0:
-                row.po_rate = row.po_net_rate
-            elif row.po_od_rate and row.po_od_rate > 0:
-                row.po_rate = row.po_od_rate
-            elif row.po_tp_rate and row.po_tp_rate > 0:
-                row.po_rate = row.po_tp_rate
-            else:
-                row.po_rate = 0.0
+                if row.po_net_rate and row.po_net_rate > 0:
+                    row.po_rate = row.po_net_rate
+                elif row.po_od_rate and row.po_od_rate > 0:
+                    row.po_rate = row.po_od_rate
+                elif row.po_tp_rate and row.po_tp_rate > 0:
+                    row.po_rate = row.po_tp_rate
+                else:
+                    row.po_rate = 0.0
 
-            existing_lock = None
-            if vehicle_no and policy_holder_name:
-                existing_lock = LockedPolicy.objects.filter(
-                    source_rate=row,
-                    vehicle_no__iexact=vehicle_no,
-                    policy_holder_name__iexact=policy_holder_name
-                ).order_by("-id").first()
+                existing_lock = None
+                if vehicle_no and policy_holder_name:
+                    existing_lock = LockedPolicy.objects.filter(
+                        source_rate=row,
+                        vehicle_no__iexact=vehicle_no,
+                        policy_holder_name__iexact=policy_holder_name
+                    ).order_by("-id").first()
 
-            row.lock_status = existing_lock.status if existing_lock else "UNLOCKED"
+                row.lock_status = existing_lock.status if existing_lock else "UNLOCKED"
 
-            results.append(row)
-            seen_groups.add(gid)
+                results.append(row)
+                seen_groups.add(gid)
 
-        if len(results) >= 300:
-            break
+            if len(results) >= 300:
+                break
 
     make_name_list = sorted({
         item.strip()
@@ -2250,6 +2277,7 @@ def policy_lock_checker(request):
     return render(request, "policy_lock_checker.html", {
         "data": results,
         "total_found": len(results),
+        "has_searched": has_searched,
         "product_list": ProductMaster.objects.all().order_by("name"),
         "sub_product_list": SubProductMaster.objects.all().order_by("name"),
         "fuel_list": FuelTypeMaster.objects.all().order_by("name"),
@@ -2276,26 +2304,34 @@ def policy_lock_checker(request):
 
 
 # -------------------------
-# LOCK POLICY
+# LOCK POLICY (AJAX UPDATED)
 # -------------------------
 @login_required
 @user_passes_test(can_view_motor_payout)
 def lock_unlock_policy(request, rate_id):
     if request.method != "POST":
-        return redirect("policy_lock_checker")
+        return JsonResponse({"success": False, "message": "Invalid request."})
 
     action_type = (request.POST.get("action_type") or "").strip().upper()
     vehicle_no = (request.POST.get("vehicle_no") or "").strip()
     policy_holder_name = (request.POST.get("policy_holder_name") or "").strip()
+    target_date = (request.POST.get("target_date") or "").strip()
 
     if not vehicle_no or not policy_holder_name:
-        messages.error(request, "Vehicle No. and Policy Holder Name are required.")
-        return redirect("policy_lock_checker")
+        return JsonResponse({"success": False, "message": "Vehicle No. and Policy Holder Name are required."})
 
     # Only LOCK is allowed from Policy Lock Checker
     if action_type != "LOCK":
-        messages.error(request, "Invalid action.")
-        return redirect("policy_lock_checker")
+        return JsonResponse({"success": False, "message": "Invalid action."})
+        
+    # --- DATE VALIDATION SECURITY CHECK ---
+    today_str = datetime.today().strftime("%Y-%m-%d")
+    if target_date != today_str:
+        return JsonResponse({
+            "success": False, 
+            "message": "Policies can only be locked for today's date. Past or future dates are restricted."
+        })
+    # --------------------------------------
 
     rate_obj = get_object_or_404(
         RateMaster.objects.select_related("product", "sub_product", "fuel_type"),
@@ -2342,7 +2378,7 @@ def lock_unlock_policy(request, rate_id):
     obj.add_tnc = rate_obj.add_tnc
     obj.rto_code = request.POST.get("rto_code", "")
     obj.make_name = request.POST.get("make_names", "")
-    obj.fuel = request.POST.get("fuel", "")
+    obj.fuel = request.POST.get("fuel", ""),
     obj.cc = request.POST.get("cc", "")
     obj.sc = request.POST.get("sc", "")
     obj.mfg_year = request.POST.get("mfg_year", "")
@@ -2351,8 +2387,7 @@ def lock_unlock_policy(request, rate_id):
     obj.locked_at = timezone.now()
     obj.save()
 
-    messages.success(request, "Your policy has been locked.")
-    return redirect("policy_lock_checker")
+    return JsonResponse({"success": True, "message": f"Successfully locked policy for {vehicle_no}."})
 
 # -------------------------
 # LOCKED POLICY DASHBOARD
@@ -2362,31 +2397,44 @@ def lock_unlock_policy(request, rate_id):
 def locked_policy_dashboard(request):
     qs = LockedPolicy.objects.select_related("source_rate", "locked_by").all()
 
+    # 1. GET FILTER PARAMETERS
     vehicle_no = (request.GET.get("vehicle_no") or "").strip()
     policy_holder_name = (request.GET.get("policy_holder_name") or "").strip()
     insurance_company = (request.GET.get("insurance_company") or "").strip()
-    status = (request.GET.get("status") or "").strip()
+    locked_by_user = (request.GET.get("locked_by_user") or "").strip()
 
+    # 2. APPLY FILTERS
     if vehicle_no:
-        qs = qs.filter(vehicle_no__icontains=vehicle_no)
+        qs = qs.filter(vehicle_no__iexact=vehicle_no)
     if policy_holder_name:
-        qs = qs.filter(policy_holder_name__icontains=policy_holder_name)
+        qs = qs.filter(policy_holder_name__iexact=policy_holder_name)
     if insurance_company:
-        qs = qs.filter(insurance_company__icontains=insurance_company)
-    if status:
-        qs = qs.filter(status=status)
+        qs = qs.filter(insurance_company__iexact=insurance_company)
+    if locked_by_user:
+        qs = qs.filter(locked_by__username__iexact=locked_by_user)
+
+    # 3. GET UNIQUE VALUES FOR DROPDOWNS (From all records)
+    all_locked = LockedPolicy.objects.select_related("locked_by").all()
+    
+    unique_vehicles = sorted(list(set(all_locked.exclude(vehicle_no__isnull=True).exclude(vehicle_no="").values_list("vehicle_no", flat=True))))
+    unique_holders = sorted(list(set(all_locked.exclude(policy_holder_name__isnull=True).exclude(policy_holder_name="").values_list("policy_holder_name", flat=True))))
+    unique_companies = sorted(list(set(all_locked.exclude(insurance_company__isnull=True).exclude(insurance_company="").values_list("insurance_company", flat=True))))
+    unique_users = sorted(list(set(all_locked.exclude(locked_by__isnull=True).values_list("locked_by__username", flat=True))))
 
     return render(request, "locked_policy_dashboard.html", {
         "records": qs.order_by("-created_at")[:300],
         "total_records": qs.count(),
+        "unique_vehicles": unique_vehicles,
+        "unique_holders": unique_holders,
+        "unique_companies": unique_companies,
+        "unique_users": unique_users,
         "selected": {
             "vehicle_no": vehicle_no,
             "policy_holder_name": policy_holder_name,
             "insurance_company": insurance_company,
-            "status": status,
+            "locked_by_user": locked_by_user,
         }
     })
-
 
 # -------------------------
 # DIRECT PASSWORD RESET
@@ -2486,6 +2534,19 @@ def send_email_background(subject, message, recipient_list):
 @user_passes_test(can_view_grid_management)
 def grid_management(request):
     if request.method == "POST":
+        action = request.POST.get("action")
+
+        # 1. HANDLE STATUS UPDATE FROM DROPDOWN
+        if action == "update_status":
+            doc_id = request.POST.get("doc_id")
+            new_status = request.POST.get("status")
+            if doc_id and new_status:
+                doc = get_object_or_404(GridDocument, id=doc_id)
+                doc.status = new_status
+                doc.save()
+            return redirect("grid_management")
+
+        # 2. HANDLE NEW FILE UPLOAD
         insurer_name = request.POST.get("insurer_name")
         remarks = request.POST.get("remarks")
         uploaded_file = request.FILES.get("uploaded_file")
@@ -2495,7 +2556,8 @@ def grid_management(request):
                 insurer_name=insurer_name,
                 remarks=remarks,
                 uploaded_file=uploaded_file,
-                uploaded_by=request.user
+                uploaded_by=request.user,
+                status="PENDING"
             )
 
             uploader_name = request.user.username
@@ -2519,3 +2581,127 @@ def grid_management(request):
 
     documents = GridDocument.objects.all().order_by("-uploaded_date")
     return render(request, "grid_management.html", {"documents": documents})
+
+
+# -------------------------
+# MOTOR POINTS AUDIT LOGS (UPDATED PARSING)
+# -------------------------
+@login_required
+@user_passes_test(can_view_motor_payout)
+def motor_points_audit_logs(request):
+    qs = AuditLog.objects.filter(action="MOTOR_POINTS_SEARCH").select_related("user").order_by("-timestamp")
+    
+    # 1. GET FILTER PARAMETERS
+    vehicle_no_filter = (request.GET.get("vehicle_no") or "").strip()
+    policy_holder_name_filter = (request.GET.get("policy_holder_name") or "").strip()
+    insurance_company_filter = (request.GET.get("insurance_company") or "").strip()
+    username_filter = (request.GET.get("username") or "").strip()
+
+    # 2. APPLY FILTERS
+    if vehicle_no_filter:
+        qs = qs.filter(details__icontains=vehicle_no_filter)
+    if policy_holder_name_filter:
+        qs = qs.filter(details__icontains=policy_holder_name_filter)
+    if insurance_company_filter:
+        qs = qs.filter(details__icontains=insurance_company_filter)
+    if username_filter:
+        qs = qs.filter(user__username__icontains=username_filter)
+
+    logs = qs[:500]
+    
+    # 3. GET UNIQUE VALUES FOR DROPDOWNS (From top 1000 logs)
+    all_logs_for_dropdowns = AuditLog.objects.filter(action="MOTOR_POINTS_SEARCH").select_related("user").order_by("-timestamp")[:1000]
+    unique_vehicles = set()
+    unique_holders = set()
+    unique_companies = set()
+    unique_users = set()
+
+    for log in all_logs_for_dropdowns:
+        if log.user and log.user.username:
+            unique_users.add(log.user.username)
+        
+        try:
+            clean_str = log.details.replace("Eligibility Check Parameters: ", "")
+            params_dict = ast.literal_eval(clean_str)
+            
+            # Flatten lists if they exist
+            flat_params = {}
+            if isinstance(params_dict, dict):
+                for k, v in params_dict.items():
+                    if isinstance(v, list) and len(v) > 0:
+                        flat_params[k] = str(v[0]).strip()
+                    else:
+                        flat_params[k] = str(v).strip()
+            
+            if flat_params.get("vehicle_no"):
+                unique_vehicles.add(flat_params["vehicle_no"])
+            if flat_params.get("policy_holder_name"):
+                unique_holders.add(flat_params["policy_holder_name"])
+            if flat_params.get("make_names"):
+                unique_companies.add(flat_params["make_names"])
+        except:
+            pass
+
+    # 4. PARSE THE STRINGIFIED DICTIONARY FOR DISPLAY
+    for log in logs:
+        try:
+            # Handle the old 'Eligibility Check Parameters: { ... }' format
+            clean_str = log.details.replace("Eligibility Check Parameters: ", "")
+            params_dict = ast.literal_eval(clean_str)
+            
+            # Flatten lists if they exist (from old format)
+            flat_params = {}
+            if isinstance(params_dict, dict):
+                for k, v in params_dict.items():
+                    if isinstance(v, list) and len(v) > 0:
+                        flat_params[k] = v[0]
+                    else:
+                        flat_params[k] = v
+            
+            # SWAP IDs FOR REAL NAMES
+            if flat_params.get("product") and str(flat_params["product"]).isdigit():
+                try: flat_params["product"] = ProductMaster.objects.get(id=int(flat_params["product"])).name
+                except: pass
+                
+            if flat_params.get("sub_product") and str(flat_params["sub_product"]).isdigit():
+                try: flat_params["sub_product"] = SubProductMaster.objects.get(id=int(flat_params["sub_product"])).name
+                except: pass
+                
+            if flat_params.get("make_model_class") and str(flat_params["make_model_class"]).isdigit():
+                try: flat_params["make_model_class"] = MakeModelClassMaster.objects.get(id=int(flat_params["make_model_class"])).name
+                except: pass
+                
+            if flat_params.get("fuel") and str(flat_params["fuel"]).isdigit():
+                try: flat_params["fuel"] = FuelTypeMaster.objects.get(id=int(flat_params["fuel"])).name
+                except: pass
+                
+            log.params = flat_params
+        except Exception:
+            log.params = {} # Fallback if parsing fails
+
+    return render(request, "motor_points_audit_logs.html", {
+        "logs": logs,
+        "unique_vehicles": sorted(list(unique_vehicles)),
+        "unique_holders": sorted(list(unique_holders)),
+        "unique_companies": sorted(list(unique_companies)),
+        "unique_users": sorted(list(unique_users)),
+        "selected": {
+            "vehicle_no": vehicle_no_filter,
+            "policy_holder_name": policy_holder_name_filter,
+            "insurance_company": insurance_company_filter,
+            "username": username_filter,
+        }
+    })
+
+
+# =========================================================
+# REST API ENDPOINTS
+# =========================================================
+class ExportRatesAPIView(generics.ListAPIView):
+    """
+    This endpoint returns all active rate data in JSON format.
+    Requires a valid API Key to access.
+    """
+    permission_classes = [HasAPIKey] 
+    queryset = RateMaster.objects.filter(is_deleted="NO") 
+    serializer_class = RateMasterSerializer

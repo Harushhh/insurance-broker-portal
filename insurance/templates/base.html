@@ -11,7 +11,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-  <!-- Tom Select -->
   <link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.css" rel="stylesheet">
 
   <style>
@@ -513,8 +512,9 @@
 
             {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Motor_Payout_Rates" %}
               <a class="dd-item {% if request.path == '/motor-payout-rates/' %}active-link{% endif %}" href="{% url 'motor_payout_rates' %}">💰 Motor Payout Rates</a>
-              <a class="dd-item {% if request.path == '/policy-lock-checker/' %}active-link{% endif %}" href="{% url 'policy_lock_checker' %}">🔒 Policy Lock Checker</a>
+              <a class="dd-item {% if request.path == '/policy-lock-checker/' %}active-link{% endif %}" href="{% url 'policy_lock_checker' %}">🔒 Motor Points</a>
               <a class="dd-item {% if request.path == '/locked-policy-dashboard/' %}active-link{% endif %}" href="{% url 'locked_policy_dashboard' %}">📌 Locked Policy Dashboard</a>
+              <a class="dd-item {% if request.path == '/motor-points-logs/' %}active-link{% endif %}" href="{% url 'motor_points_audit_logs' %}">📋 Motor Points Logs</a>
             {% endif %}
 
             {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_RTO_Dashboard" %}
@@ -550,6 +550,8 @@
 
             {% if request.user|has_group:"ADMIN" %}
               <a class="dd-item {% if request.path == '/user-management/' %}active-link{% endif %}" href="{% url 'user_management' %}">👥 User Management</a>
+              
+              <a class="dd-item" href="{% url 'swagger-ui' %}" target="_blank">📖 API Documentation</a>
             {% endif %}
 
             {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Audit_Log" %}

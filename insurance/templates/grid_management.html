@@ -2,6 +2,48 @@
 {% block title %}Grid Management{% endblock %}
 
 {% block content %}
+<style>
+    /* Styling for the Status Dropdown Badges */
+    .status-select {
+        padding: 6px 30px 6px 14px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-weight: 800;
+        border: 1px solid transparent;
+        cursor: pointer;
+        outline: none;
+        appearance: none;
+        background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23475569%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px top 50%;
+        background-size: 10px auto;
+        transition: all 0.2s ease;
+    }
+
+    .status-pending { 
+        background-color: #fef08a; /* Yellow */
+        color: #854d0e; 
+        border-color: #fde047; 
+    }
+    
+    .status-follow-up { 
+        background-color: #bfdbfe; /* Blue */
+        color: #1e3a8a; 
+        border-color: #93c5fd; 
+    }
+    
+    .status-done { 
+        background-color: #bbf7d0; /* Green */
+        color: #166534; 
+        border-color: #86efac; 
+    }
+
+    .status-select:hover {
+        filter: brightness(0.95);
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    }
+</style>
+
 <div class="card" style="padding: 30px;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 25px;">
         <div>
@@ -19,6 +61,7 @@
                 <tr style="background:#f8fafc; color:#475569; font-size:12px; text-transform:uppercase;">
                     <th style="padding:16px;">Insurer Name</th>
                     <th style="padding:16px;">Remarks</th>
+                    <th style="padding:16px;">Status</th>
                     <th style="padding:16px;">Uploaded By</th>
                     <th style="padding:16px;">Date & Time</th>
                     <th style="padding:16px; text-align:right;">Action</th>
@@ -29,6 +72,24 @@
                 <tr style="border-bottom:1px solid var(--border); background:#fff; transition: background 0.2s;">
                     <td style="padding:16px; font-weight:600; color:#0f172a;">{{ doc.insurer_name }}</td>
                     <td style="padding:16px; color:#475569;">{{ doc.remarks|default:"-" }}</td>
+                    
+                    <td style="padding:16px;">
+                        <form method="POST" style="margin:0;">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="update_status">
+                            <input type="hidden" name="doc_id" value="{{ doc.id }}">
+                            
+                            <select name="status" onchange="this.form.submit()" class="status-select 
+                                {% if doc.status == 'PENDING' %}status-pending
+                                {% elif doc.status == 'FOLLOW-UP' %}status-follow-up
+                                {% elif doc.status == 'DONE' %}status-done{% endif %}">
+                                <option value="PENDING" {% if doc.status == 'PENDING' %}selected{% endif %}>⏳ Pending</option>
+                                <option value="FOLLOW-UP" {% if doc.status == 'FOLLOW-UP' %}selected{% endif %}>🔄 Follow-up</option>
+                                <option value="DONE" {% if doc.status == 'DONE' %}selected{% endif %}>✅ Done</option>
+                            </select>
+                        </form>
+                    </td>
+
                     <td style="padding:16px; color:#475569;">{{ doc.uploaded_by.username|default:"System" }}</td>
                     <td style="padding:16px; color:#475569;">{{ doc.uploaded_date|date:"d M Y, h:i A" }}</td>
                     <td style="padding:16px; text-align:right;">
@@ -39,7 +100,7 @@
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="5" style="padding:40px; text-align:center; color:#64748b;">
+                    <td colspan="6" style="padding:40px; text-align:center; color:#64748b;">
                         No grids uploaded yet. Click the upload button to add your first file!
                     </td>
                 </tr>
@@ -58,6 +119,7 @@
         
         <form method="POST" enctype="multipart/form-data">
             {% csrf_token %}
+            <input type="hidden" name="action" value="upload_grid">
             
             <label style="font-size:12px; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:6px; display:block;">Insurer Name *</label>
             <input type="text" name="insurer_name" required placeholder="e.g. Reliance General" style="width:100%; padding:12px; border:1px solid #cbd5e1; border-radius:10px; margin-bottom:16px; font-family:inherit; box-sizing:border-box;">

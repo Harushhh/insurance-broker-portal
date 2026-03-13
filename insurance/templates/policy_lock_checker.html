@@ -1,412 +1,412 @@
 {% extends "base.html" %}
-{% block title %}Policy Lock Checker{% endblock %}
+{% block title %}Motor Points{% endblock %}
 
 {% block content %}
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
 <style>
-  .page-card{
-    background: rgba(255,255,255,.92);
+  /* Base Reset for Form Elements */
+  .search-panel * {
+    box-sizing: border-box !important;
+  }
+
+  .page-card {
+    background: rgba(255,255,255,.96);
     border: 1px solid rgba(229,231,235,.95);
     border-radius: 24px;
     box-shadow: 0 18px 45px rgba(15,23,42,.08);
-    padding: 24px;
+    padding: 26px;
     margin-top: 18px;
   }
 
-  .hero-head{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:16px;
-    flex-wrap:wrap;
-    margin-bottom:18px;
+  .hero-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    flex-wrap: wrap;
+    margin-bottom: 22px;
   }
 
-  .hero-title{
-    font-size:30px;
-    font-weight:800;
-    color:#0f172a;
-    margin:0;
-    line-height:1.1;
+  .hero-title {
+    font-size: 28px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0;
+    line-height: 1.1;
   }
 
-  .hero-sub{
-    color:#64748b;
-    font-size:14px;
-    font-weight:600;
-    margin-top:6px;
+  .hero-sub {
+    color: #64748b;
+    font-size: 14px;
+    font-weight: 600;
+    margin-top: 8px;
+    line-height: 1.45;
   }
 
-  .match-badge{
-    padding:12px 16px;
-    border-radius:16px;
+  .match-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    padding: 0 18px;
+    border-radius: 14px;
     background: linear-gradient(135deg, rgba(37,99,235,.08), rgba(14,165,233,.08));
-    color:#1d4ed8;
-    font-weight:800;
-    border:1px solid rgba(37,99,235,.14);
-    font-size:13px;
-    min-width:170px;
-    text-align:center;
+    color: #1d4ed8;
+    font-weight: 800;
+    border: 1px solid rgba(37,99,235,.14);
+    font-size: 13px;
+    white-space: nowrap;
   }
 
-  .search-panel{
-    background: linear-gradient(180deg, #f8fbff, #f3f7ff);
-    border:1px solid #dbeafe;
-    border-radius:22px;
-    padding:22px;
-    margin-bottom:18px;
+  .search-panel {
+    background: linear-gradient(180deg, #f8fbff, #f4f8ff);
+    border: 1px solid #dbeafe;
+    border-radius: 22px;
+    padding: 22px;
+    margin-bottom: 20px;
   }
 
-  .panel-title{
-    font-size:15px;
-    font-weight:800;
-    color:#2563eb;
-    margin-bottom:16px;
+  .panel-title {
+    font-size: 15px;
+    font-weight: 800;
+    color: #2563eb;
+    margin-bottom: 18px;
   }
 
-  .form-grid{
-    display:grid;
+  .form-grid {
+    display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap:16px;
+    gap: 20px 16px; 
+    align-items: start;
   }
 
-  .field-group{
-    display:flex;
-    flex-direction:column;
-    gap:7px;
+  .field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    width: 100%;
   }
 
-  .field-group label{
-    font-size:12px;
-    font-weight:800;
-    color:#475569;
-    text-transform:uppercase;
-    letter-spacing:.04em;
+  .field-group label {
+    font-size: 11px;
+    font-weight: 800;
+    color: #475569;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    line-height: 1;
+    margin: 0;
+    padding-left: 2px;
   }
 
-  .field-group input,
-  .field-group select,
-  .field-group .ts-wrapper{
-    width:100%;
+  .field-group input[type="text"],
+  .field-group input[type="date"],
+  .field-group select {
+    height: 44px !important;
+    width: 100%;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    background: #fff;
+    padding: 0 14px;
+    font-size: 14px;
+    color: #0f172a;
+    outline: none;
+    transition: all .15s ease;
+    box-shadow: inset 0 1px 2px rgba(15,23,42,.02);
   }
 
-  .field-group input,
-  .field-group select{
-    height:46px;
-    border:1px solid #dbe2ea;
-    border-radius:12px;
-    background:#fff;
-    padding:0 14px;
-    font-size:14px;
-    color:#0f172a;
-    outline:none;
-    transition:border .15s ease, box-shadow .15s ease;
+  .field-group input::placeholder {
+    color: #94a3b8;
   }
 
   .field-group input:focus,
-  .field-group select:focus{
-    border-color:#60a5fa;
-    box-shadow: 0 0 0 4px rgba(37,99,235,.10);
+  .field-group select:focus {
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59,130,246,.15);
   }
 
-  /* searchable dropdown like screenshot */
-  .ts-wrapper{
-    font-size:14px;
+  /* FIX TOMSELECT DROPDOWNS */
+  .ts-wrapper {
+    height: 44px !important;
+    width: 100%;
+    margin: 0 !important;
+    padding: 0 !important;
   }
 
-  .ts-wrapper.single .ts-control{
-    min-height:46px;
-    border:1px solid #dbe2ea;
-    border-radius:14px;
-    background:#fff;
-    box-shadow:none;
-    padding:10px 14px;
-    display:flex;
-    align-items:center;
+  .ts-wrapper.single .ts-control {
+    height: 44px !important;
+    min-height: 44px !important;
+    border: 1px solid #cbd5e1 !important;
+    border-radius: 12px !important;
+    background: #fff !important;
+    padding: 0 36px 0 14px !important;
+    display: flex;
+    align-items: center;
+    box-shadow: inset 0 1px 2px rgba(15,23,42,.02);
   }
 
-  .ts-wrapper.single .ts-control input{
-    font-size:14px;
-    color:#0f172a;
+  .ts-wrapper.single .ts-control input {
+    font-size: 14px;
+    color: #0f172a;
+    height: auto !important; 
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
   }
 
-  .ts-wrapper.single .ts-control .item{
-    font-size:14px;
-    color:#0f172a;
+  .ts-wrapper.single .ts-control .item {
+    font-size: 14px;
+    color: #0f172a;
+    line-height: 1;
+    margin-top: 2px;
   }
 
-  .ts-wrapper.focus .ts-control{
-    border-color:#60a5fa !important;
-    box-shadow:0 0 0 4px rgba(37,99,235,.10) !important;
+  .ts-wrapper.focus .ts-control {
+    border-color: #3b82f6 !important;
+    box-shadow: 0 0 0 3px rgba(59,130,246,.15) !important;
   }
 
-  .ts-wrapper.single .ts-control:after{
-    border-color:#94a3b8 transparent transparent transparent;
-    right:14px;
+  .ts-wrapper.single .ts-control:after {
+    border-width: 5px 4px 0 4px;
+    border-color: #64748b transparent transparent transparent;
+    right: 14px;
+    margin-top: -2px;
   }
 
-  .ts-dropdown{
-    border:1px solid #dbe2ea;
-    border-radius:14px;
-    overflow:hidden;
-    margin-top:8px;
-    box-shadow:0 18px 40px rgba(15,23,42,.12);
-    background:#fff;
-    z-index:9999;
-  }
-
-  .ts-dropdown .ts-dropdown-content{
-    max-height:240px;
-    overflow-y:auto;
-    padding:6px;
-  }
-
-  .ts-dropdown .option,
-  .ts-dropdown .create{
-    padding:12px 14px;
-    border-radius:10px;
-    font-size:14px;
-    color:#0f172a;
-    cursor:pointer;
-    line-height:1.2;
-  }
-
-  .ts-dropdown .option.active{
-    background:#5b82e8;
-    color:#fff;
-  }
-
-  .ts-dropdown .option.selected{
-    background:#eef4ff;
-    color:#1d4ed8;
-    font-weight:700;
-  }
-
-  .ts-dropdown .no-results{
-    padding:12px 14px;
-    color:#64748b;
-    font-size:13px;
-  }
-
-  .toggle-group{
-    display:grid;
+  /* FIX TOGGLE PILLS */
+  .toggle-group {
+    display: grid;
     grid-template-columns: 1fr 1fr;
-    gap:10px;
-    background:#edf2f7;
-    border-radius:14px;
-    padding:4px;
-    height:52px;
-    align-items:center;
+    gap: 6px;
+    background: #f1f5f9;
+    border: 1px solid #cbd5e1;
+    border-radius: 12px;
+    padding: 4px;
+    height: 44px !important; 
+    align-items: center;
   }
 
-  .toggle-group input[type="radio"]{
-    display:none;
+  .toggle-group input[type="radio"] {
+    display: none;
   }
 
-  .toggle-option{
-    height:44px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    border-radius:12px;
-    font-size:14px !important;
-    font-weight:800 !important;
-    color:#64748b !important;
-    cursor:pointer;
-    transition:all .18s ease;
-    background:transparent;
-    text-transform:none !important;
-    letter-spacing:0 !important;
+  .toggle-option {
+    height: 100%;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    font-size: 12px !important;
+    font-weight: 800 !important;
+    color: #64748b !important;
+    cursor: pointer;
+    transition: all .15s ease;
+    background: transparent;
+    margin: 0;
+    user-select: none;
   }
 
-  .toggle-group input[type="radio"]:checked + .toggle-option{
-    background:#fff;
-    color:#4361ee !important;
-    box-shadow:0 6px 16px rgba(15,23,42,.08);
+  .toggle-group input[type="radio"]:checked + .toggle-option {
+    background: #fff;
+    color: #2563eb !important;
+    box-shadow: 0 2px 8px rgba(15,23,42,.08);
+    border: 1px solid #e2e8f0;
   }
 
-  .button-row{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    margin-top:20px;
-    flex-wrap:wrap;
-    padding-top:16px;
-    border-top:1px solid #dbeafe;
+  .ts-dropdown {
+    border: 1px solid #cbd5e1;
+    border-radius: 14px;
+    overflow: hidden;
+    margin-top: 6px;
+    box-shadow: 0 12px 30px rgba(15,23,42,.1);
+    z-index: 9999;
   }
 
-  .btn-group{
-    display:flex;
-    flex-wrap:wrap;
-    gap:10px;
+  .ts-dropdown .ts-dropdown-content {
+    max-height: 220px;
+    padding: 6px;
   }
 
-  .modern-btn{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    gap:8px;
-    min-height:46px;
-    padding:0 18px;
-    border:none;
-    border-radius:14px;
-    cursor:pointer;
-    font-weight:800;
-    font-size:14px;
-    transition:all .18s ease;
-    text-decoration:none;
-    font-family:inherit;
+  .ts-dropdown .option {
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    cursor: pointer;
   }
 
-  .modern-btn:hover{
-    transform:translateY(-1px);
-    box-shadow:0 10px 20px rgba(15,23,42,.10);
+  .ts-dropdown .option.active {
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 600;
   }
 
-  .btn-primary{
-    background:linear-gradient(135deg,#2563eb,#0ea5e9);
-    color:#fff;
+  /* Action Buttons */
+  .button-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    margin-top: 24px;
+    flex-wrap: wrap;
+    padding-top: 18px;
+    border-top: 1px solid #dbeafe;
   }
 
-  .btn-light{
-    background:#fff;
-    border:1px solid #dbe2ea;
-    color:#0f172a;
+  .btn-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
   }
 
-  .table-card{
-    border:1px solid #e5e7eb;
-    border-radius:18px;
-    overflow:hidden;
-    background:#fff;
+  .modern-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 44px;
+    padding: 0 20px;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 14px;
+    transition: all .18s ease;
+    text-decoration: none;
   }
 
-  .table-head{
-    display:flex;
-    justify-content:space-between;
-    align-items:center;
-    gap:10px;
-    padding:14px 16px;
-    border-bottom:1px solid #e5e7eb;
-    background:linear-gradient(180deg,#ffffff,#f8fafc);
+  .modern-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 6px 15px rgba(15,23,42,.08);
   }
 
-  .table-title{
-    font-size:16px;
-    font-weight:800;
-    color:#0f172a;
+  .btn-primary {
+    background: linear-gradient(135deg, #2563eb, #3b82f6);
+    color: #fff;
   }
 
-  .table-sub{
-    font-size:12px;
-    color:#64748b;
-    font-weight:600;
-    margin-top:3px;
+  .btn-light {
+    background: #fff;
+    border: 1px solid #cbd5e1;
+    color: #334155;
   }
 
-  .table-wrap-modern{
-    overflow:auto;
-    max-height:65vh;
+  .table-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 18px;
+    overflow: hidden;
+    background: #fff;
   }
 
-  .table-modern{
-    width:100%;
-    border-collapse:separate;
-    border-spacing:0;
-    min-width:980px;
+  .table-head {
+    padding: 16px 20px;
+    border-bottom: 1px solid #e2e8f0;
+    background: #f8fafc;
   }
 
-  .table-modern thead th{
-    position:sticky;
-    top:0;
-    z-index:2;
-    background:#0f172a;
-    color:#fff;
-    font-size:11px;
-    font-weight:800;
-    text-transform:uppercase;
-    letter-spacing:.05em;
-    padding:14px 12px;
-    text-align:left;
-    white-space:nowrap;
+  .table-title {
+    font-size: 16px;
+    font-weight: 800;
+    color: #0f172a;
   }
 
-  .table-modern tbody td{
-    padding:14px 12px;
-    border-bottom:1px solid #eef2f7;
-    font-size:13px;
-    color:#0f172a;
-    vertical-align:middle;
-    white-space:nowrap;
+  .table-sub {
+    font-size: 12px;
+    color: #64748b;
+    font-weight: 600;
+    margin-top: 4px;
   }
 
-  .table-modern tbody tr:hover td{
-    background:#f8fbff;
+  .table-wrap-modern {
+    overflow: auto;
+    max-height: 60vh;
   }
 
-  .action-stack{
-    display:flex;
-    gap:8px;
-    flex-wrap:wrap;
+  .table-modern {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    min-width: 980px;
   }
 
-  .mini-btn{
-    min-height:40px;
-    padding:0 18px;
-    border:none;
-    border-radius:12px;
-    cursor:pointer;
-    font-weight:800;
-    font-size:13px;
-    transition:all .15s ease;
-    font-family:inherit;
+  .table-modern thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: #0f172a;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    padding: 14px 16px;
+    text-align: left;
+    white-space: nowrap;
   }
 
-  .mini-btn:hover{
-    transform:translateY(-1px);
+  .table-modern tbody td {
+    padding: 14px 16px;
+    border-bottom: 1px solid #f1f5f9;
+    font-size: 13px;
+    color: #1e293b;
+    font-weight: 500;
+    vertical-align: middle;
+    white-space: nowrap;
   }
 
-  .mini-lock{
-    background:linear-gradient(135deg,#dc2626,#ef4444);
-    color:#fff;
+  .table-modern tbody tr:hover td {
+    background: #f8fafc;
   }
 
-  .empty-row{
-    text-align:center;
-    color:#64748b;
-    padding:24px !important;
-    font-weight:600;
+  .mini-btn {
+    height: 38px;
+    padding: 0 16px;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    font-weight: 800;
+    font-size: 12px;
+    transition: all .15s ease;
   }
 
-  .alert-msg{
-    padding:14px 16px;
-    border-radius:14px;
-    margin-bottom:16px;
-    font-weight:700;
-    font-size:14px;
+  .mini-lock {
+    background: linear-gradient(135deg, #ef4444, #f43f5e);
+    color: #fff;
   }
 
-  .alert-danger{
-    background:#fef2f2;
-    border:1px solid #fecaca;
-    color:#991b1b;
+  .mini-lock:hover:not(:disabled) {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(239,68,68,.25);
   }
 
-  .alert-success{
-    background:#ecfdf5;
-    border:1px solid #a7f3d0;
-    color:#065f46;
+  .mini-lock:disabled {
+    background: #e2e8f0 !important;
+    color: #94a3b8 !important;
+    cursor: not-allowed;
+    box-shadow: none;
+    transform: none;
   }
 
-  @media (max-width: 1100px){
-    .form-grid{ grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .empty-row {
+    text-align: center;
+    color: #64748b;
+    padding: 30px !important;
+    font-weight: 600;
   }
 
-  @media (max-width: 700px){
-    .form-grid{ grid-template-columns: 1fr; }
-    .hero-head{ align-items:flex-start; }
-    .button-row{ flex-direction:column; align-items:stretch; }
-    .btn-group{ width:100%; }
+  @media (max-width: 1200px) {
+    .form-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 900px) {
+    .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 700px) {
+    .form-grid { grid-template-columns: 1fr; }
+    .button-row { flex-direction: column; align-items: stretch; }
+    .btn-group { width: 100%; display: flex; }
+    .btn-group .modern-btn { flex: 1; }
   }
 </style>
 
@@ -414,12 +414,14 @@
 
   <div class="hero-head">
     <div>
-      <h1 class="hero-title">Policy Lock Checker</h1>
+      <h1 class="hero-title">Motor Points</h1>
       <div class="hero-sub">
         Search matching payout records, then lock a policy for a specific vehicle and policy holder.
       </div>
     </div>
+    {% if has_searched %}
     <div class="match-badge">Valid Matches Found: {{ total_found|default:0 }}</div>
+    {% endif %}
   </div>
 
   <div class="search-panel">
@@ -429,7 +431,7 @@
       <div class="form-grid">
         <div class="field-group">
           <label>Select Date</label>
-          <input type="date" name="target_date" value="{{ selected.target_date }}">
+          <input type="date" id="target_date_input" name="target_date" value="{{ selected.target_date }}">
         </div>
 
         <div class="field-group">
@@ -549,9 +551,8 @@
       <div class="button-row">
         <div class="btn-group">
           <button type="submit" class="modern-btn btn-primary">🔍 Check Eligibility</button>
-          <a href="{% url 'policy_lock_checker' %}" class="modern-btn btn-light">Clear</a>
+          <a href="{% url 'policy_lock_checker' %}" class="modern-btn btn-light">Clear Form</a>
         </div>
-
         <div class="btn-group">
           <a href="{% url 'locked_policy_dashboard' %}" class="modern-btn btn-light">📋 View Locked Dashboard</a>
         </div>
@@ -559,6 +560,7 @@
     </form>
   </div>
 
+  {% if has_searched %}
   <div class="table-card">
     <div class="table-head">
       <div>
@@ -583,52 +585,55 @@
         <tbody>
           {% for row in data %}
           <tr>
-            <td>{{ row.display_group_id }}</td>
+            <td><strong>{{ row.display_group_id }}</strong></td>
             <td>{{ row.insurance_company }}</td>
             <td>{{ row.po_type|default:"-" }}</td>
-            <td>{{ row.po_rate|default:"0" }}</td>
-            <td>{{ row.po_flat_amount|default:"0" }}</td>
+            <td style="color:#059669; font-weight:800;">{{ row.po_rate|default:"0" }}%</td>
+            <td>₹{{ row.po_flat_amount|default:"0" }}</td>
             <td>{{ row.add_tnc|default:"-" }}</td>
             <td>
-              <div class="action-stack">
-                <form method="post" action="{% url 'lock_unlock_policy' row.id %}">
-                  {% csrf_token %}
-                  <input type="hidden" name="rate_id" value="{{ row.id }}">
-                  <input type="hidden" name="action_type" value="LOCK">
-                  <input type="hidden" name="vehicle_no" value="{{ selected.vehicle_no }}">
-                  <input type="hidden" name="policy_holder_name" value="{{ selected.policy_holder_name }}">
-                  <input type="hidden" name="target_date" value="{{ selected.target_date }}">
-                  <input type="hidden" name="product" value="{{ selected.product }}">
-                  <input type="hidden" name="make_model_class" value="{{ selected.make_model_class }}">
-                  <input type="hidden" name="sub_product" value="{{ selected.sub_product }}">
-                  <input type="hidden" name="make_names" value="{{ selected.make_names }}">
-                  <input type="hidden" name="rto_code" value="{{ selected.rto_code }}">
-                  <input type="hidden" name="cc" value="{{ selected.cc }}">
-                  <input type="hidden" name="fuel" value="{{ selected.fuel }}">
-                  <input type="hidden" name="sc" value="{{ selected.sc }}">
-                  <input type="hidden" name="mfg_year" value="{{ selected.mfg_year }}">
-                  <input type="hidden" name="is_zd" value="{{ selected.is_zd|default:'NO' }}">
-                  <input type="hidden" name="is_cpa" value="{{ selected.is_cpa|default:'NO' }}">
-                  <input type="hidden" name="is_ncb" value="{{ selected.is_ncb|default:'NO' }}">
-                  <button type="submit" class="mini-btn mini-lock">Lock</button>
-                </form>
-              </div>
+              <form class="ajax-lock-form" action="{% url 'lock_unlock_policy' row.id %}" style="margin:0;">
+                {% csrf_token %}
+                <input type="hidden" name="action_type" value="LOCK">
+                <input type="hidden" name="vehicle_no" value="{{ selected.vehicle_no }}">
+                <input type="hidden" name="policy_holder_name" value="{{ selected.policy_holder_name }}">
+                <input type="hidden" name="target_date" value="{{ selected.target_date }}">
+                <input type="hidden" name="rto_code" value="{{ selected.rto_code }}">
+                <input type="hidden" name="make_names" value="{{ selected.make_names }}">
+                <input type="hidden" name="fuel" value="{{ selected.fuel }}">
+                <input type="hidden" name="cc" value="{{ selected.cc }}">
+                <input type="hidden" name="sc" value="{{ selected.sc }}">
+                <input type="hidden" name="mfg_year" value="{{ selected.mfg_year }}">
+                
+                <button type="submit" class="mini-btn mini-lock lock-submit-btn">Lock Rate</button>
+              </form>
             </td>
           </tr>
           {% empty %}
           <tr>
-            <td colspan="7" class="empty-row">No matching records found.</td>
+            <td colspan="7" class="empty-row">
+              <span style="font-size: 18px; display:block; margin-bottom: 8px;">📭</span>
+              No matching records found for this combination.
+            </td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
   </div>
+  {% else %}
+  <div class="table-card" style="padding: 60px 20px; text-align: center; border: 2px dashed #cbd5e1; background: transparent; box-shadow: none;">
+      <div style="font-size: 40px; margin-bottom: 10px;">🔍</div>
+      <h3 style="color: #0f172a; margin-bottom: 5px;">Ready to Search</h3>
+      <p style="color: #64748b; font-size: 14px;">Enter vehicle details above and click <b>Check Eligibility</b> to view matching rates.</p>
+  </div>
+  {% endif %}
 
 </div>
 
 <script>
   document.addEventListener("DOMContentLoaded", function () {
+    // 1. Initialize TomSelect
     document.querySelectorAll(".smart-dropdown").forEach(function (el) {
       if (el.tomselect) return;
 
@@ -638,16 +643,109 @@
         allowEmptyOption: true,
         placeholder: el.getAttribute("data-placeholder") || "Select...",
         searchField: ["text"],
-        sortField: [],
+        sortField: [{field: "text", direction: "asc"}],
         dropdownClass: "ts-dropdown",
         controlInput: "<input>",
         render: {
           no_results: function () {
-            return '<div class="no-results">No results found</div>';
+            return '<div class="no-results" style="padding:10px; color:#64748b; font-size:13px;">No results found</div>';
           }
         }
       });
     });
+
+    // 2. Strict Date Logic (Disable locking for past dates)
+    const dateInput = document.getElementById("target_date_input");
+    const todayObj = new Date();
+    const todayStr = todayObj.getFullYear() + '-' + 
+                     String(todayObj.getMonth() + 1).padStart(2, '0') + '-' + 
+                     String(todayObj.getDate()).padStart(2, '0');
+
+    dateInput.setAttribute("max", todayStr);
+
+    function validateLocking() {
+      const selectedDate = dateInput.value;
+      const lockButtons = document.querySelectorAll(".lock-submit-btn");
+      
+      if (selectedDate && selectedDate < todayStr) {
+        lockButtons.forEach(btn => {
+          btn.disabled = true;
+          btn.title = "Cannot lock policies for past dates.";
+          btn.innerHTML = "Past Date";
+        });
+      } else {
+        lockButtons.forEach(btn => {
+          // Only reset if it hasn't been locked yet
+          if(btn.innerHTML !== "Locked") {
+             btn.disabled = false;
+             btn.title = "Lock this rate";
+             btn.innerHTML = "Lock Rate";
+          }
+        });
+      }
+    }
+
+    validateLocking();
+    dateInput.addEventListener("change", validateLocking);
+
+    // 3. AJAX Submission for Lock Forms
+    document.querySelectorAll('.ajax-lock-form').forEach(form => {
+        form.addEventListener('submit', function(e) {
+            e.preventDefault(); // Stop page reload!
+            
+            const formData = new FormData(this);
+            const url = this.action;
+            const btn = this.querySelector('.lock-submit-btn');
+
+            // Set to loading state
+            btn.disabled = true;
+            btn.innerHTML = "Locking...";
+
+            fetch(url, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if(data.success) {
+                    // Success Popup
+                    Swal.fire({
+                        icon: 'success',
+                        title: 'Locked!',
+                        text: data.message,
+                        confirmButtonColor: '#059669',
+                        timer: 2500
+                    });
+                    
+                    // Visually disable the button permanently 
+                    btn.innerHTML = "Locked";
+                    btn.classList.remove('mini-lock');
+                    btn.style.background = "#cbd5e1";
+                    btn.style.color = "#f1f5f9";
+                    btn.style.cursor = "not-allowed";
+                } else {
+                    // Error Popup (e.g. Missing Vehicle No)
+                    Swal.fire({
+                        icon: 'error',
+                        title: 'Wait a second...',
+                        text: data.message,
+                        confirmButtonColor: '#dc2626'
+                    });
+                    btn.disabled = false;
+                    btn.innerHTML = "Lock Rate";
+                }
+            })
+            .catch(error => {
+                Swal.fire('Error', 'Server connection failed.', 'error');
+                btn.disabled = false;
+                btn.innerHTML = "Lock Rate";
+            });
+        });
+    });
+
   });
 </script>
 {% endblock %}
