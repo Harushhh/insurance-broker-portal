@@ -1,33 +1,51 @@
+# ===============================
 # Python
+# ===============================
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
 
+# ===============================
 # Django
+# ===============================
 db.sqlite3
 *.log
+local_settings.py
 
-# Virtual environments
+# ===============================
+# Virtual Environments
+# ===============================
 venv/
 env/
 .venv/
 
-# VS Code
-.vscode/
+# ===============================
+# Environment Variables
+# ===============================
+.env
+.env.*
 
-# OS files
+# ===============================
+# Media & Static
+# ===============================
+media/
+staticfiles/
+
+# ===============================
+# IDE / Editor
+# ===============================
+.vscode/
+.idea/
+
+# ===============================
+# OS Files
+# ===============================
 .DS_Store
 Thumbs.db
 
-# Media uploads
-media/
-
-# Collected static files
-staticfiles/
-
-# Backups
+# ===============================
+# Backup & Temp
+# ===============================
 *.json
-
-# Environment variables
-.env
+*.bak
+*.swp

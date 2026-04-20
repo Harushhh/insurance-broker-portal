@@ -2705,3 +2705,8 @@ class ExportRatesAPIView(generics.ListAPIView):
     permission_classes = [HasAPIKey] 
     queryset = RateMaster.objects.filter(is_deleted="NO") 
     serializer_class = RateMasterSerializer
+
+
+@login_required
+def mapping_management(request):
+    return render(request, "insurance/mapping_management.html")

@@ -17,6 +17,11 @@ urlpatterns = [
     path("user-management/", views.user_management, name="user_management"),
     path("grid-management/", views.grid_management, name="grid_management"),
 
+    # ================================
+    # 🔹 NEW - Mapping Management Module
+    # ================================
+    path("mapping-management/", views.mapping_management, name="mapping_management"),
+
     # PDF extraction + MIS pages
     path("upload-extract-pdf/", views.upload_extract_pdf, name="upload_extract_pdf"),
     path("my-mis/", views.my_mis, name="my_mis"),
@@ -59,11 +64,11 @@ urlpatterns = [
         auth_views.PasswordResetCompleteView.as_view(template_name="password_reset_complete.html"),
         name="password_reset_complete"
     ),
+
     path('motor-points-logs/', views.motor_points_audit_logs, name='motor_points_audit_logs'),
-    
+
     # ==========================================
     # REST API ENDPOINTS
     # ==========================================
-    # This is the endpoint the external system will use, and what Swagger will document
     path('api/v1/export-rates/', views.ExportRatesAPIView.as_view(), name='api-export-rates'),
 ]
