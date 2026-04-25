@@ -1,593 +1,95 @@
-{% extends "base.html" %}
-{% block title %}Upload & Extract PDF{% endblock %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Upload Policy Document</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
+        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px; max-width: 1000px; margin-left: auto; margin-right: auto; }
+        .alert-success { background: #d4edda; color: #155724; padding: 15px; border-radius: 4px; margin-bottom: 20px; border: 1px solid #c3e6cb; }
+        .alert-danger { background: #f8d7da; color: #721c24; padding: 15px; border-radius: 4px; margin-bottom: 20px; border: 1px solid #f5c6cb; }
+        
+        .upload-area { border: 2px dashed #ccc; padding: 40px; text-align: center; border-radius: 8px; background: #fafafa; margin-bottom: 15px; }
+        .upload-area:hover { border-color: #0d6efd; background: #f0f7ff; }
+        
+        .btn { padding: 10px 20px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; font-weight: 500; text-decoration: none; display: inline-block; }
+        .btn:hover { background: #0b5ed7; }
+        .btn-view { background: #198754; font-size: 0.85em; padding: 6px 12px; }
+        
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.95em; }
+        th, td { padding: 12px 15px; border-bottom: 1px solid #eee; text-align: left; }
+        th { color: #666; font-weight: 600; background: #f8f9fa; }
+        
+        .badge { padding: 5px 10px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
+        .badge-completed { background: #d4edda; color: #155724; }
+        .badge-pending { background: #e2e3e5; color: #383d41; }
+        .badge-processing { background: #cce5ff; color: #004085; }
+        .badge-failed { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
 
-{% block content %}
-<div class="extract-page">
-  <div class="hero-card">
-    <div class="hero-left">
-      <div class="hero-icon">📄</div>
-      <div>
-        <h1>Upload & Extract PDF</h1>
-        <p class="hero-sub">
-          Upload policy PDF or image and extract MIS fields using your alias mapping.
-        </p>
-      </div>
-    </div>
+<div class="card">
+    <h2>📄 Upload Policy Document</h2>
+    <p style="color: #666;">Upload a PDF or Image (JPG/PNG). The AI will automatically extract the fields configured in your rulebook.</p>
 
-    <div class="hero-stats">
-      <div class="stat-box">
-        <div class="stat-label">Uploads</div>
-        <div class="stat-value">{{ documents|length }}</div>
-      </div>
+    {% if msg %} <div class="alert-success">{{ msg }}</div> {% endif %}
+    {% if error %} <div class="alert-danger">{{ error }}</div> {% endif %}
 
-      {% if latest_document %}
-      <div class="stat-box">
-        <div class="stat-label">Latest Status</div>
-        <div class="stat-value small">
-          {{ latest_document.status }}
-        </div>
-      </div>
-      {% endif %}
-    </div>
-  </div>
-
-  {% if msg %}
-    <div class="alert success">{{ msg }}</div>
-  {% endif %}
-
-  {% if error %}
-    <div class="alert error">{{ error }}</div>
-  {% endif %}
-
-  <div class="top-grid">
-    <div class="panel-card">
-      <div class="panel-header">
-        <div>
-          <h3>Upload Document</h3>
-          <p>Select a PDF, PNG, JPG, or JPEG file for extraction.</p>
-        </div>
-      </div>
-
-      <form method="POST" enctype="multipart/form-data" class="form-grid">
+    <form method="POST" enctype="multipart/form-data">
         {% csrf_token %}
-
-        <div class="form-group">
-          <label>Choose File</label>
-          {{ upload_form.uploaded_file }}
-          {% if upload_form.uploaded_file.errors %}
-            <div class="field-error">{{ upload_form.uploaded_file.errors|striptags }}</div>
-          {% endif %}
+        <div class="upload-area">
+            {{ upload_form.uploaded_file }}
         </div>
-
-        <div class="helper-box">
-          <div class="helper-title">How it works</div>
-          <ul class="helper-list">
-            <li>Upload policy document.</li>
-            <li>System reads text from PDF or image.</li>
-            <li>Aliases are matched against extracted labels.</li>
-            <li>Mapped values are saved into MIS records.</li>
-          </ul>
-        </div>
-
-        <div class="form-actions">
-          <button type="submit" class="btn-primary violet">Upload & Extract</button>
-        </div>
-      </form>
-    </div>
-
-    <div class="panel-card">
-      <div class="panel-header">
-        <div>
-          <h3>Latest Extracted Output</h3>
-          <p>Preview of the most recent extracted document.</p>
-        </div>
-      </div>
-
-      {% if latest_document %}
-        <div class="preview-grid">
-          <div class="info-row">
-            <span class="info-label">File</span>
-            <span class="info-value">{{ latest_document.original_filename|default:"-" }}</span>
-          </div>
-
-          <div class="info-row">
-            <span class="info-label">Method</span>
-            <span class="info-value">{{ latest_document.extraction_method|default:"-" }}</span>
-          </div>
-
-          <div class="info-row">
-            <span class="info-label">Status</span>
-            <span class="info-value">
-              {% if latest_document.status == "COMPLETED" %}
-                <span class="status-badge active">Completed</span>
-              {% elif latest_document.status == "FAILED" %}
-                <span class="status-badge inactive">Failed</span>
-              {% elif latest_document.status == "PROCESSING" %}
-                <span class="status-badge pending">Processing</span>
-              {% else %}
-                <span class="status-badge pending">{{ latest_document.status }}</span>
-              {% endif %}
-            </span>
-          </div>
-
-          {% if latest_document.parsed_json %}
-            <div class="json-box">
-              <div class="json-title">Extracted Fields</div>
-              <div class="json-content">
-                {% for key, value in latest_document.parsed_json.items %}
-                  <div class="json-row">
-                    <span class="json-key">{{ key }}</span>
-                    <span class="json-sep">:</span>
-                    <span class="json-value">{{ value }}</span>
-                  </div>
-                {% endfor %}
-              </div>
-            </div>
-          {% else %}
-            <div class="empty-box">
-              No extracted fields found yet.
-            </div>
-          {% endif %}
-
-          {% if latest_document.error_message %}
-            <div class="error-box">
-              <strong>Error:</strong> {{ latest_document.error_message }}
-            </div>
-          {% endif %}
-        </div>
-      {% else %}
-        <div class="empty-box">
-          No document uploaded yet.
-        </div>
-      {% endif %}
-    </div>
-  </div>
-
-  <div class="panel-card table-panel">
-    <div class="panel-header">
-      <div>
-        <h3>Recent Uploads</h3>
-        <p>Latest uploaded policy documents and extraction results.</p>
-      </div>
-    </div>
-
-    <div class="table-wrap">
-      <table class="modern-table">
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>File Name</th>
-            <th>Status</th>
-            <th>Method</th>
-            <th>Uploaded By</th>
-            <th>Created At</th>
-            <th>Processed At</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for doc in documents %}
-            <tr>
-              <td>{{ doc.id }}</td>
-              <td>{{ doc.original_filename|default:"-" }}</td>
-              <td>
-                {% if doc.status == "COMPLETED" %}
-                  <span class="status-badge active">Completed</span>
-                {% elif doc.status == "FAILED" %}
-                  <span class="status-badge inactive">Failed</span>
-                {% elif doc.status == "PROCESSING" %}
-                  <span class="status-badge pending">Processing</span>
-                {% else %}
-                  <span class="status-badge pending">{{ doc.status }}</span>
-                {% endif %}
-              </td>
-              <td>{{ doc.extraction_method|default:"-" }}</td>
-              <td>{{ doc.uploaded_by|default:"-" }}</td>
-              <td>{{ doc.created_at|date:"d M Y, h:i A" }}</td>
-              <td>
-                {% if doc.processed_at %}
-                  {{ doc.processed_at|date:"d M Y, h:i A" }}
-                {% else %}
-                  -
-                {% endif %}
-              </td>
-            </tr>
-          {% empty %}
-            <tr>
-              <td colspan="7" class="empty-cell">No uploads found.</td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
+        <button type="submit" class="btn">Extract Data</button>
+    </form>
 </div>
 
-<style>
-  .extract-page {
-    display: flex;
-    flex-direction: column;
-    gap: 18px;
-  }
+<div class="card">
+    <h3>Recent Uploads</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>File Name</th>
+                <th>Uploaded By</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Action</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for doc in documents %}
+            <tr>
+                <td><strong>{{ doc.original_filename|default:"Unnamed File" }}</strong></td>
+                <td>{{ doc.uploaded_by.username|default:"System" }}</td>
+                <td>{{ doc.created_at|date:"M d, Y H:i" }}</td>
+                <td>
+                    {% if doc.status == 'COMPLETED' %}
+                        <span class="badge badge-completed">Completed</span>
+                    {% elif doc.status == 'FAILED' %}
+                        <span class="badge badge-failed" title="{{ doc.error_message }}">Failed</span>
+                    {% elif doc.status == 'PROCESSING' %}
+                        <span class="badge badge-processing">Processing...</span>
+                    {% else %}
+                        <span class="badge badge-pending">Pending</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if doc.status == 'COMPLETED' %}
+                        <a href="{% url 'my_mis' %}?policy_number={{ doc.mis_record.policy_number }}" class="btn btn-view">Review Data →</a>
+                    {% else %}
+                        <span style="color: #999; font-size: 0.9em;">Waiting...</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% empty %}
+            <tr>
+                <td colspan="5" style="text-align: center; color: #999;">No documents uploaded yet.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
 
-  .hero-card,
-  .panel-card {
-    background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
-    border: 1px solid #e6edf5;
-    border-radius: 22px;
-    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
-  }
-
-  .hero-card {
-    padding: 24px 26px;
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    align-items: center;
-    flex-wrap: wrap;
-  }
-
-  .hero-left {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .hero-icon {
-    width: 58px;
-    height: 58px;
-    border-radius: 18px;
-    background: linear-gradient(135deg, #7c3aed, #2563eb);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 28px;
-    box-shadow: 0 10px 24px rgba(109, 40, 217, 0.24);
-  }
-
-  .hero-left h1 {
-    margin: 0 0 6px;
-    font-size: 30px;
-    line-height: 1.1;
-    color: #0f172a;
-  }
-
-  .hero-sub {
-    margin: 0;
-    color: #64748b;
-    font-size: 14px;
-  }
-
-  .hero-stats {
-    display: flex;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-
-  .stat-box {
-    min-width: 130px;
-    padding: 14px 18px;
-    border-radius: 18px;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    text-align: center;
-  }
-
-  .stat-label {
-    font-size: 11px;
-    font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: #64748b;
-    margin-bottom: 6px;
-  }
-
-  .stat-value {
-    font-size: 28px;
-    font-weight: 800;
-    color: #0f172a;
-  }
-
-  .stat-value.small {
-    font-size: 18px;
-  }
-
-  .alert {
-    padding: 14px 18px;
-    border-radius: 16px;
-    font-weight: 600;
-    font-size: 14px;
-  }
-
-  .alert.success {
-    background: #ecfdf3;
-    color: #166534;
-    border: 1px solid #bbf7d0;
-  }
-
-  .alert.error {
-    background: #fef2f2;
-    color: #991b1b;
-    border: 1px solid #fecaca;
-  }
-
-  .top-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 18px;
-  }
-
-  .panel-card {
-    padding: 20px;
-  }
-
-  .panel-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: start;
-    margin-bottom: 16px;
-    gap: 10px;
-  }
-
-  .panel-header h3 {
-    margin: 0 0 6px;
-    font-size: 20px;
-    color: #0f172a;
-  }
-
-  .panel-header p {
-    margin: 0;
-    color: #64748b;
-    font-size: 13px;
-  }
-
-  .form-grid {
-    display: grid;
-    gap: 14px;
-  }
-
-  .form-group label {
-    display: block;
-    margin-bottom: 6px;
-    font-size: 12px;
-    font-weight: 700;
-    color: #475569;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .form-group input,
-  .form-group select,
-  .form-group textarea {
-    width: 100%;
-    padding: 12px 14px;
-    border-radius: 14px;
-    border: 1px solid #dbe4ee;
-    background: #fff;
-    font-size: 14px;
-    color: #0f172a;
-    outline: none;
-  }
-
-  .field-error {
-    color: #b91c1c;
-    font-size: 12px;
-    margin-top: 6px;
-  }
-
-  .helper-box,
-  .json-box,
-  .empty-box,
-  .error-box {
-    border-radius: 18px;
-    border: 1px solid #e2e8f0;
-    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
-    padding: 16px;
-  }
-
-  .helper-title,
-  .json-title {
-    font-size: 15px;
-    font-weight: 800;
-    color: #0f172a;
-    margin-bottom: 10px;
-  }
-
-  .helper-list {
-    margin: 0;
-    padding-left: 18px;
-    color: #475569;
-    line-height: 1.7;
-    font-size: 14px;
-  }
-
-  .form-actions {
-    display: flex;
-    gap: 10px;
-    align-items: center;
-    flex-wrap: wrap;
-    margin-top: 4px;
-  }
-
-  .btn-primary {
-    border: none;
-    cursor: pointer;
-    text-decoration: none;
-    font-weight: 700;
-    transition: all 0.18s ease;
-    background: linear-gradient(135deg, #7c3aed, #2563eb);
-    color: #fff;
-    padding: 12px 18px;
-    border-radius: 14px;
-    box-shadow: 0 10px 20px rgba(109, 40, 217, 0.20);
-  }
-
-  .btn-primary:hover {
-    transform: translateY(-1px);
-  }
-
-  .preview-grid {
-    display: grid;
-    gap: 12px;
-  }
-
-  .info-row {
-    display: grid;
-    grid-template-columns: 140px 1fr;
-    gap: 12px;
-    align-items: center;
-    padding: 10px 12px;
-    border-radius: 12px;
-    background: #f8fafc;
-    border: 1px solid #e2e8f0;
-  }
-
-  .info-label {
-    font-size: 12px;
-    font-weight: 800;
-    color: #64748b;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .info-value {
-    color: #0f172a;
-    font-weight: 600;
-  }
-
-  .json-content {
-    display: grid;
-    gap: 8px;
-  }
-
-  .json-row {
-    display: grid;
-    grid-template-columns: 180px 14px 1fr;
-    gap: 8px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: #f8fafc;
-    border: 1px solid #edf2f7;
-  }
-
-  .json-key {
-    font-weight: 700;
-    color: #1d4ed8;
-    word-break: break-word;
-  }
-
-  .json-sep {
-    text-align: center;
-    color: #64748b;
-    font-weight: 700;
-  }
-
-  .json-value {
-    color: #0f172a;
-    word-break: break-word;
-  }
-
-  .error-box {
-    background: #fef2f2;
-    color: #991b1b;
-    border: 1px solid #fecaca;
-  }
-
-  .table-panel {
-    overflow: hidden;
-  }
-
-  .table-wrap {
-    overflow-x: auto;
-    border: 1px solid #e5edf5;
-    border-radius: 18px;
-    background: #fff;
-  }
-
-  .modern-table {
-    width: 100%;
-    border-collapse: collapse;
-    min-width: 900px;
-  }
-
-  .modern-table thead th {
-    background: #f8fafc;
-    color: #475569;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-weight: 800;
-    padding: 14px 16px;
-    border-bottom: 1px solid #e2e8f0;
-    text-align: left;
-  }
-
-  .modern-table tbody td {
-    padding: 14px 16px;
-    border-bottom: 1px solid #eef2f7;
-    color: #334155;
-    font-size: 14px;
-    vertical-align: middle;
-  }
-
-  .modern-table tbody tr:hover {
-    background: #f8fbff;
-  }
-
-  .status-badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 6px 10px;
-    border-radius: 999px;
-    font-size: 12px;
-    font-weight: 800;
-    letter-spacing: 0.03em;
-  }
-
-  .status-badge.active {
-    background: #dcfce7;
-    color: #166534;
-    border: 1px solid #bbf7d0;
-  }
-
-  .status-badge.inactive {
-    background: #fef2f2;
-    color: #991b1b;
-    border: 1px solid #fecaca;
-  }
-
-  .status-badge.pending {
-    background: #eff6ff;
-    color: #1d4ed8;
-    border: 1px solid #bfdbfe;
-  }
-
-  .empty-cell {
-    text-align: center;
-    color: #64748b;
-    padding: 28px 16px !important;
-  }
-
-  @media (max-width: 1100px) {
-    .top-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .hero-card {
-      align-items: flex-start;
-    }
-
-    .hero-stats {
-      width: 100%;
-    }
-
-    .stat-box {
-      flex: 1;
-    }
-
-    .json-row,
-    .info-row {
-      grid-template-columns: 1fr;
-    }
-  }
-</style>
-{% endblock %}
+</body>
+</html>

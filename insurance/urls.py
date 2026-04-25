@@ -17,14 +17,12 @@ urlpatterns = [
     path("user-management/", views.user_management, name="user_management"),
     path("grid-management/", views.grid_management, name="grid_management"),
 
-    # ================================
-    # 🔹 NEW - Mapping Management Module
-    # ================================
-    path("mapping-management/", views.mapping_management, name="mapping_management"),
-
-    # PDF extraction + MIS pages
+    # AI OCR & PDF extraction Pipeline
     path("upload-extract-pdf/", views.upload_extract_pdf, name="upload_extract_pdf"),
     path("my-mis/", views.my_mis, name="my_mis"),
+    path('mis-review/<int:pk>/', views.mis_review, name='mis_review'),
+    path('configurator/', views.field_configurator, name='field_configurator'),
+    path('configurator/delete/<int:pk>/', views.delete_field, name='delete_field'),
 
     # Policy Lock System
     path("policy-lock-checker/", views.policy_lock_checker, name="policy_lock_checker"),
@@ -43,9 +41,6 @@ urlpatterns = [
     # Master edit routes
     path("rto/edit/<int:pk>/", views.edit_rto, name="edit_rto"),
     path("make-model/edit/<int:pk>/", views.edit_make_model, name="edit_make_model"),
-
-    # Alias Management
-    path("alias-management/", views.alias_management, name="alias_management"),
 
     # Password reset
     path("password-reset/", views.direct_password_reset, name="password_reset"),

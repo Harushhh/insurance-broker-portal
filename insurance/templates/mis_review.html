@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Review Extracted Data</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
+        .header-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        
+        .split-layout { display: flex; gap: 20px; align-items: flex-start; }
+        .panel { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); flex: 1; height: 75vh; overflow-y: auto; }
+        
+        .form-group { margin-bottom: 15px; }
+        label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #444; }
+        .mandatory-star { color: #dc3545; }
+        .form-control { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        
+        /* Highlight fields the AI missed */
+        .needs-attention { border-color: #dc3545; background-color: #fff8f8; }
+        .error-text { color: #dc3545; font-size: 0.8em; margin-top: 4px; display: block; }
+        
+        .btn { padding: 10px 20px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; }
+        .btn:hover { background: #0b5ed7; }
+        .btn-secondary { background: #6c757d; text-decoration: none; display: inline-block; }
+        
+        .raw-text { white-space: pre-wrap; font-family: monospace; font-size: 0.85em; color: #555; background: #f4f4f4; padding: 15px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+
+<div class="header-card">
+    <div>
+        <h2 style="margin: 0;">Review: {{ record.source_document.original_filename }}</h2>
+        <p style="margin: 5px 0 0 0; color: #666; font-size: 0.9em;">Extracted via {{ record.source_document.extraction_method }} on {{ record.created_at|date:"M d, Y H:i" }}</p>
+    </div>
+    <div>
+        <a href="{% url 'my_mis' %}" class="btn btn-secondary">← Back to List</a>
+    </div>
+</div>
+
+<div class="split-layout">
+    <div class="panel">
+        <h3 style="margin-top: 0;">Raw Document Text</h3>
+        <p style="font-size: 0.85em; color: #666;">Use this to find missing information if the AI couldn't map it automatically.</p>
+        
+        {% if record.source_document.uploaded_file %}
+            <a href="{{ record.source_document.uploaded_file.url }}" target="_blank" style="display: block; margin-bottom: 15px; color: #0d6efd;">📄 Open Original PDF/Image</a>
+        {% endif %}
+        
+        <div class="raw-text">{{ record.source_document.extracted_text|default:"No raw text available." }}</div>
+    </div>
+
+    <div class="panel">
+        <h3 style="margin-top: 0;">Extracted Data Fields</h3>
+        
+        <form method="POST">
+            {% csrf_token %}
+            
+            {% for data in field_data %}
+            <div class="form-group">
+                <label>
+                    {{ data.rule.field_name }} 
+                    {% if data.rule.is_mandatory %}<span class="mandatory-star">*</span>{% endif %}
+                </label>
+                
+                <input type="text" 
+                       name="{{ data.key }}" 
+                       value="{{ data.value }}" 
+                       class="form-control {% if data.is_missing_mandatory %}needs-attention{% endif %}"
+                       {% if data.rule.has_dropdown %}list="list_{{ data.key }}"{% endif %}>
+                       
+                {% if data.is_missing_mandatory %}
+                    <span class="error-text">Mandatory field missing. Please review the raw text.</span>
+                {% endif %}
+                
+                {% if data.rule.has_dropdown %}
+                    <datalist id="list_{{ data.key }}">
+                        <option value="HDFC ERGO">
+                        <option value="ICICI Lombard">
+                        <option value="Bajaj Allianz">
+                        <option value="Tata AIG">
+                        </datalist>
+                {% endif %}
+            </div>
+            {% endfor %}
+            
+            <hr style="border-top: 1px solid #eee; margin: 20px 0;">
+            <button type="submit" class="btn">Save & Verify Document</button>
+        </form>
+    </div>
+</div>
+
+</body>
+</html>

@@ -529,7 +529,7 @@
             <div class="dd-muted">Extraction & MIS</div>
 
             {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Alias_Management" %}
-              <a class="dd-item {% if request.path == '/alias-management/' %}active-link{% endif %}" href="{% url 'alias_management' %}">🧠 Alias Management</a>
+              <a class="dd-item {% if request.path == '/configurator/' %}active-link{% endif %}" href="{% url 'field_configurator' %}">🧠 AI Rulebook</a>
             {% endif %}
 
             {% if request.user.is_authenticated %}

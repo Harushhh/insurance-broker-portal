@@ -3,8 +3,8 @@ from .models import (
     RateMaster,
     RTOMaster,
     MakeModelMaster,
-    MISFieldMaster,
-    MISFieldAlias,
+    ExtractionField,
+    FieldSynonym,
     PolicyDocumentUpload,
     PolicyMISRecord,
 )
@@ -97,27 +97,33 @@ class MakeModelMasterAdmin(admin.ModelAdmin):
     ordering = ("make_model_name",)
 
 
-class MISFieldAliasInline(admin.TabularInline):
-    model = MISFieldAlias
+# =========================================================
+# AI OCR RULEBOOK ADMIN
+# =========================================================
+
+class FieldSynonymInline(admin.TabularInline):
+    model = FieldSynonym
     extra = 1
 
+@admin.register(ExtractionField)
+class ExtractionFieldAdmin(admin.ModelAdmin):
+    list_display = ("id", "field_name", "category", "order_index", "is_mandatory", "extraction_method", "is_active")
+    search_fields = ("field_name", "category")
+    list_filter = ("category", "is_mandatory", "extraction_method", "is_active", "has_dropdown")
+    ordering = ("category", "order_index")
+    inlines = [FieldSynonymInline]
 
-@admin.register(MISFieldMaster)
-class MISFieldMasterAdmin(admin.ModelAdmin):
-    list_display = ("id", "field_key", "field_label", "is_active")
-    search_fields = ("field_key", "field_label")
-    list_filter = ("is_active",)
-    ordering = ("field_label",)
-    inlines = [MISFieldAliasInline]
+@admin.register(FieldSynonym)
+class FieldSynonymAdmin(admin.ModelAdmin):
+    list_display = ("id", "synonym_text", "extraction_field")
+    search_fields = ("synonym_text", "extraction_field__field_name")
+    list_filter = ("extraction_field__category",)
+    ordering = ("extraction_field__field_name", "synonym_text")
 
 
-@admin.register(MISFieldAlias)
-class MISFieldAliasAdmin(admin.ModelAdmin):
-    list_display = ("id", "alias_text", "field_master", "is_active")
-    search_fields = ("alias_text", "field_master__field_key", "field_master__field_label")
-    list_filter = ("is_active", "field_master")
-    ordering = ("field_master__field_label", "alias_text")
-
+# =========================================================
+# DOCUMENT & MIS ADMIN
+# =========================================================
 
 @admin.register(PolicyDocumentUpload)
 class PolicyDocumentUploadAdmin(admin.ModelAdmin):

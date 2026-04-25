@@ -52,7 +52,7 @@ from .models import (
     ProductMaster, SubProductMaster, PolicyTypeMaster,
     FuelTypeMaster, MakeModelClassMaster,
     RateGroup, AuditLog, GridDocument, UserProfile,
-    MISFieldMaster, MISFieldAlias, PolicyDocumentUpload, PolicyMISRecord,
+    ExtractionField, FieldSynonym, PolicyDocumentUpload, PolicyMISRecord,
     LockedPolicy
 )
 
@@ -410,12 +410,21 @@ def extract_text_from_document(file_path):
 
 def build_alias_lookup():
     alias_lookup = {}
-    active_aliases = MISFieldAlias.objects.select_related("field_master").filter(
-        is_active=True,
-        field_master__is_active=True
+    
+    # 1. Base field mapping (Maps the exact field_name to a slugified key)
+    # E.g. "Insurance Company" -> "insurance_company"
+    for field in ExtractionField.objects.filter(is_active=True):
+        prog_key = field.field_name.strip().lower().replace(" ", "_")
+        alias_lookup[normalize_label(field.field_name)] = prog_key
+
+    # 2. Synonym mapping (Maps the synonym to the slugified key of the parent field)
+    active_synonyms = FieldSynonym.objects.select_related("extraction_field").filter(
+        extraction_field__is_active=True
     )
-    for alias in active_aliases:
-        alias_lookup[normalize_label(alias.alias_text)] = alias.field_master.field_key
+    for syn in active_synonyms:
+        prog_key = syn.extraction_field.field_name.strip().lower().replace(" ", "_")
+        alias_lookup[normalize_label(syn.synonym_text)] = prog_key
+        
     return alias_lookup
 
 
@@ -517,36 +526,16 @@ def process_policy_document(document_obj):
 # =========================================================
 # FORMS
 # =========================================================
-class MISFieldMasterForm(forms.ModelForm):
+
+class ExtractionFieldForm(forms.ModelForm):
     class Meta:
-        model = MISFieldMaster
-        fields = ["field_key", "field_label", "is_active"]
+        model = ExtractionField
+        fields = ['category', 'field_name', 'is_mandatory', 'extraction_method', 'is_active', 'has_dropdown']
         widgets = {
-            "field_key": forms.TextInput(attrs={"class": "form-control"}),
-            "field_label": forms.TextInput(attrs={"class": "form-control"}),
+            'category': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., Motor'}),
+            'field_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., Insurance Company'}),
+            'extraction_method': forms.Select(attrs={'class': 'form-control'}),
         }
-
-    def clean_field_key(self):
-        value = (self.cleaned_data.get("field_key") or "").strip().lower().replace(" ", "_")
-        if not value:
-            raise forms.ValidationError("Field key is required.")
-        return value
-
-
-class MISFieldAliasForm(forms.ModelForm):
-    class Meta:
-        model = MISFieldAlias
-        fields = ["field_master", "alias_text", "is_active"]
-        widgets = {
-            "field_master": forms.Select(attrs={"class": "form-control"}),
-            "alias_text": forms.TextInput(attrs={"class": "form-control"}),
-        }
-
-    def clean_alias_text(self):
-        value = (self.cleaned_data.get("alias_text") or "").strip()
-        if not value:
-            raise forms.ValidationError("Alias text is required.")
-        return value
 
 
 class PolicyDocumentUploadForm(forms.ModelForm):
@@ -827,7 +816,15 @@ def upload_csv(request):
                     "to_date": parse_date(row.get("to_date")),
                     "sc_min": float(row.get("sc_min") or 0),
                     "sc_max": float(row.get("sc_max") or 0),
+                    "user_id": int(float(row.get("user_id") or 0)) if row.get("user_id") else None,
+                    "veh_use": row.get("veh_use") or None,
                     "add_tnc": row.get("add_tnc") or None,
+                    "remarks": row.get("remarks") or None,
+                    "po_type": row.get("po_type") or None,
+                    "po_od_rate": float(row.get("po_od_rate") or 0),
+                    "po_tp_rate": float(row.get("po_tp_rate") or 0),
+                    "po_net_rate": float(row.get("po_net_rate") or 0),
+                    "po_flat_amount": float(row.get("po_flat_amount") or 0),
                 }
 
                 key_hash, key_text = build_key_hash(cleaned)
@@ -1324,112 +1321,33 @@ def export_rates_xlsx(request):
 
 
 # -------------------------
-# Alias Management
+# Alias / Field Management Configurator
 # -------------------------
 @login_required
 @user_passes_test(can_view_alias_management)
-def alias_management(request):
-    msg = ""
-    error = ""
+def field_configurator(request):
+    if request.method == 'POST':
+        form = ExtractionFieldForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect('field_configurator')
+    else:
+        form = ExtractionFieldForm()
 
-    field_search = (request.GET.get("field_search") or "").strip()
-    alias_search = (request.GET.get("alias_search") or "").strip()
-    active_filter = (request.GET.get("active_filter") or "").strip()
+    fields = ExtractionField.objects.prefetch_related('synonyms').order_by('category', 'order_index')
 
-    field_form = MISFieldMasterForm(prefix="field")
-    alias_form = MISFieldAliasForm(prefix="alias")
-
-    if request.method == "POST":
-        action = (request.POST.get("action") or "").strip()
-
-        try:
-            if action == "add_field":
-                field_form = MISFieldMasterForm(request.POST, prefix="field")
-                if field_form.is_valid():
-                    field_obj = field_form.save()
-                    msg = f"✅ Field '{field_obj.field_label}' added successfully."
-                    field_form = MISFieldMasterForm(prefix="field")
-                else:
-                    error = "⚠️ Please correct the field form errors."
-
-            elif action == "add_alias":
-                alias_form = MISFieldAliasForm(request.POST, prefix="alias")
-                if alias_form.is_valid():
-                    alias_obj = alias_form.save()
-                    msg = f"✅ Alias '{alias_obj.alias_text}' added successfully."
-                    alias_form = MISFieldAliasForm(prefix="alias")
-                else:
-                    error = "⚠️ Please correct the alias form errors."
-
-            elif action == "toggle_alias":
-                alias_id = request.POST.get("alias_id")
-                alias_obj = MISFieldAlias.objects.get(id=alias_id)
-                alias_obj.is_active = not alias_obj.is_active
-                alias_obj.save()
-                msg = f"✅ Alias '{alias_obj.alias_text}' status updated."
-
-            elif action == "delete_alias":
-                alias_id = request.POST.get("alias_id")
-                alias_obj = MISFieldAlias.objects.get(id=alias_id)
-                alias_name = alias_obj.alias_text
-                alias_obj.delete()
-                msg = f"🗑️ Alias '{alias_name}' deleted successfully."
-
-            elif action == "delete_field":
-                field_id = request.POST.get("field_id")
-                field_obj = MISFieldMaster.objects.get(id=field_id)
-                field_name = field_obj.field_label
-                field_obj.delete()
-                msg = f"🗑️ Field '{field_name}' deleted successfully."
-
-            elif action == "toggle_field":
-                field_id = request.POST.get("field_id")
-                field_obj = MISFieldMaster.objects.get(id=field_id)
-                field_obj.is_active = not field_obj.is_active
-                field_obj.save()
-                msg = f"✅ Field '{field_obj.field_label}' status updated."
-
-        except Exception as e:
-            error = f"⚠️ {str(e)}"
-
-    fields_qs = MISFieldMaster.objects.prefetch_related("aliases").all().order_by("field_label")
-    aliases_qs = MISFieldAlias.objects.select_related("field_master").all().order_by(
-        "field_master__field_label", "alias_text"
-    )
-
-    if field_search:
-        fields_qs = fields_qs.filter(
-            Q(field_key__icontains=field_search) |
-            Q(field_label__icontains=field_search)
-        )
-
-    if alias_search:
-        aliases_qs = aliases_qs.filter(
-            Q(alias_text__icontains=alias_search) |
-            Q(field_master__field_key__icontains=alias_search) |
-            Q(field_master__field_label__icontains=alias_search)
-        )
-
-    if active_filter == "active":
-        fields_qs = fields_qs.filter(is_active=True)
-        aliases_qs = aliases_qs.filter(is_active=True)
-    elif active_filter == "inactive":
-        fields_qs = fields_qs.filter(is_active=False)
-        aliases_qs = aliases_qs.filter(is_active=False)
-
-    return render(request, "alias_management.html", {
-        "field_form": field_form,
-        "alias_form": alias_form,
-        "fields": fields_qs,
-        "aliases": aliases_qs,
-        "msg": msg,
-        "error": error,
-        "selected": {
-            "field_search": field_search,
-            "alias_search": alias_search,
-            "active_filter": active_filter,
-        }
+    return render(request, 'insurance/configurator.html', {
+        'fields': fields,
+        'form': form
     })
+
+@login_required
+@user_passes_test(can_view_alias_management)
+def delete_field(request, pk):
+    if request.method == 'POST':
+        field = get_object_or_404(ExtractionField, pk=pk)
+        field.delete()
+    return redirect('field_configurator')
 
 
 # -------------------------
@@ -2072,23 +1990,19 @@ def motor_payout_rates(request):
 def policy_lock_checker(request):
     has_searched = bool(request.GET) # Detects if user clicked 'Check Eligibility'
 
-    # --- UPDATED: Create Audit Log with cleaner dictionary ---
     if has_searched:
-        # Create a flat dictionary (no lists) of the search parameters
         flat_params = {}
         for key in request.GET.keys():
             val = request.GET.get(key, "").strip()
             if val and key != "csrfmiddlewaretoken":
                 flat_params[key] = val
         
-        # Only log if they actually searched with parameters
         if flat_params:
             AuditLog.objects.create(
                 user=request.user,
                 action="MOTOR_POINTS_SEARCH",
                 details=str(flat_params) # Save as stringified flat dict
             )
-    # ---------------------------------------------------------
 
     qs = RateMaster.objects.select_related(
         "product", "sub_product", "policy_type", "fuel_type",
@@ -2708,5 +2622,53 @@ class ExportRatesAPIView(generics.ListAPIView):
 
 
 @login_required
-def mapping_management(request):
-    return render(request, "insurance/mapping_management.html")
+@user_passes_test(can_view_alias_management)
+def mis_review(request, pk):
+    record = get_object_or_404(PolicyMISRecord.objects.select_related('source_document'), pk=pk)
+    
+    # 1. Grab the active rulebook
+    rules = ExtractionField.objects.filter(is_active=True).order_by('category', 'order_index')
+    
+    if request.method == 'POST':
+        updated_json = record.parsed_json or {}
+        
+        # 2. Loop through the submitted form and update our JSON
+        for rule in rules:
+            field_key = rule.field_name.strip().lower().replace(" ", "_")
+            new_val = request.POST.get(field_key)
+            if new_val is not None:
+                updated_json[field_key] = new_val
+                
+        # 3. Save the corrected data back to the database
+        record.parsed_json = updated_json
+        
+        # Update the hard database columns if they match standard keys
+        record.policy_number = updated_json.get("policy_number", record.policy_number)
+        record.insurer_name = updated_json.get("insurance_company", record.insurer_name)
+        record.insured_name = updated_json.get("insured_name", record.insured_name)
+        record.save()
+        
+        return redirect('my_mis')
+
+    # 4. Prepare the data for the template (matching rules to extracted data)
+    field_data = []
+    parsed = record.parsed_json or {}
+    
+    for rule in rules:
+        field_key = rule.field_name.strip().lower().replace(" ", "_")
+        val = parsed.get(field_key, "")
+        
+        # Flag if the AI missed a mandatory field
+        is_missing_mandatory = rule.is_mandatory and not val
+        
+        field_data.append({
+            'rule': rule,
+            'key': field_key,
+            'value': val,
+            'is_missing_mandatory': is_missing_mandatory
+        })
+        
+    return render(request, 'mis_review.html', {
+        'record': record,
+        'field_data': field_data
+    })

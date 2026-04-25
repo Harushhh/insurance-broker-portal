@@ -276,36 +276,53 @@ class GridDocument(models.Model):
 
 
 # =========================================================
-# NEW MODELS FOR AI OCR / NON-OCR POLICY EXTRACTION
+# AI OCR RULEBOOK MODELS
 # =========================================================
 
-class MISFieldMaster(models.Model):
-    field_key = models.CharField(max_length=100, unique=True)
-    field_label = models.CharField(max_length=150)
+class ExtractionField(models.Model):
+    EXTRACTION_CHOICES = [
+        ('AI', 'AI Read'),
+        ('MANUAL', 'Manual'),
+    ]
+
+    # Matches the top text: "Showing fields for Motor"
+    category = models.CharField(max_length=50, default="Base", help_text="e.g., Base, Motor, Health")
+    
+    # Matches the "#" column (Drag to reorder)
+    order_index = models.PositiveIntegerField(default=0)
+    
+    # Matches "Field Name"
+    field_name = models.CharField(max_length=150, unique=True)
+    
+    # For fields that have a dropdown (like "Insurance Company [27]")
+    has_dropdown = models.BooleanField(default=False)
+    
+    # Matches "Mandatory" column
+    is_mandatory = models.BooleanField(default=True)
+    
+    # Matches "AI Read" column
+    extraction_method = models.CharField(max_length=20, choices=EXTRACTION_CHOICES, default='AI')
+    
+    # Matches "Active" column
     is_active = models.BooleanField(default=True)
 
     class Meta:
-        ordering = ["field_label"]
+        ordering = ['category', 'order_index']
 
     def __str__(self):
-        return f"{self.field_label} ({self.field_key})"
+        return f"{self.field_name} ({self.category})"
 
 
-class MISFieldAlias(models.Model):
-    field_master = models.ForeignKey(
-        MISFieldMaster,
-        on_delete=models.CASCADE,
-        related_name="aliases"
-    )
-    alias_text = models.CharField(max_length=255)
-    is_active = models.BooleanField(default=True)
+class FieldSynonym(models.Model):
+    # Matches the "Synonyms / Aliases" column
+    extraction_field = models.ForeignKey(ExtractionField, on_delete=models.CASCADE, related_name="synonyms")
+    synonym_text = models.CharField(max_length=255)
 
     class Meta:
-        unique_together = ("field_master", "alias_text")
-        ordering = ["field_master__field_label", "alias_text"]
+        unique_together = ("extraction_field", "synonym_text")
 
     def __str__(self):
-        return f"{self.alias_text} -> {self.field_master.field_key}"
+        return self.synonym_text
 
 
 class PolicyDocumentUpload(models.Model):
