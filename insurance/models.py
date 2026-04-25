@@ -297,6 +297,9 @@ class ExtractionField(models.Model):
     # For fields that have a dropdown (like "Insurance Company [27]")
     has_dropdown = models.BooleanField(default=False)
     
+    # Comma-separated list of options for the dropdown
+    dropdown_options = models.TextField(blank=True, null=True, help_text="Comma-separated list of options (e.g., HDFC, ICICI, Tata)")
+    
     # Matches "Mandatory" column
     is_mandatory = models.BooleanField(default=True)
     
