@@ -1,95 +1,148 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Upload Policy Document</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
-        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px; max-width: 1000px; margin-left: auto; margin-right: auto; }
-        .alert-success { background: #d4edda; color: #155724; padding: 15px; border-radius: 4px; margin-bottom: 20px; border: 1px solid #c3e6cb; }
-        .alert-danger { background: #f8d7da; color: #721c24; padding: 15px; border-radius: 4px; margin-bottom: 20px; border: 1px solid #f5c6cb; }
-        
-        .upload-area { border: 2px dashed #ccc; padding: 40px; text-align: center; border-radius: 8px; background: #fafafa; margin-bottom: 15px; }
-        .upload-area:hover { border-color: #0d6efd; background: #f0f7ff; }
-        
-        .btn { padding: 10px 20px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 1em; font-weight: 500; text-decoration: none; display: inline-block; }
-        .btn:hover { background: #0b5ed7; }
-        .btn-view { background: #198754; font-size: 0.85em; padding: 6px 12px; }
-        
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.95em; }
-        th, td { padding: 12px 15px; border-bottom: 1px solid #eee; text-align: left; }
-        th { color: #666; font-weight: 600; background: #f8f9fa; }
-        
-        .badge { padding: 5px 10px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
-        .badge-completed { background: #d4edda; color: #155724; }
-        .badge-pending { background: #e2e3e5; color: #383d41; }
-        .badge-processing { background: #cce5ff; color: #004085; }
-        .badge-failed { background: #f8d7da; color: #721c24; }
-    </style>
-</head>
-<body>
+{% extends 'base.html' %}
+{% load static %}
 
-<div class="card">
-    <h2>📄 Upload Policy Document</h2>
-    <p style="color: #666;">Upload a PDF or Image (JPG/PNG). The AI will automatically extract the fields configured in your rulebook.</p>
+{% block content %}
+<style>
+    /* Premium Styling Overrides */
+    .premium-card { background: #ffffff; border-radius: 16px; border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03); overflow: hidden; }
+    
+    .table-modern { border-collapse: separate; border-spacing: 0; width: 100%; }
+    .table-modern th { background: #f8fafc; padding: 16px 24px; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid #e2e8f0; font-weight: 600; }
+    .table-modern td { padding: 18px 24px; font-size: 14px; vertical-align: middle; border-bottom: 1px solid #f1f5f9; color: #334155; }
+    .table-modern tbody tr { transition: background-color 0.2s; }
+    .table-modern tbody tr:hover { background-color: #f8fafc; }
+    
+    .upload-zone { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 40px; text-align: center; background: #f8fafc; transition: all 0.2s; }
+    .upload-zone:hover { border-color: #94a3b8; background: #f1f5f9; }
+    
+    /* Button Styling */
+    .btn-gradient { background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%); color: white; border: none; font-weight: 600; border-radius: 8px; padding: 10px 24px; transition: all 0.2s; }
+    .btn-gradient:hover:not(:disabled) { box-shadow: 0 8px 20px rgba(37, 99, 235, 0.2); transform: translateY(-1px); color: white; }
+    .btn-gradient:disabled { background: #94a3b8; cursor: not-allowed; transform: none; box-shadow: none; opacity: 0.8; }
+    
+    .status-badge { padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    .badge-success { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+    .badge-warning { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+    .badge-danger { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
 
-    {% if msg %} <div class="alert-success">{{ msg }}</div> {% endif %}
-    {% if error %} <div class="alert-danger">{{ error }}</div> {% endif %}
+    /* Custom Spinner Animation */
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+    .spinner-icon { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; margin-right: 8px; vertical-align: middle; }
+</style>
 
-    <form method="POST" enctype="multipart/form-data">
-        {% csrf_token %}
-        <div class="upload-area">
-            {{ upload_form.uploaded_file }}
+<div class="container-fluid py-5 mx-auto" style="max-width: 1200px; padding-left: 2rem; padding-right: 2rem;">
+    
+    <div class="mb-5">
+        <h2 class="mb-1" style="font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">
+            <i class="bi bi-file-earmark-arrow-up text-primary me-2"></i>Upload Policy Document
+        </h2>
+        <p class="text-muted mb-0" style="font-size: 15px;">Upload a PDF or Image (JPG/PNG). The AI will automatically extract the fields configured in your rulebook.</p>
+    </div>
+
+    {% if msg %}
+    <div class="alert alert-success d-flex align-items-center mb-4" style="border-radius: 12px; font-weight: 500; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46;">
+        <i class="bi bi-check-circle-fill me-2 fs-5"></i> {{ msg }}
+    </div>
+    {% endif %}
+    {% if error %}
+    <div class="alert alert-danger d-flex align-items-center mb-4" style="border-radius: 12px; font-weight: 500; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;">
+        <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i> {{ error }}
+    </div>
+    {% endif %}
+
+    <div class="premium-card p-4 mb-5">
+        <form method="POST" enctype="multipart/form-data" id="extractionForm">
+            {% csrf_token %}
+            <div class="upload-zone mb-4">
+                {{ upload_form.uploaded_file }}
+            </div>
+            <button type="submit" class="btn btn-gradient px-4 py-2" id="extractBtn">
+                <span id="btnIcon"><i class="bi bi-magic me-2"></i></span>
+                <span id="btnText">Extract Data</span>
+            </button>
+        </form>
+    </div>
+
+    <div class="premium-card">
+        <div class="bg-white py-4 px-4 border-bottom">
+            <h5 class="mb-0" style="font-weight: 700; color: #0f172a; font-size: 18px;">Recent Uploads</h5>
         </div>
-        <button type="submit" class="btn">Extract Data</button>
-    </form>
+        <div class="table-responsive">
+            <table class="table-modern">
+                <thead>
+                    <tr>
+                        <th>File Name</th>
+                        <th>Uploaded By</th>
+                        <th>Date</th>
+                        <th>Status</th>
+                        <th class="text-end">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for doc in documents %}
+                    <tr>
+                        <td style="font-weight: 600; color: #0f172a;">{{ doc.original_filename|default:"Unnamed File"|truncatechars:40 }}</td>
+                        <td>
+                            <span style="background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; color: #475569;">
+                                {{ doc.uploaded_by.username|default:"System" }}
+                            </span>
+                        </td>
+                        <td>
+                            <span style="color: #475569; font-weight: 500;">{{ doc.created_at|date:"M d, Y" }}</span><br>
+                            <span style="color: #94a3b8; font-size: 12px;">{{ doc.created_at|time:"H:i A" }}</span>
+                        </td>
+                        <td>
+                            {% if doc.status == 'COMPLETED' %}
+                                <span class="status-badge badge-success"><i class="bi bi-check-circle me-1"></i>Completed</span>
+                            {% elif doc.status == 'FAILED' %}
+                                <span class="status-badge badge-danger"><i class="bi bi-x-circle me-1"></i>Failed</span>
+                                <div style="font-size: 11px; color: #dc2626; margin-top: 6px; font-weight: 500; line-height: 1.2;">
+                                    {{ doc.error_message }}
+                                </div>
+                            {% elif doc.status == 'PROCESSING' %}
+                                <span class="status-badge badge-warning"><i class="bi bi-hourglass-split me-1"></i>Processing...</span>
+                            {% else %}
+                                <span class="status-badge" style="background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;"><i class="bi bi-clock me-1"></i>Pending</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end">
+                            {% if doc.status == 'COMPLETED' %}
+                                <a href="{% url 'my_mis' %}?policy_number={{ doc.mis_record.policy_number }}" class="btn btn-sm btn-light border text-primary" style="font-weight: 600; border-radius: 6px; padding: 6px 14px;">Review Data <i class="bi bi-arrow-right ms-1"></i></a>
+                            {% else %}
+                                <span class="text-muted" style="font-size: 13px; font-weight: 500;">Waiting...</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center py-5">
+                            <div style="color: #cbd5e1; font-size: 40px; margin-bottom: 10px;"><i class="bi bi-inbox"></i></div>
+                            <h6 style="color: #475569; font-weight: 600;">No Uploads Yet</h6>
+                            <p style="color: #94a3b8; font-size: 14px; margin-bottom: 0;">Documents you upload will appear here.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
-<div class="card">
-    <h3>Recent Uploads</h3>
-    <table>
-        <thead>
-            <tr>
-                <th>File Name</th>
-                <th>Uploaded By</th>
-                <th>Date</th>
-                <th>Status</th>
-                <th>Action</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for doc in documents %}
-            <tr>
-                <td><strong>{{ doc.original_filename|default:"Unnamed File" }}</strong></td>
-                <td>{{ doc.uploaded_by.username|default:"System" }}</td>
-                <td>{{ doc.created_at|date:"M d, Y H:i" }}</td>
-                <td>
-                    {% if doc.status == 'COMPLETED' %}
-                        <span class="badge badge-completed">Completed</span>
-                    {% elif doc.status == 'FAILED' %}
-                        <span class="badge badge-failed" title="{{ doc.error_message }}">Failed</span>
-                    {% elif doc.status == 'PROCESSING' %}
-                        <span class="badge badge-processing">Processing...</span>
-                    {% else %}
-                        <span class="badge badge-pending">Pending</span>
-                    {% endif %}
-                </td>
-                <td>
-                    {% if doc.status == 'COMPLETED' %}
-                        <a href="{% url 'my_mis' %}?policy_number={{ doc.mis_record.policy_number }}" class="btn btn-view">Review Data →</a>
-                    {% else %}
-                        <span style="color: #999; font-size: 0.9em;">Waiting...</span>
-                    {% endif %}
-                </td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="5" style="text-align: center; color: #999;">No documents uploaded yet.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
-
-</body>
-</html>
+<script>
+    document.getElementById('extractionForm').addEventListener('submit', function(e) {
+        // Prevent multiple submissions
+        const btn = document.getElementById('extractBtn');
+        if (btn.disabled) {
+            e.preventDefault();
+            return;
+        }
+        
+        // Disable the button and change the UI
+        btn.disabled = true;
+        
+        // Swap the icon to our CSS spinner and update the text
+        document.getElementById('btnIcon').innerHTML = '<span class="spinner-icon"></span>';
+        document.getElementById('btnText').innerHTML = 'Processing Document...';
+    });
+</script>
+{% endblock %}

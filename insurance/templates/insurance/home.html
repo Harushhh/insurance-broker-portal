@@ -1,0 +1,288 @@
+{% extends 'base.html' %}
+{% load static %}
+
+{% block content %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+    /* Premium Base Styling */
+    body { 
+        background-color: #f8fafc; 
+        font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+    }
+    
+    /* Modern Apple/Fintech-style Cards */
+    .dash-card { 
+        background: #ffffff; 
+        border-radius: 16px; 
+        border: 1px solid rgba(226, 232, 240, 0.8); 
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03); 
+        height: 100%; 
+        transition: all 0.3s ease; 
+    }
+    .dash-card:hover { 
+        transform: translateY(-4px); 
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.06); 
+    }
+    
+    /* Premium Icon Boxes with Subtle Gradients */
+    .icon-box { 
+        width: 56px; 
+        height: 56px; 
+        border-radius: 16px; 
+        display: flex; 
+        align-items: center; 
+        justify-content: center; 
+        font-size: 26px; 
+    }
+    .bg-gradient-primary { background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); color: #2563eb; }
+    .bg-gradient-success { background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%); color: #059669; }
+    .bg-gradient-warning { background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); color: #d97706; }
+    
+    /* Crisp, airy data tables */
+    .table-card {
+        background: #fff;
+        border-radius: 16px;
+        border: 1px solid rgba(226, 232, 240, 0.8);
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+        overflow: hidden;
+    }
+    .table-modern { border-collapse: separate; border-spacing: 0; width: 100%; }
+    .table-modern th { 
+        background: #f8fafc; 
+        padding: 16px 24px; 
+        color: #64748b; 
+        font-size: 12px; 
+        text-transform: uppercase; 
+        letter-spacing: 0.08em; 
+        border-bottom: 1px solid #e2e8f0; 
+        font-weight: 600;
+    }
+    .table-modern td { 
+        padding: 18px 24px; 
+        font-size: 14px; 
+        vertical-align: middle; 
+        border-bottom: 1px solid #f1f5f9; 
+        color: #334155;
+    }
+    .table-modern tbody tr { transition: background-color 0.2s; }
+    .table-modern tbody tr:hover { background-color: #f8fafc; }
+    
+    /* Center chart constraint */
+    .chart-wrapper { width: 100%; height: 180px; position: relative; }
+</style>
+
+<div class="container-fluid py-5 mx-auto" style="max-width: 1400px; padding-left: 2rem; padding-right: 2rem;">
+    
+    <div class="d-flex justify-content-between align-items-center mb-5">
+        <div>
+            <h2 class="mb-1" style="font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">Welcome back, {{ request.user.first_name|default:request.user.username }}!</h2>
+            <p class="text-muted mb-0" style="font-size: 15px;">
+                {% if is_admin_user %}
+                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 me-2 rounded-pill px-3 py-1">Admin View</span> 
+                    Showing aggregate data for all business units.
+                {% else %}
+                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 me-2 rounded-pill px-3 py-1">My View</span> 
+                    Showing your personal extraction metrics.
+                {% endif %}
+            </p>
+        </div>
+        <div>
+            <a href="{% url 'upload_extract_pdf' %}" class="btn btn-primary px-4 py-2" style="border-radius: 8px; font-weight: 500; box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2);"><i class="bi bi-cloud-upload me-2"></i>Upload Document</a>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-5">
+        
+        <div class="col-xl-4 col-md-6">
+            <div class="dash-card p-4 d-flex flex-column justify-content-between">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <p class="text-uppercase mb-2" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Total Cases Processed</p>
+                        <h2 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 36px; letter-spacing: -0.02em;">{{ total_cases }}</h2>
+                    </div>
+                    <div class="icon-box bg-gradient-primary shadow-sm">
+                        <i class="bi bi-file-earmark-check"></i>
+                    </div>
+                </div>
+                <div class="mt-4 pt-3" style="border-top: 1px solid #f1f5f9;">
+                    <span class="text-success" style="font-weight: 600; font-size: 13px;"><i class="bi bi-arrow-up-right me-1"></i>Active</span>
+                    <span class="text-muted ms-2" style="font-size: 13px;">Extraction pipeline operational</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-4 col-md-6">
+            <div class="dash-card p-4 d-flex flex-column justify-content-between">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <p class="text-uppercase mb-2" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Total Gross Premium</p>
+                        <h2 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 36px; letter-spacing: -0.02em;">₹{{ total_premium|floatformat:2 }}</h2>
+                    </div>
+                    <div class="icon-box bg-gradient-success shadow-sm">
+                        <i class="bi bi-cash-stack"></i>
+                    </div>
+                </div>
+                <div class="mt-4 pt-3" style="border-top: 1px solid #f1f5f9;">
+                    <span class="text-success" style="font-weight: 600; font-size: 13px;"><i class="bi bi-check-circle-fill me-1"></i>Verified</span>
+                    <span class="text-muted ms-2" style="font-size: 13px;">Extracted & logged in MIS</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-4 col-md-12">
+            <div class="dash-card p-4 d-flex flex-column">
+                
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div>
+                        <p class="text-uppercase mb-1" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Product Mix</p>
+                        <h3 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 24px; letter-spacing: -0.02em;">{{ total_cases }} <span style="font-size: 14px; color:#64748b; font-weight:500;">Total</span></h3>
+                    </div>
+                    <div class="icon-box bg-gradient-warning shadow-sm">
+                        <i class="bi bi-pie-chart"></i>
+                    </div>
+                </div>
+                
+                <div class="chart-wrapper d-flex justify-content-center align-items-center mt-3">
+                    <canvas id="productMixChart"></canvas>
+                </div>
+
+                <div class="d-flex justify-content-center align-items-center mt-4 gap-4" style="font-size: 14px;">
+                    <div class="d-flex align-items-center">
+                        <span style="display: inline-block; width: 12px; height: 12px; background-color: #2563eb; border-radius: 4px; margin-right: 8px;"></span>
+                        <span class="text-muted" style="font-weight: 500;">Motor</span>
+                        <strong class="ms-2" style="color: #0f172a;">{{ motor_count|default:"0" }}</strong>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <span style="display: inline-block; width: 12px; height: 12px; background-color: #059669; border-radius: 4px; margin-right: 8px;"></span>
+                        <span class="text-muted" style="font-weight: 500;">Health</span>
+                        <strong class="ms-2" style="color: #0f172a;">{{ health_count|default:"0" }}</strong>
+                    </div>
+                </div>
+                
+            </div>
+        </div>
+    </div>
+
+    <div class="table-card">
+        <div class="bg-white py-4 px-4 border-bottom d-flex justify-content-between align-items-center">
+            <h5 class="mb-0" style="font-weight: 700; color: #0f172a; font-size: 18px;">Recent Activity</h5>
+            <a href="{% url 'my_mis' %}" class="btn btn-sm btn-light border px-3 py-2" style="font-weight: 500; border-radius: 8px; color: #475569;">View All MIS</a>
+        </div>
+        <div class="table-responsive">
+            <table class="table-modern">
+                <thead>
+                    <tr>
+                        <th>Date Processed</th>
+                        <th>Insured Name</th>
+                        <th>Insurer</th>
+                        <th>Premium</th>
+                        {% if is_admin_user %}
+                        <th>Uploaded By</th>
+                        {% endif %}
+                        <th class="text-end">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in recent_activity %}
+                    <tr>
+                        <td>
+                            <span style="color: #475569; font-weight: 500;">{{ record.created_at|date:"M d, Y" }}</span><br>
+                            <span style="color: #94a3b8; font-size: 12px;">{{ record.created_at|time:"H:i A" }}</span>
+                        </td>
+                        <td style="color: #0f172a; font-weight: 600;">{{ record.insured_name|default:"--" }}</td>
+                        <td>
+                            <span style="background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; color: #475569;">
+                                {{ record.insurer_name|default:"--" }}
+                            </span>
+                        </td>
+                        <td class="text-success" style="font-weight: 700;">{% if record.gross_premium %}₹{{ record.gross_premium }}{% else %}--{% endif %}</td>
+                        
+                        {% if is_admin_user %}
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div style="width: 28px; height: 28px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #475569; margin-right: 8px;">
+                                    {{ record.source_document.uploaded_by.username|default:"S"|make_list|first|upper }}
+                                </div>
+                                <span style="font-weight: 500; color: #334155;">{{ record.source_document.uploaded_by.username|default:"System" }}</span>
+                            </div>
+                        </td>
+                        {% endif %}
+                        
+                        <td class="text-end">
+                            <a href="{% url 'mis_review' record.pk %}" class="btn btn-sm btn-light border text-primary" style="font-weight: 600; border-radius: 6px; padding: 6px 14px;">Review <i class="bi bi-arrow-right ms-1"></i></a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="{% if is_admin_user %}6{% else %}5{% endif %}" class="text-center py-5">
+                            <div style="color: #cbd5e1; font-size: 40px; margin-bottom: 10px;"><i class="bi bi-inbox"></i></div>
+                            <h6 style="color: #475569; font-weight: 600;">No Activity Yet</h6>
+                            <p style="color: #94a3b8; font-size: 14px; margin-bottom: 0;">Documents processed by the AI will appear here.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const ctx = document.getElementById('productMixChart').getContext('2d');
+        
+        // Grab values from Django, fallback to 0 if empty
+        const motorData = parseInt("{{ motor_count|default:'0' }}");
+        const healthData = parseInt("{{ health_count|default:'0' }}");
+
+        // Only draw the chart if there is data
+        if (motorData > 0 || healthData > 0) {
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Motor', 'Health'],
+                    datasets: [{
+                        data: [motorData, healthData],
+                        backgroundColor: ['#2563eb', '#059669'],
+                        borderWidth: 0,
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '70%', // Make the donut ring perfectly sized
+                    plugins: {
+                        legend: {
+                            display: false // We use our custom HTML legend at the bottom
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                            padding: 12,
+                            titleFont: { size: 13, family: 'Inter' },
+                            bodyFont: { size: 14, family: 'Inter', weight: 'bold' },
+                            cornerRadius: 8,
+                            callbacks: {
+                                label: function(context) {
+                                    return ' ' + context.label + ': ' + context.raw + ' Policies';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        } else {
+            // Render an empty soft-grey circle if no data exists yet
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['No Data'],
+                    datasets: [{ data: [1], backgroundColor: ['#f1f5f9'], borderWidth: 0 }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, cutout: '70%', plugins: { tooltip: { enabled: false }, legend: { display: false } } }
+            });
+        }
+    });
+</script>
+{% endblock %}

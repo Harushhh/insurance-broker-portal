@@ -1,94 +1,160 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Review Extracted Data</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
-        .header-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-        
-        .split-layout { display: flex; gap: 20px; align-items: flex-start; }
-        .panel { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); flex: 1; height: 75vh; overflow-y: auto; }
-        
-        .form-group { margin-bottom: 15px; }
-        label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 0.9em; color: #444; }
-        .mandatory-star { color: #dc3545; }
-        .form-control { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        
-        /* Highlight fields the AI missed */
-        .needs-attention { border-color: #dc3545; background-color: #fff8f8; }
-        .error-text { color: #dc3545; font-size: 0.8em; margin-top: 4px; display: block; }
-        
-        .btn { padding: 10px 20px; background: #0d6efd; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 500; }
-        .btn:hover { background: #0b5ed7; }
-        .btn-secondary { background: #6c757d; text-decoration: none; display: inline-block; }
-        
-        .raw-text { white-space: pre-wrap; font-family: monospace; font-size: 0.85em; color: #555; background: #f4f4f4; padding: 15px; border-radius: 4px; }
-    </style>
-</head>
-<body>
+{% extends 'base.html' %}
+{% load static %}
 
-<div class="header-card">
-    <div>
-        <h2 style="margin: 0;">Review: {{ record.source_document.original_filename }}</h2>
-        <p style="margin: 5px 0 0 0; color: #666; font-size: 0.9em;">Extracted via {{ record.source_document.extraction_method }} on {{ record.created_at|date:"M d, Y H:i" }}</p>
-    </div>
-    <div>
-        <a href="{% url 'my_mis' %}" class="btn btn-secondary">← Back to List</a>
-    </div>
-</div>
+{% block content %}
+<style>
+    /* Premium Card Styling */
+    .premium-card { background: #ffffff; border-radius: 16px; border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03); overflow: hidden; height: 100%; }
+    .card-header-custom { background: #f8fafc; padding: 16px 24px; border-bottom: 1px solid #e2e8f0; font-weight: 700; color: #0f172a; font-size: 16px; }
+    
+    /* Form Inputs */
+    .form-group { margin-bottom: 20px; }
+    .form-label { font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 8px; display: block; }
+    .mandatory-star { color: #dc2626; margin-left: 4px; }
+    
+    /* Standardized height and styling for both inputs and dropdowns */
+    .form-control-custom { border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; font-size: 14px; width: 100%; background: #fff; color: #0f172a; transition: border-color 0.2s, box-shadow 0.2s; height: 42px; }
+    .form-control-custom:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+    .form-control-error { border-color: #f87171; background-color: #fef2f2; }
+    
+    /* Specifically style the select dropdown */
+    select.form-control-custom { cursor: pointer; appearance: auto; }
+    
+    /* Buttons */
+    .btn-gradient { background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%); color: white; border: none; font-weight: 600; border-radius: 8px; padding: 12px 24px; cursor: pointer; transition: all 0.2s; width: 100%; font-size: 15px; }
+    .btn-gradient:hover { box-shadow: 0 8px 20px rgba(37, 99, 235, 0.2); transform: translateY(-1px); color: white; }
+    .btn-back { background: #64748b; color: white; border: none; border-radius: 8px; padding: 8px 16px; font-weight: 600; text-decoration: none; font-size: 13px; transition: all 0.2s; }
+    .btn-back:hover { background: #475569; color: white; }
 
-<div class="split-layout">
-    <div class="panel">
-        <h3 style="margin-top: 0;">Raw Document Text</h3>
-        <p style="font-size: 0.85em; color: #666;">Use this to find missing information if the AI couldn't map it automatically.</p>
-        
-        {% if record.source_document.uploaded_file %}
-            <a href="{{ record.source_document.uploaded_file.url }}" target="_blank" style="display: block; margin-bottom: 15px; color: #0d6efd;">📄 Open Original PDF/Image</a>
-        {% endif %}
-        
-        <div class="raw-text">{{ record.source_document.extracted_text|default:"No raw text available." }}</div>
+    /* UNBREAKABLE LAYOUT */
+    .review-layout {
+        display: flex;
+        gap: 24px;
+        align-items: flex-start;
+        width: 100%;
+    }
+    .pdf-panel {
+        flex: 1.5;
+        position: sticky;
+        top: 90px;
+        height: calc(100vh - 120px);
+        min-width: 0;
+    }
+    .form-panel {
+        flex: 1;
+        min-width: 0;
+        position: relative;
+        z-index: 50;
+    }
+    .pdf-viewer { width: 100%; height: calc(100% - 55px); border: none; background-color: #f1f5f9; }
+
+    @media (max-width: 1024px) {
+        .review-layout { flex-direction: column; }
+        .pdf-panel { position: relative; top: 0; height: 600px; width: 100%; }
+        .form-panel { width: 100%; }
+    }
+</style>
+
+<div class="container-fluid py-4 mx-auto" style="max-width: 1600px; padding-left: 2rem; padding-right: 2rem;">
+    
+    <div class="premium-card mb-4 p-4" style="display: flex; justify-content: space-between; align-items: center; height: auto;">
+        <div>
+            <h2 class="mb-1" style="font-weight: 800; color: #0f172a; font-size: 22px; margin: 0 0 4px 0;">
+                Review: {{ record.source_document.original_filename }}
+            </h2>
+            <p class="text-muted mb-0" style="font-size: 13px; margin: 0;">
+                <i class="bi bi-robot text-primary me-1"></i> Extracted via {{ record.ai_model_name|default:"Gemini AI" }} on {{ record.created_at|date:"M d, Y H:i" }}
+            </p>
+        </div>
+        <div>
+            <a href="{% url 'my_mis' %}" class="btn-back"><i class="bi bi-arrow-left me-1"></i> Back to List</a>
+        </div>
     </div>
 
-    <div class="panel">
-        <h3 style="margin-top: 0;">Extracted Data Fields</h3>
+    <div class="review-layout">
         
-        <form method="POST">
-            {% csrf_token %}
-            
-            {% for data in field_data %}
-            <div class="form-group">
-                <label>
-                    {{ data.rule.field_name }} 
-                    {% if data.rule.is_mandatory %}<span class="mandatory-star">*</span>{% endif %}
-                </label>
+        <div class="pdf-panel">
+            <div class="premium-card">
+                <div class="card-header-custom" style="display: flex; justify-content: space-between; align-items: center;">
+                    <span><i class="bi bi-file-earmark-pdf me-2 text-danger"></i> Original Document</span>
+                    <a href="{{ record.source_document.uploaded_file.url }}" target="_blank" class="text-primary" style="font-size: 13px; font-weight: 600; text-decoration: none;">
+                        Open in New Tab <i class="bi bi-box-arrow-up-right ms-1"></i>
+                    </a>
+                </div>
                 
-                <input type="text" 
-                       name="{{ data.key }}" 
-                       value="{{ data.value }}" 
-                       class="form-control {% if data.is_missing_mandatory %}needs-attention{% endif %}"
-                       {% if data.rule.has_dropdown %}list="list_{{ data.key }}"{% endif %}>
-                       
-                {% if data.is_missing_mandatory %}
-                    <span class="error-text">Mandatory field missing. Please review the raw text.</span>
-                {% endif %}
-                
-                {% if data.rule.has_dropdown %}
-                    <datalist id="list_{{ data.key }}">
-                        <option value="HDFC ERGO">
-                        <option value="ICICI Lombard">
-                        <option value="Bajaj Allianz">
-                        <option value="Tata AIG">
-                        </datalist>
-                {% endif %}
+                <object data="{{ record.source_document.uploaded_file.url }}#view=FitH" type="application/pdf" class="pdf-viewer">
+                    <div style="padding: 40px; text-align: center; color: #64748b; background: #f8fafc; height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center;">
+                        <i class="bi bi-file-earmark-pdf" style="font-size: 48px; color: #cbd5e1; margin-bottom: 16px;"></i>
+                        <h5 style="color: #334155; font-weight: 700;">PDF Viewer Not Supported</h5>
+                        <p style="font-size: 14px; max-width: 300px; margin-bottom: 20px;">Your browser is blocking the inline PDF viewer.</p>
+                        <a href="{{ record.source_document.uploaded_file.url }}" target="_blank" class="btn-gradient" style="text-decoration: none; display: inline-block; width: auto;">
+                            View PDF in New Tab
+                        </a>
+                    </div>
+                </object>
             </div>
-            {% endfor %}
-            
-            <hr style="border-top: 1px solid #eee; margin: 20px 0;">
-            <button type="submit" class="btn">Save & Verify Document</button>
-        </form>
-    </div>
-</div>
+        </div>
 
-</body>
-</html>
+        <div class="form-panel">
+            <div class="premium-card" style="height: auto;">
+                <div class="card-header-custom">
+                    <i class="bi bi-list-check me-2 text-primary"></i> Extracted Data Fields
+                </div>
+                
+                <div class="p-4">
+                    <form method="POST">
+                        {% csrf_token %}
+                        
+                        {% for field in field_data %}
+                        <div class="form-group">
+                            <label class="form-label" for="id_{{ field.key }}">
+                                {{ field.rule.field_name }} 
+                                {% if field.rule.is_mandatory %}
+                                    <span class="mandatory-star">*</span>
+                                {% endif %}
+                            </label>
+                            
+                            {% if field.dropdown_choices %}
+                                <select id="id_{{ field.key }}"
+                                        name="{{ field.key }}" 
+                                        class="form-control-custom {% if field.is_missing_mandatory %}form-control-error{% endif %}"
+                                        {% if field.rule.is_mandatory %}required{% endif %}>
+                                    <option value="">-- Select Option --</option>
+                                    {% for choice in field.dropdown_choices %}
+                                        <option value="{{ choice }}" {% if field.value == choice %}selected{% endif %}>
+                                            {{ choice }}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            
+                            {% else %}
+                                <input type="text" 
+                                       id="id_{{ field.key }}"
+                                       name="{{ field.key }}" 
+                                       value="{{ field.value }}" 
+                                       class="form-control-custom {% if field.is_missing_mandatory %}form-control-error{% endif %}"
+                                       {% if field.rule.is_mandatory %}required{% endif %}
+                                >
+                            {% endif %}
+                            
+                            {% if field.is_missing_mandatory %}
+                                <div style="font-size: 12px; color: #dc2626; margin-top: 4px; font-weight: 500;">
+                                    <i class="bi bi-exclamation-circle me-1"></i> AI failed to extract this mandatory field.
+                                </div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                        
+                        <div class="mt-5 pt-3" style="border-top: 1px solid #e2e8f0;">
+                            <button type="submit" class="btn-gradient">
+                                <i class="bi bi-check2-circle me-2"></i> Save & Verify Document
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

@@ -487,7 +487,7 @@
     {% with p=request.path %}
     {% if p != "/" and p != "/login/" and p != "/accounts/login/" and "password-reset" not in p and "reset/" not in p %}
     <div class="topbar">
-      <a href="{% url 'dashboard' %}" class="brand">
+      <a href="{% url 'home_dashboard' %}" class="brand">
         <div class="brand-badge"></div>
         <div class="brand-text">
           <div class="brand-title">Insurance Portal</div>

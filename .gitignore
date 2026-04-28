@@ -9,6 +9,7 @@ __pycache__/
 # Django
 # ===============================
 db.sqlite3
+db.sqlite3-journal
 *.log
 local_settings.py
 
@@ -29,6 +30,7 @@ env/
 # Media & Static
 # ===============================
 media/
+media/*
 staticfiles/
 
 # ===============================
@@ -36,6 +38,8 @@ staticfiles/
 # ===============================
 .vscode/
 .idea/
+*.swp
+*~
 
 # ===============================
 # OS Files
@@ -46,6 +50,6 @@ Thumbs.db
 # ===============================
 # Backup & Temp
 # ===============================
-*.json
 *.bak
-*.swp
+# Note: If you ever need to commit JSON config files or fixtures, you may need to remove this next line.
+*.json

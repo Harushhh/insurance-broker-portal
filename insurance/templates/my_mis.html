@@ -1,100 +1,121 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>My MIS - AI Extractions</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 20px; background-color: #f8f9fa; color: #333; }
-        .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px; }
-        
-        /* Search Form Styling */
-        .search-bar { display: flex; gap: 15px; align-items: center; flex-wrap: wrap; }
-        .form-control { padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; flex: 1; min-width: 200px; }
-        .btn-search { padding: 9px 20px; background: #212529; color: white; border: none; border-radius: 4px; cursor: pointer; }
-        .btn-clear { padding: 9px 20px; background: #e2e3e5; color: #333; text-decoration: none; border-radius: 4px; }
-        
-        /* Table Styling */
-        table { width: 100%; border-collapse: collapse; margin-top: 15px; font-size: 0.9em; }
-        th, td { padding: 12px 15px; border-bottom: 1px solid #eee; text-align: left; }
-        th { color: #666; font-weight: 600; background: #f8f9fa; text-transform: uppercase; font-size: 0.85em; }
-        tr:hover { background-color: #fcfcfc; }
-        
-        .btn-edit { padding: 6px 12px; background: #0d6efd; color: white; text-decoration: none; border-radius: 4px; font-weight: 500; font-size: 0.9em; }
-        .btn-edit:hover { background: #0b5ed7; }
-        .empty-state { text-align: center; padding: 40px; color: #999; }
-        
-        /* Subtle text for missing data */
-        .missing { color: #dc3545; font-style: italic; font-size: 0.9em; }
-    </style>
-</head>
-<body>
+{% extends 'base.html' %}
+{% load static %}
 
-<div class="card">
-    <h2 style="margin-top: 0;">📊 My MIS (Extracted Data)</h2>
-    <p style="color: #666; font-size: 0.9em;">Review and search through all policies processed by the AI Rule Engine.</p>
+{% block content %}
+<style>
+    /* Premium Styling Overrides */
+    .premium-card { background: #ffffff; border-radius: 16px; border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03); overflow: hidden; }
     
-    <form method="GET" class="search-bar">
-        <input type="text" name="policy_number" class="form-control" placeholder="Search Policy No..." value="{{ selected.policy_number }}">
-        <input type="text" name="insured_name" class="form-control" placeholder="Search Insured Name..." value="{{ selected.insured_name }}">
-        <input type="text" name="insurer_name" class="form-control" placeholder="Search Insurer..." value="{{ selected.insurer_name }}">
-        
-        <button type="submit" class="btn-search">🔍 Search</button>
-        <a href="{% url 'my_mis' %}" class="btn-clear">Clear</a>
-    </form>
-</div>
+    .table-modern { border-collapse: separate; border-spacing: 0; width: 100%; }
+    .table-modern th { background: #f8fafc; padding: 16px 24px; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid #e2e8f0; font-weight: 600; }
+    .table-modern td { padding: 18px 24px; font-size: 14px; vertical-align: middle; border-bottom: 1px solid #f1f5f9; color: #334155; }
+    .table-modern tbody tr { transition: background-color 0.2s; }
+    .table-modern tbody tr:hover { background-color: #f8fafc; }
+    
+    .search-input { border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 16px; font-size: 14px; width: 100%; transition: all 0.2s; background: #f8fafc; color: #0f172a; }
+    .search-input:focus { outline: none; border-color: #2563eb; background: #ffffff; box-shadow: 0 0 0 4px rgba(37,99,235,0.1); }
+    
+    .btn-dark-custom { background: #0f172a; color: white; border: none; border-radius: 8px; padding: 10px 24px; font-weight: 600; transition: background 0.2s; }
+    .btn-dark-custom:hover { background: #1e293b; color: white; }
+    .btn-light-custom { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 24px; font-weight: 600; text-decoration: none; transition: all 0.2s; }
+    .btn-light-custom:hover { background: #e2e8f0; color: #0f172a; }
 
-<div class="card">
-    <table>
-        <thead>
-            <tr>
-                <th>Extracted Date</th>
-                <th>Insurer</th>
-                <th>Policy Number</th>
-                <th>Insured Name</th>
-                <th>Vehicle / Make</th>
-                <th>Net Premium</th>
-                <th>Action</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for record in records %}
-            <tr>
-                <td style="color: #666;">{{ record.created_at|date:"M d, Y" }}</td>
-                
-                <td>
-                    {% if record.insurer_name %}{{ record.insurer_name }}
-                    {% else %}<span class="missing">Needs Review</span>{% endif %}
-                </td>
-                
-                <td>
-                    {% if record.policy_number %}<strong>{{ record.policy_number }}</strong>
-                    {% else %}<span class="missing">Missing</span>{% endif %}
-                </td>
-                
-                <td>{{ record.insured_name|default:"-" }}</td>
-                
-                <td>
-                    {{ record.vehicle_registration_number|default:"No Reg" }}<br>
-                    <span style="font-size: 0.85em; color: #888;">{{ record.vehicle_make_model|default:"-" }}</span>
-                </td>
-                
-                <td>
-                    {% if record.net_premium %}₹{{ record.net_premium }}
-                    {% else %}-{% endif %}
-                </td>
-                
-                <td>
-                    <a href="#" class="btn-edit">Review / Edit</a>
-                </td>
-            </tr>
-            {% empty %}
-            <tr>
-                <td colspan="7" class="empty-state">No extracted records found matching your search.</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-</div>
+    .missing-text { color: #ef4444; font-style: italic; font-size: 13px; font-weight: 500; }
+</style>
 
-</body>
-</html>
+<div class="container-fluid py-5 mx-auto" style="max-width: 1400px; padding-left: 2rem; padding-right: 2rem;">
+    
+    <div class="mb-4 d-flex justify-content-between align-items-end">
+        <div>
+            <h2 class="mb-1" style="font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">
+                📊 My MIS (Extracted Data)
+            </h2>
+            <p class="text-muted mb-0" style="font-size: 15px;">Review and search through all policies processed by the AI Rule Engine.</p>
+        </div>
+    </div>
+
+    <div class="premium-card p-4 mb-4 bg-white">
+        <form method="GET" class="row g-3 align-items-center">
+            <div class="col-md-3">
+                <input type="text" name="policy_number" class="search-input" placeholder="Search Policy No..." value="{{ selected.policy_number }}">
+            </div>
+            <div class="col-md-3">
+                <input type="text" name="insured_name" class="search-input" placeholder="Search Insured Name..." value="{{ selected.insured_name }}">
+            </div>
+            <div class="col-md-3">
+                <input type="text" name="insurer_name" class="search-input" placeholder="Search Insurer..." value="{{ selected.insurer_name }}">
+            </div>
+            <div class="col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-dark-custom flex-grow-1"><i class="bi bi-search me-2"></i>Search</button>
+                <a href="{% url 'my_mis' %}" class="btn btn-light-custom">Clear</a>
+            </div>
+        </form>
+    </div>
+
+    <div class="premium-card">
+        <div class="table-responsive">
+            <table class="table-modern">
+                <thead>
+                    <tr>
+                        <th>Extracted Date</th>
+                        <th>Insurer</th>
+                        <th>Policy Number</th>
+                        <th>Insured Name</th>
+                        <th>Vehicle / Make</th>
+                        <th>Net Premium</th>
+                        <th class="text-end">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in records %}
+                    <tr>
+                        <td>
+                            <span style="color: #475569; font-weight: 500;">{{ record.created_at|date:"M d, Y" }}</span>
+                        </td>
+                        
+                        <td>
+                            {% if record.insurer_name %}
+                                <span style="font-weight: 600; color: #0f172a;">{{ record.insurer_name }}</span>
+                            {% else %}
+                                <span class="missing-text">Needs Review</span>
+                            {% endif %}
+                        </td>
+                        
+                        <td>
+                            {% if record.policy_number %}
+                                <span style="font-family: 'Courier New', Courier, monospace; font-weight: 600; color: #334155; background: #f1f5f9; padding: 4px 8px; border-radius: 4px;">{{ record.policy_number }}</span>
+                            {% else %}
+                                <span class="missing-text">Missing</span>
+                            {% endif %}
+                        </td>
+                        
+                        <td style="font-weight: 500;">{{ record.insured_name|default:"-" }}</td>
+                        
+                        <td>
+                            <div style="font-weight: 600; color: #0f172a;">{{ record.vehicle_registration_number|default:"No Reg" }}</div>
+                            <div style="font-size: 12px; color: #64748b; margin-top: 2px;">{{ record.vehicle_make_model|default:"-" }}</div>
+                        </td>
+                        
+                        <td style="font-weight: 700; color: #059669;">
+                            {% if record.net_premium %}₹{{ record.net_premium }}{% else %}<span style="color: #94a3b8; font-weight: 500;">-</span>{% endif %}
+                        </td>
+                        
+                        <td class="text-end">
+                            <a href="{% url 'mis_review' record.pk %}" class="btn btn-sm btn-light border text-primary" style="font-weight: 600; border-radius: 6px; padding: 6px 14px;">Review / Edit <i class="bi bi-pencil-square ms-1"></i></a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5">
+                            <div style="color: #cbd5e1; font-size: 40px; margin-bottom: 10px;"><i class="bi bi-search"></i></div>
+                            <h6 style="color: #475569; font-weight: 600;">No Records Found</h6>
+                            <p style="color: #94a3b8; font-size: 14px; margin-bottom: 0;">Try adjusting your search filters or upload a new document.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

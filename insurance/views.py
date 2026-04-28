@@ -7,7 +7,7 @@ from django.utils.encoding import force_bytes
 from django.utils import timezone
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
-from django.db.models import Q, F, Count, Avg
+from django.db.models import Q, F, Count, Avg, Sum, Case, When, Value, CharField
 from django.core.mail import send_mail
 from django.conf import settings
 from django import forms
@@ -16,13 +16,11 @@ import json
 import re
 import hashlib
 import threading
-import ast  # ADDED FOR AUDIT LOG PARSING
+import ast
 
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from collections import defaultdict
-
 from openpyxl import Workbook
 
 # --- DRF & SWAGGER IMPORTS ---
@@ -30,22 +28,6 @@ from rest_framework import generics
 from rest_framework_api_key.permissions import HasAPIKey
 from .serializers import RateMasterSerializer
 # -----------------------------
-
-# Optional extraction libs
-try:
-    import fitz  # PyMuPDF
-except Exception:
-    fitz = None
-
-try:
-    from PIL import Image
-except Exception:
-    Image = None
-
-try:
-    import pytesseract
-except Exception:
-    pytesseract = None
 
 from .models import (
     RTOMaster, MakeModelMaster, RateMaster, YesNoNAMaster,
@@ -55,6 +37,10 @@ from .models import (
     ExtractionField, FieldSynonym, PolicyDocumentUpload, PolicyMISRecord,
     LockedPolicy
 )
+
+# Import our Gemini AI utility
+from .utils import extract_data_with_gemini
+from .forms import ExtractionFieldForm
 
 # =========================================================
 # PAGE-LEVEL ACCESS GROUPS
@@ -71,64 +57,35 @@ PAGE_GROUPS = [
     "Can_View_Alias_Management",
 ]
 
-
 def is_admin(user):
     return user.is_superuser or user.groups.filter(name="ADMIN").exists()
 
-
 def can_view_dashboard(user):
-    return user.is_superuser or user.groups.filter(
-        name__in=["ADMIN", "Can_View_Dashboard"]
-    ).exists()
-
+    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Dashboard"]).exists()
 
 def can_view_analysis(user):
-    return user.is_superuser or user.groups.filter(
-        name__in=["ADMIN", "Can_View_Analysis"]
-    ).exists()
-
+    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Analysis"]).exists()
 
 def can_view_motor_payout(user):
-    return user.is_superuser or user.groups.filter(
-        name__in=["ADMIN", "Can_View_Motor_Payout_Rates"]
-    ).exists()
-
+    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Motor_Payout_Rates"]).exists()
 
 def can_upload(user):
-    return user.is_superuser or user.groups.filter(
-        name__in=["ADMIN", "Can_Upload_CSV"]
-    ).exists()
-
+    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_Upload_CSV"]).exists()
 
 def can_view_rto(user):
-    return user.is_superuser or user.groups.filter(
-        name__in=["ADMIN", "Can_View_RTO_Dashboard"]
-    ).exists()
-
+    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_RTO_Dashboard"]).exists()
 
 def can_view_make_model(user):
-    return user.is_superuser or user.groups.filter(
-        name__in=["ADMIN", "Can_View_Make_Model_Dashboard"]
-    ).exists()
-
+    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Make_Model_Dashboard"]).exists()
 
 def can_view_audit_log(user):
-    return user.is_superuser or user.groups.filter(
-        name__in=["ADMIN", "Can_View_Audit_Log"]
-    ).exists()
-
+    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Audit_Log"]).exists()
 
 def can_view_grid_management(user):
-    return user.is_superuser or user.groups.filter(
-        name__in=["ADMIN", "Can_View_Grid_Management"]
-    ).exists()
-
+    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Grid_Management"]).exists()
 
 def can_view_alias_management(user):
-    return user.is_superuser or user.groups.filter(
-        name__in=["ADMIN", "Can_View_Alias_Management"]
-    ).exists()
-
+    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Alias_Management"]).exists()
 
 # =========================================================
 # NA CONFIGURATION
@@ -142,7 +99,6 @@ NA_MAKE_MODEL_MAP = {
     "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
     "MISCD": ["MISCD-Tractor", "MISCD-Others"],
 }
-
 
 # =========================================================
 # UTILITY FUNCTIONS
@@ -160,7 +116,6 @@ def strict_match_in_cluster(search_term, cluster_string):
             return True
     return False
 
-
 def parse_date(value):
     if not value:
         return None
@@ -168,7 +123,6 @@ def parse_date(value):
         return datetime.strptime(str(value).strip(), "%d/%m/%Y").date()
     except Exception:
         return None
-
 
 def parse_yes_no_na(value):
     if not value:
@@ -181,7 +135,6 @@ def parse_yes_no_na(value):
     else:
         return YesNoNAMaster.objects.get(code="NA")
 
-
 GROUP_FIELDS = [
     "new_vehicle_makes", "insurer_vertical", "insurance_company", "product", "sub_product",
     "policy_type", "vehicle_age_min", "vehicle_age_max", "make_model_class",
@@ -191,12 +144,10 @@ GROUP_FIELDS = [
     "is_zd", "from_date", "to_date", "sc_min", "sc_max", "add_tnc",
 ]
 
-
 def normalize(v):
     if v is None:
         return ""
     return str(v).strip().lower()
-
 
 def build_key_hash(cleaned_dict):
     parts = []
@@ -210,7 +161,6 @@ def build_key_hash(cleaned_dict):
     key_text = "|".join(parts)
     key_hash = hashlib.sha256(key_text.encode("utf-8")).hexdigest()
     return key_hash, key_text
-
 
 def unique_join(values):
     seen = set()
@@ -228,7 +178,6 @@ def unique_join(values):
         out.append(s)
     return ", ".join(out)
 
-
 def split_csv_values(values):
     out = []
     for v in values:
@@ -239,7 +188,6 @@ def split_csv_values(values):
             if part:
                 out.append(part)
     return out
-
 
 def apply_range_filter(qs, field_min, field_max, range_val):
     if not range_val:
@@ -256,7 +204,6 @@ def apply_range_filter(qs, field_min, field_max, range_val):
         qs = qs.filter(**{field_min: range_val})
     return qs
 
-
 def get_na_class_list_for_product(product_id: str):
     if product_id and str(product_id).isdigit():
         p = ProductMaster.objects.filter(id=int(product_id)).first()
@@ -267,7 +214,6 @@ def get_na_class_list_for_product(product_id: str):
     for vals in NA_MAKE_MODEL_MAP.values():
         combined.extend(vals)
     return combined
-
 
 def apply_make_model_filter(qs, product_id: str, make_model_class: str):
     if not make_model_class:
@@ -308,7 +254,6 @@ def apply_make_model_filter(qs, product_id: str, make_model_class: str):
 
     return qs
 
-
 def get_make_mapping_context():
     all_makes_objs = MakeModelMaster.objects.all()
     all_individual_makes = set()
@@ -342,14 +287,9 @@ def get_make_mapping_context():
     class_makes_mapping = {k: sorted(list(v)) for k, v in class_to_makes.items()}
     return json.dumps(all_individual_makes), json.dumps(class_makes_mapping), all_individual_makes
 
-
 # =========================================================
-# OCR / EXTRACTION HELPERS
+# AI EXTRACTION HELPERS
 # =========================================================
-def normalize_label(text):
-    return re.sub(r"[^a-z0-9]+", " ", str(text).lower()).strip()
-
-
 def safe_decimal(value):
     if value in [None, ""]:
         return None
@@ -361,7 +301,6 @@ def safe_decimal(value):
         return Decimal(cleaned)
     except (InvalidOperation, ValueError):
         return None
-
 
 def safe_date_multi(value):
     if not value:
@@ -378,166 +317,66 @@ def safe_date_multi(value):
             pass
     return None
 
-
-def extract_text_from_pdf(file_path):
-    if not fitz:
-        raise Exception("PyMuPDF is not installed. Run: pip install pymupdf")
-    text_parts = []
-    doc = fitz.open(file_path)
-    try:
-        for page in doc:
-            text_parts.append(page.get_text("text"))
-    finally:
-        doc.close()
-    return "\n".join(text_parts).strip()
-
-
-def extract_text_from_image(file_path):
-    if not Image or not pytesseract:
-        raise Exception("Pillow / pytesseract not installed. Run: pip install pillow pytesseract")
-    img = Image.open(file_path)
-    return pytesseract.image_to_string(img).strip()
-
-
-def extract_text_from_document(file_path):
-    ext = Path(file_path).suffix.lower()
-    if ext == ".pdf":
-        return extract_text_from_pdf(file_path), "PDF_TEXT"
-    if ext in [".png", ".jpg", ".jpeg"]:
-        return extract_text_from_image(file_path), "OCR"
-    raise Exception("Unsupported file type.")
-
-
-def build_alias_lookup():
-    alias_lookup = {}
-    
-    # 1. Base field mapping (Maps the exact field_name to a slugified key)
-    # E.g. "Insurance Company" -> "insurance_company"
-    for field in ExtractionField.objects.filter(is_active=True):
-        prog_key = field.field_name.strip().lower().replace(" ", "_")
-        alias_lookup[normalize_label(field.field_name)] = prog_key
-
-    # 2. Synonym mapping (Maps the synonym to the slugified key of the parent field)
-    active_synonyms = FieldSynonym.objects.select_related("extraction_field").filter(
-        extraction_field__is_active=True
-    )
-    for syn in active_synonyms:
-        prog_key = syn.extraction_field.field_name.strip().lower().replace(" ", "_")
-        alias_lookup[normalize_label(syn.synonym_text)] = prog_key
-        
-    return alias_lookup
-
-
-def extract_key_value_candidates(raw_text):
-    candidates = {}
-    lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
-    patterns = [
-        r"^\s*(.*?)\s*[:\-]\s*(.+?)\s*$",
-        r"^\s*(.*?)\s{2,}(.+?)\s*$",
-    ]
-
-    for line in lines:
-        for pattern in patterns:
-            match = re.match(pattern, line)
-            if match:
-                left = normalize_label(match.group(1))
-                right = match.group(2).strip()
-                if left and right and left not in candidates:
-                    candidates[left] = right
-                break
-
-    return candidates
-
-
-def map_text_with_aliases(raw_text):
-    alias_lookup = build_alias_lookup()
-    candidates = extract_key_value_candidates(raw_text)
-    mapped = {}
-
-    for left_label, value in candidates.items():
-        if left_label in alias_lookup:
-            mapped[alias_lookup[left_label]] = value
-            continue
-
-        for alias_text, field_key in alias_lookup.items():
-            if left_label == alias_text or alias_text in left_label or left_label in alias_text:
-                if field_key not in mapped:
-                    mapped[field_key] = value
-                break
-
-    return mapped
-
-
-def save_policy_mis_record(document_obj, mapped_data):
-    PolicyMISRecord.objects.update_or_create(
-        source_document=document_obj,
-        defaults={
-            "insurer_name": mapped_data.get("insurer_name"),
-            "policy_number": mapped_data.get("policy_number"),
-            "insured_name": mapped_data.get("insured_name"),
-            "vehicle_registration_number": mapped_data.get("vehicle_registration_number"),
-            "vehicle_make": mapped_data.get("vehicle_make"),
-            "vehicle_model": mapped_data.get("vehicle_model"),
-            "vehicle_make_model": mapped_data.get("vehicle_make_model"),
-            "engine_number": mapped_data.get("engine_number"),
-            "chassis_number": mapped_data.get("chassis_number"),
-            "fuel_type": mapped_data.get("fuel_type"),
-            "cubic_capacity_cc": mapped_data.get("cubic_capacity_cc"),
-            "gross_premium": safe_decimal(mapped_data.get("gross_premium")),
-            "net_premium": safe_decimal(mapped_data.get("net_premium")),
-            "tax_amount": safe_decimal(mapped_data.get("tax_amount")),
-            "policy_start_date": safe_date_multi(mapped_data.get("policy_start_date")),
-            "policy_end_date": safe_date_multi(mapped_data.get("policy_end_date")),
-            "issue_date": safe_date_multi(mapped_data.get("issue_date")),
-            "rto_location": mapped_data.get("rto_location"),
-            "raw_ai_json": mapped_data,
-            "confidence_notes": "Mapped using MIS aliases.",
-            "ai_model_name": "alias-rule-engine",
-        }
-    )
-
-
 def process_policy_document(document_obj):
+    """
+    Passes the uploaded file to Gemini for AI extraction and saves the MIS record.
+    """
     try:
         document_obj.status = PolicyDocumentUpload.STATUS_PROCESSING
         document_obj.error_message = ""
         document_obj.save(update_fields=["status", "error_message"])
 
         file_path = document_obj.uploaded_file.path
-        extracted_text, method = extract_text_from_document(file_path)
-        mapped_data = map_text_with_aliases(extracted_text)
+        
+        # 1. Call Gemini to do the heavy lifting
+        mapped_data = extract_data_with_gemini(file_path)
 
-        document_obj.extracted_text = extracted_text
-        document_obj.extraction_method = method
+        # 2. Update the document record
+        document_obj.extracted_text = "Extracted directly via Gemini Multimodal API."
+        document_obj.extraction_method = "Gemini 2.5 Flash"
         document_obj.parsed_json = mapped_data
         document_obj.status = PolicyDocumentUpload.STATUS_COMPLETED
         document_obj.processed_at = timezone.now()
         document_obj.save()
 
-        save_policy_mis_record(document_obj, mapped_data)
+        # 3. Create the MIS Record for the UI to review
+        PolicyMISRecord.objects.update_or_create(
+            source_document=document_obj,
+            defaults={
+                "insurer_name": mapped_data.get("insurance_company") or mapped_data.get("insurer_name"),
+                "policy_number": mapped_data.get("policy_number"),
+                "insured_name": mapped_data.get("insured_name"),
+                "vehicle_registration_number": mapped_data.get("vehicle_registration_number"),
+                "vehicle_make": mapped_data.get("vehicle_make"),
+                "vehicle_model": mapped_data.get("vehicle_model"),
+                "vehicle_make_model": mapped_data.get("vehicle_make_model"),
+                "engine_number": mapped_data.get("engine_number"),
+                "chassis_number": mapped_data.get("chassis_number"),
+                "fuel_type": mapped_data.get("fuel_type"),
+                "cubic_capacity_cc": mapped_data.get("cubic_capacity_cc"),
+                "gross_premium": safe_decimal(mapped_data.get("gross_premium")),
+                "net_premium": safe_decimal(mapped_data.get("net_premium")),
+                "tax_amount": safe_decimal(mapped_data.get("tax_amount")),
+                "policy_start_date": safe_date_multi(mapped_data.get("policy_start_date")),
+                "policy_end_date": safe_date_multi(mapped_data.get("policy_end_date")),
+                "issue_date": safe_date_multi(mapped_data.get("issue_date")),
+                "rto_location": mapped_data.get("rto_location"),
+                "raw_ai_json": mapped_data,
+                "confidence_notes": "Extracted via Gemini 2.5 Flash with Synonyms injection.",
+                "ai_model_name": "gemini-2.5-flash",
+            }
+        )
 
     except Exception as e:
+        print(f"\n❌ AI EXTRACTION ERROR: {str(e)}\n")
         document_obj.status = PolicyDocumentUpload.STATUS_FAILED
         document_obj.error_message = str(e)
         document_obj.processed_at = timezone.now()
         document_obj.save(update_fields=["status", "error_message", "processed_at"])
 
-
 # =========================================================
 # FORMS
 # =========================================================
-
-class ExtractionFieldForm(forms.ModelForm):
-    class Meta:
-        model = ExtractionField
-        fields = ['category', 'field_name', 'is_mandatory', 'extraction_method', 'is_active', 'has_dropdown']
-        widgets = {
-            'category': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., Motor'}),
-            'field_name': forms.TextInput(attrs={'class': 'form-control', 'placeholder': 'e.g., Insurance Company'}),
-            'extraction_method': forms.Select(attrs={'class': 'form-control'}),
-        }
-
-
 class PolicyDocumentUploadForm(forms.ModelForm):
     class Meta:
         model = PolicyDocumentUpload
@@ -555,18 +394,15 @@ class PolicyDocumentUploadForm(forms.ModelForm):
             raise forms.ValidationError("Only PDF, PNG, JPG, JPEG files are allowed.")
         return f
 
-
 class RTOForm(forms.ModelForm):
     class Meta:
         model = RTOMaster
         fields = ["rto_name", "rto_cluster"]
 
-
 class MakeModelForm(forms.ModelForm):
     class Meta:
         model = MakeModelMaster
         fields = ["make_model_name", "make_model_cluster"]
-
 
 class RateForm(forms.ModelForm):
     product = forms.ModelChoiceField(
@@ -609,7 +445,6 @@ class RateForm(forms.ModelForm):
         required=False,
         widget=forms.Select(attrs={"class": "select2-single"})
     )
-
     new_rto_list = forms.MultipleChoiceField(
         required=False,
         widget=forms.SelectMultiple(attrs={"class": "select2-multiple"})
@@ -683,6 +518,50 @@ class RateForm(forms.ModelForm):
         data = self.cleaned_data.get("new_vehicle_makes")
         return ", ".join(data) if data else ""
 
+# =========================================================
+# UNIFIED HOME DASHBOARD
+# =========================================================
+@login_required
+def home_dashboard(request):
+    is_admin_user = request.user.is_superuser or request.user.groups.filter(name="ADMIN").exists()
+    qs = PolicyMISRecord.objects.select_related("source_document", "source_document__uploaded_by")
+
+    if not is_admin_user:
+        qs = qs.filter(source_document__uploaded_by=request.user)
+
+    total_cases = qs.count()
+    total_premium = qs.aggregate(total=Sum('gross_premium'))['total'] or 0
+
+    product_mix_query = qs.annotate(
+        category=Case(
+            When(
+                Q(vehicle_registration_number__isnull=False) & ~Q(vehicle_registration_number=""), 
+                then=Value('Motor')
+            ),
+            When(
+                Q(vehicle_make__isnull=False) & ~Q(vehicle_make=""), 
+                then=Value('Motor')
+            ),
+            default=Value('Health'),
+            output_field=CharField(),
+        )
+    ).values('category').annotate(count=Count('id'))
+
+    product_mix = {item['category']: item['count'] for item in product_mix_query}
+    motor_count = product_mix.get('Motor', 0)
+    health_count = product_mix.get('Health', 0)
+
+    recent_activity = qs.order_by('-created_at')[:5]
+
+    context = {
+        'is_admin_user': is_admin_user,
+        'total_cases': total_cases,
+        'total_premium': total_premium,
+        'motor_count': motor_count,
+        'health_count': health_count,
+        'recent_activity': recent_activity,
+    }
+    return render(request, 'insurance/home.html', context)
 
 # -------------------------
 # Upload CSV
@@ -890,7 +769,6 @@ def upload_csv(request):
         })
 
     return render(request, "upload.html")
-
 
 # -------------------------
 # Dashboard (GROUPED view)
@@ -1122,7 +1000,6 @@ def dashboard(request):
         }
     })
 
-
 # -------------------------
 # Export UNGROUPED to Excel
 # -------------------------
@@ -1319,7 +1196,6 @@ def export_rates_xlsx(request):
     wb.save(response)
     return response
 
-
 # -------------------------
 # Alias / Field Management Configurator
 # -------------------------
@@ -1349,6 +1225,41 @@ def delete_field(request, pk):
         field.delete()
     return redirect('field_configurator')
 
+# -------------------------
+# Edit Field (Configurations & Synonyms)
+# -------------------------
+@login_required
+@user_passes_test(can_view_alias_management)
+def edit_field(request, pk):
+    field_obj = get_object_or_404(ExtractionField, pk=pk)
+    
+    if request.method == 'POST':
+        action = request.POST.get('action')
+        
+        if action == 'update_field':
+            form = ExtractionFieldForm(request.POST, instance=field_obj)
+            if form.is_valid():
+                form.save()
+                return redirect('edit_field', pk=pk)
+        
+        elif action == 'add_synonym':
+            synonym_text = request.POST.get('synonym_text', '').strip()
+            if synonym_text:
+                FieldSynonym.objects.get_or_create(extraction_field=field_obj, synonym_text=synonym_text)
+            return redirect('edit_field', pk=pk)
+            
+        elif action == 'delete_synonym':
+            syn_id = request.POST.get('synonym_id')
+            FieldSynonym.objects.filter(id=syn_id).delete()
+            return redirect('edit_field', pk=pk)
+            
+    else:
+        form = ExtractionFieldForm(instance=field_obj)
+        
+    return render(request, 'insurance/edit_field.html', {
+        'form': form,
+        'field_obj': field_obj
+    })
 
 # -------------------------
 # Upload & Extract PDF / Image
@@ -1363,19 +1274,26 @@ def upload_extract_pdf(request):
     if request.method == "POST":
         upload_form = PolicyDocumentUploadForm(request.POST, request.FILES)
         if upload_form.is_valid():
-            try:
-                doc_obj = upload_form.save(commit=False)
-                doc_obj.original_filename = doc_obj.uploaded_file.name
-                doc_obj.uploaded_by = request.user
-                doc_obj.mime_type = getattr(doc_obj.uploaded_file, "content_type", "") or ""
-                doc_obj.status = PolicyDocumentUpload.STATUS_PENDING
-                doc_obj.save()
+            uploaded_file = request.FILES['uploaded_file']
+            
+            # --- NEW: DUPLICATE PREVENTION LOGIC ---
+            # Check if a file with this exact name has already been uploaded
+            if PolicyDocumentUpload.objects.filter(original_filename=uploaded_file.name).exists():
+                error = f"⚠️ Duplicate File: A document named '{uploaded_file.name}' has already been processed."
+            else:
+                try:
+                    doc_obj = upload_form.save(commit=False)
+                    doc_obj.original_filename = doc_obj.uploaded_file.name
+                    doc_obj.uploaded_by = request.user
+                    doc_obj.mime_type = getattr(doc_obj.uploaded_file, "content_type", "") or ""
+                    doc_obj.status = PolicyDocumentUpload.STATUS_PENDING
+                    doc_obj.save()
 
-                process_policy_document(doc_obj)
-                return redirect("upload_extract_pdf")
+                    process_policy_document(doc_obj)
+                    return redirect("upload_extract_pdf")
 
-            except Exception as e:
-                error = f"⚠️ {str(e)}"
+                except Exception as e:
+                    error = f"⚠️ {str(e)}"
         else:
             error = "⚠️ Please correct the upload form."
 
@@ -1392,7 +1310,6 @@ def upload_extract_pdf(request):
         "msg": msg,
         "error": error,
     })
-
 
 # -------------------------
 # My MIS
@@ -1413,15 +1330,20 @@ def my_mis(request):
     if insurer_name:
         qs = qs.filter(insurer_name__icontains=insurer_name)
 
+    stats = qs.aggregate(
+        total_processed=Count('id'),
+        total_premium=Sum('gross_premium')
+    )
+
     return render(request, "my_mis.html", {
         "records": qs[:200],
+        "stats": stats,
         "selected": {
             "policy_number": policy_number,
             "insured_name": insured_name,
             "insurer_name": insurer_name,
         }
     })
-
 
 # -------------------------
 # User Management (ADMIN only)
@@ -1520,7 +1442,6 @@ def user_management(request):
         "error": error
     })
 
-
 # -------------------------
 # RTO DASHBOARD
 # -------------------------
@@ -1550,7 +1471,6 @@ def rto_dashboard(request):
         "is_admin": is_admin(request.user)
     })
 
-
 @login_required
 @user_passes_test(can_view_rto)
 def export_rto_xlsx(request):
@@ -1578,7 +1498,6 @@ def export_rto_xlsx(request):
     response["Content-Disposition"] = 'attachment; filename="rto_master.xlsx"'
     wb.save(response)
     return response
-
 
 # -------------------------
 # MAKE MODEL DASHBOARD
@@ -1611,7 +1530,6 @@ def make_model_dashboard(request):
         "is_admin": is_admin(request.user)
     })
 
-
 @login_required
 @user_passes_test(can_view_make_model)
 def export_make_model_xlsx(request):
@@ -1640,7 +1558,6 @@ def export_make_model_xlsx(request):
     wb.save(response)
     return response
 
-
 # -------------------------
 # Edit Master Tables
 # -------------------------
@@ -1662,7 +1579,6 @@ def edit_rto(request, pk):
         "back_url": "rto_dashboard"
     })
 
-
 @login_required
 @user_passes_test(is_admin)
 def edit_make_model(request, pk):
@@ -1680,7 +1596,6 @@ def edit_make_model(request, pk):
         "title": "Edit Make/Model Record",
         "back_url": "make_model_dashboard"
     })
-
 
 # -------------------------
 # Edit Rate Form
@@ -1741,7 +1656,6 @@ def edit_rate(request, group_id):
         "rto_display": rto_display
     })
 
-
 # -------------------------
 # BULK UPDATE RATES
 # -------------------------
@@ -1792,7 +1706,6 @@ def bulk_update_rates(request):
         )
 
     return redirect("dashboard")
-
 
 # -------------------------
 # MOTOR PAYOUT RATES
@@ -1981,14 +1894,13 @@ def motor_payout_rates(request):
         }
     })
 
-
 # -------------------------
 # POLICY LOCK CHECKER
 # -------------------------
 @login_required
 @user_passes_test(can_view_motor_payout)
 def policy_lock_checker(request):
-    has_searched = bool(request.GET) # Detects if user clicked 'Check Eligibility'
+    has_searched = bool(request.GET)
 
     if has_searched:
         flat_params = {}
@@ -2001,7 +1913,7 @@ def policy_lock_checker(request):
             AuditLog.objects.create(
                 user=request.user,
                 action="MOTOR_POINTS_SEARCH",
-                details=str(flat_params) # Save as stringified flat dict
+                details=str(flat_params)
             )
 
     qs = RateMaster.objects.select_related(
@@ -2216,9 +2128,8 @@ def policy_lock_checker(request):
         }
     })
 
-
 # -------------------------
-# LOCK POLICY (AJAX UPDATED)
+# LOCK POLICY
 # -------------------------
 @login_required
 @user_passes_test(can_view_motor_payout)
@@ -2234,18 +2145,15 @@ def lock_unlock_policy(request, rate_id):
     if not vehicle_no or not policy_holder_name:
         return JsonResponse({"success": False, "message": "Vehicle No. and Policy Holder Name are required."})
 
-    # Only LOCK is allowed from Policy Lock Checker
     if action_type != "LOCK":
         return JsonResponse({"success": False, "message": "Invalid action."})
         
-    # --- DATE VALIDATION SECURITY CHECK ---
     today_str = datetime.today().strftime("%Y-%m-%d")
     if target_date != today_str:
         return JsonResponse({
             "success": False, 
             "message": "Policies can only be locked for today's date. Past or future dates are restricted."
         })
-    # --------------------------------------
 
     rate_obj = get_object_or_404(
         RateMaster.objects.select_related("product", "sub_product", "fuel_type"),
@@ -2311,13 +2219,11 @@ def lock_unlock_policy(request, rate_id):
 def locked_policy_dashboard(request):
     qs = LockedPolicy.objects.select_related("source_rate", "locked_by").all()
 
-    # 1. GET FILTER PARAMETERS
     vehicle_no = (request.GET.get("vehicle_no") or "").strip()
     policy_holder_name = (request.GET.get("policy_holder_name") or "").strip()
     insurance_company = (request.GET.get("insurance_company") or "").strip()
     locked_by_user = (request.GET.get("locked_by_user") or "").strip()
 
-    # 2. APPLY FILTERS
     if vehicle_no:
         qs = qs.filter(vehicle_no__iexact=vehicle_no)
     if policy_holder_name:
@@ -2327,7 +2233,6 @@ def locked_policy_dashboard(request):
     if locked_by_user:
         qs = qs.filter(locked_by__username__iexact=locked_by_user)
 
-    # 3. GET UNIQUE VALUES FOR DROPDOWNS (From all records)
     all_locked = LockedPolicy.objects.select_related("locked_by").all()
     
     unique_vehicles = sorted(list(set(all_locked.exclude(vehicle_no__isnull=True).exclude(vehicle_no="").values_list("vehicle_no", flat=True))))
@@ -2368,7 +2273,6 @@ def direct_password_reset(request):
             })
 
     return render(request, "password_reset.html")
-
 
 # -------------------------
 # EXECUTIVE ANALYSIS DASHBOARD
@@ -2413,7 +2317,6 @@ def business_analysis(request):
         "top_rtos": top_rtos,
     })
 
-
 # -------------------------
 # AUDIT TRAIL LOGS
 # -------------------------
@@ -2422,7 +2325,6 @@ def business_analysis(request):
 def audit_logs(request):
     logs = AuditLog.objects.all().order_by("-timestamp")[:200]
     return render(request, "audit_log.html", {"logs": logs})
-
 
 # -------------------------
 # EMAIL BACKGROUND
@@ -2440,7 +2342,6 @@ def send_email_background(subject, message, recipient_list):
     except Exception as e:
         print(f"\n❌ BACKGROUND EMAIL FAILED: {e}\n")
 
-
 # -------------------------
 # GRID MANAGEMENT
 # -------------------------
@@ -2450,7 +2351,6 @@ def grid_management(request):
     if request.method == "POST":
         action = request.POST.get("action")
 
-        # 1. HANDLE STATUS UPDATE FROM DROPDOWN
         if action == "update_status":
             doc_id = request.POST.get("doc_id")
             new_status = request.POST.get("status")
@@ -2460,7 +2360,6 @@ def grid_management(request):
                 doc.save()
             return redirect("grid_management")
 
-        # 2. HANDLE NEW FILE UPLOAD
         insurer_name = request.POST.get("insurer_name")
         remarks = request.POST.get("remarks")
         uploaded_file = request.FILES.get("uploaded_file")
@@ -2496,22 +2395,19 @@ def grid_management(request):
     documents = GridDocument.objects.all().order_by("-uploaded_date")
     return render(request, "grid_management.html", {"documents": documents})
 
-
 # -------------------------
-# MOTOR POINTS AUDIT LOGS (UPDATED PARSING)
+# MOTOR POINTS AUDIT LOGS
 # -------------------------
 @login_required
 @user_passes_test(can_view_motor_payout)
 def motor_points_audit_logs(request):
     qs = AuditLog.objects.filter(action="MOTOR_POINTS_SEARCH").select_related("user").order_by("-timestamp")
     
-    # 1. GET FILTER PARAMETERS
     vehicle_no_filter = (request.GET.get("vehicle_no") or "").strip()
     policy_holder_name_filter = (request.GET.get("policy_holder_name") or "").strip()
     insurance_company_filter = (request.GET.get("insurance_company") or "").strip()
     username_filter = (request.GET.get("username") or "").strip()
 
-    # 2. APPLY FILTERS
     if vehicle_no_filter:
         qs = qs.filter(details__icontains=vehicle_no_filter)
     if policy_holder_name_filter:
@@ -2523,7 +2419,6 @@ def motor_points_audit_logs(request):
 
     logs = qs[:500]
     
-    # 3. GET UNIQUE VALUES FOR DROPDOWNS (From top 1000 logs)
     all_logs_for_dropdowns = AuditLog.objects.filter(action="MOTOR_POINTS_SEARCH").select_related("user").order_by("-timestamp")[:1000]
     unique_vehicles = set()
     unique_holders = set()
@@ -2538,7 +2433,6 @@ def motor_points_audit_logs(request):
             clean_str = log.details.replace("Eligibility Check Parameters: ", "")
             params_dict = ast.literal_eval(clean_str)
             
-            # Flatten lists if they exist
             flat_params = {}
             if isinstance(params_dict, dict):
                 for k, v in params_dict.items():
@@ -2556,14 +2450,11 @@ def motor_points_audit_logs(request):
         except:
             pass
 
-    # 4. PARSE THE STRINGIFIED DICTIONARY FOR DISPLAY
     for log in logs:
         try:
-            # Handle the old 'Eligibility Check Parameters: { ... }' format
             clean_str = log.details.replace("Eligibility Check Parameters: ", "")
             params_dict = ast.literal_eval(clean_str)
             
-            # Flatten lists if they exist (from old format)
             flat_params = {}
             if isinstance(params_dict, dict):
                 for k, v in params_dict.items():
@@ -2572,7 +2463,6 @@ def motor_points_audit_logs(request):
                     else:
                         flat_params[k] = v
             
-            # SWAP IDs FOR REAL NAMES
             if flat_params.get("product") and str(flat_params["product"]).isdigit():
                 try: flat_params["product"] = ProductMaster.objects.get(id=int(flat_params["product"])).name
                 except: pass
@@ -2591,7 +2481,7 @@ def motor_points_audit_logs(request):
                 
             log.params = flat_params
         except Exception:
-            log.params = {} # Fallback if parsing fails
+            log.params = {}
 
     return render(request, "motor_points_audit_logs.html", {
         "logs": logs,
@@ -2607,15 +2497,10 @@ def motor_points_audit_logs(request):
         }
     })
 
-
 # =========================================================
 # REST API ENDPOINTS
 # =========================================================
 class ExportRatesAPIView(generics.ListAPIView):
-    """
-    This endpoint returns all active rate data in JSON format.
-    Requires a valid API Key to access.
-    """
     permission_classes = [HasAPIKey] 
     queryset = RateMaster.objects.filter(is_deleted="NO") 
     serializer_class = RateMasterSerializer
@@ -2630,7 +2515,7 @@ def mis_review(request, pk):
     rules = ExtractionField.objects.filter(is_active=True).order_by('category', 'order_index')
     
     if request.method == 'POST':
-        updated_json = record.parsed_json or {}
+        updated_json = record.raw_ai_json or {}
         
         # 2. Loop through the submitted form and update our JSON
         for rule in rules:
@@ -2640,7 +2525,7 @@ def mis_review(request, pk):
                 updated_json[field_key] = new_val
                 
         # 3. Save the corrected data back to the database
-        record.parsed_json = updated_json
+        record.raw_ai_json = updated_json
         
         # Update the hard database columns if they match standard keys
         record.policy_number = updated_json.get("policy_number", record.policy_number)
@@ -2650,9 +2535,9 @@ def mis_review(request, pk):
         
         return redirect('my_mis')
 
-    # 4. Prepare the data for the template (matching rules to extracted data)
+    # 4. Prepare the data for the template
     field_data = []
-    parsed = record.parsed_json or {}
+    parsed = record.raw_ai_json or {}
     
     for rule in rules:
         field_key = rule.field_name.strip().lower().replace(" ", "_")
@@ -2661,11 +2546,17 @@ def mis_review(request, pk):
         # Flag if the AI missed a mandatory field
         is_missing_mandatory = rule.is_mandatory and not val
         
+        # Check if this field should be a dropdown and split the options
+        dropdown_choices = []
+        if getattr(rule, 'has_dropdown', False) and getattr(rule, 'dropdown_options', None):
+            dropdown_choices = [x.strip() for x in rule.dropdown_options.split(',') if x.strip()]
+            
         field_data.append({
             'rule': rule,
             'key': field_key,
             'value': val,
-            'is_missing_mandatory': is_missing_mandatory
+            'is_missing_mandatory': is_missing_mandatory,
+            'dropdown_choices': dropdown_choices
         })
         
     return render(request, 'mis_review.html', {

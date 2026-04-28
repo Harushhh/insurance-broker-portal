@@ -3,104 +3,255 @@
 
 {% block content %}
 <style>
-    /* Force standard dashboard styling */
-    .dash-label { font-size: 13px; color: #6c757d; margin-bottom: 5px; display: block; }
-    .dash-input { width: 100%; padding: 8px 12px; border: 1px solid #ced4da; border-radius: 4px; font-size: 14px; background-color: #fff; }
-    .dash-input:focus { border-color: #86b7fe; outline: none; }
-    .dash-btn { background-color: #4285f4; color: white; border: none; padding: 9px 20px; border-radius: 4px; font-weight: 500; cursor: pointer; height: 38px; }
-    .dash-btn:hover { background-color: #3367d6; }
-    .table-hdr th { background-color: #f8f9fa !important; color: #495057 !important; border-bottom: 2px solid #dee2e6; font-size: 12px; font-weight: bold; text-transform: uppercase; }
+    /* Premium Card & Table Styling */
+    .premium-card { background: #ffffff; border-radius: 16px; border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03); overflow: hidden; }
+    
+    .table-responsive { overflow-x: auto; }
+    .table-modern { border-collapse: separate; border-spacing: 0; width: 100%; table-layout: auto; }
+    .table-modern th { background: #f8fafc; padding: 16px 24px; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid #e2e8f0; font-weight: 600; white-space: nowrap; text-align: left; }
+    .table-modern td { padding: 18px 24px; font-size: 14px; vertical-align: middle; border-bottom: 1px solid #f1f5f9; color: #334155; }
+    .table-modern tbody tr:hover { background-color: #f8fafc; }
+    
+    /* Table Cell Overrides */
+    .wrap-cell { white-space: normal !important; word-wrap: break-word; max-width: 350px; line-height: 1.6; }
+    
+    /* Form Inputs */
+    .form-control-custom { border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 14px; font-size: 14px; width: 100%; background: #fff; color: #0f172a; transition: border-color 0.2s, box-shadow 0.2s; height: 42px; }
+    .form-control-custom:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+    
+    /* Buttons */
+    .btn-gradient { background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%); color: white; border: none; font-weight: 600; border-radius: 8px; padding: 0 24px; height: 42px; cursor: pointer; transition: all 0.2s; white-space: nowrap; }
+    .btn-gradient:hover { box-shadow: 0 8px 20px rgba(37, 99, 235, 0.2); transform: translateY(-1px); color: white; }
+    .btn-action { background: #fff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 12px; font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-block; transition: background 0.2s; }
+    .btn-action:hover { background: #f8fafc; }
+
+    /* Custom Inline Form Layout */
+    .custom-inline-form { display: flex; gap: 16px; align-items: flex-end; flex-wrap: nowrap; width: 100%; }
+    .form-group { display: flex; flex-direction: column; }
+    .form-label { font-size: 11px; font-weight: 700; color: #64748b; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+    
+    /* Flex column widths */
+    .col-cat { width: 12%; }
+    .col-name { flex-grow: 1; }
+    .col-method { width: auto; }
+    .col-man { width: auto; }
+    .col-act { width: auto; }
+    .col-btn { width: auto; }
+
+    /* =========================================
+       NEW PREMIUM UI CONTROLS 
+       ========================================= */
+       
+    /* 1. The Yes/No Button Toggle (Mandatory) */
+    .cb-button { display: inline-flex; background: #f1f5f9; border-radius: 8px; padding: 4px; border: 1px solid #e2e8f0; cursor: pointer; user-select: none; position: relative; height: 42px; align-items: center; }
+    .cb-button input { display: none; }
+    .cb-button .btn-state { padding: 4px 14px; font-size: 13px; font-weight: 600; border-radius: 6px; transition: all 0.2s; }
+    .cb-button .off { color: #64748b; }
+    .cb-button .on { color: #64748b; }
+    .cb-button input:checked ~ .on { background: #ffffff; color: #dc2626; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+    .cb-button input:checked ~ .off { background: transparent; color: #64748b; box-shadow: none; }
+    .cb-button input:not(:checked) ~ .off { background: #ffffff; color: #475569; box-shadow: 0 2px 6px rgba(0,0,0,0.05); }
+    .cb-button input:not(:checked) ~ .on { background: transparent; color: #64748b; box-shadow: none; }
+
+    /* 2. The AI/Manual Button Group (Method) */
+    .radio-group { display: inline-flex; background: #f1f5f9; border-radius: 8px; padding: 4px; border: 1px solid #e2e8f0; height: 42px; align-items: center; }
+    .radio-label { cursor: pointer; padding: 4px 14px; font-size: 13px; font-weight: 600; border-radius: 6px; color: #64748b; transition: all 0.2s; user-select: none; margin: 0; display: flex; align-items: center; gap: 6px; }
+    .radio-group input { display: none; }
+    .radio-group input:checked + .radio-label { background: #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.05); color: #0f172a; }
+    .radio-group input[value*="AI"]:checked + .radio-label, .radio-group input[id*="ai"]:checked + .radio-label { color: #2563eb; }
+
+    /* 3. The Active Switch */
+    .switch { position: relative; display: inline-block; width: 46px; height: 26px; flex-shrink: 0; margin-top: 8px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .3s cubic-bezier(0.4, 0, 0.2, 1); border-radius: 24px; }
+    .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; transition: .3s cubic-bezier(0.4, 0, 0.2, 1); border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    input:checked + .slider { background-color: #059669; }
+    input:checked + .slider:before { transform: translateX(20px); }
+
+    @media (max-width: 1100px) {
+        .custom-inline-form { flex-wrap: wrap; }
+        .col-cat, .col-name { flex: 1 1 100%; }
+        .col-btn { width: 100%; }
+        .btn-gradient { width: 100%; }
+    }
 </style>
 
-<div style="padding: 20px;">
-    <h2 style="margin-top: 0; font-weight: 600; font-size: 24px; color: #212529;">Extraction Field Configurator</h2>
-    <p style="color: #6c757d; font-size: 14px;">Showing extraction rules. Order is used in Upload Step 2.</p>
+<div class="container-fluid py-5 mx-auto" style="max-width: 1500px; padding-left: 2rem; padding-right: 2rem;">
+    
+    <div class="mb-4">
+        <h2 class="mb-1" style="font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">
+            Extraction Field Configurator
+        </h2>
+        <p class="text-muted mb-0" style="font-size: 15px;">Showing extraction rules. Order is used in Upload Step 2.</p>
+    </div>
 
-    <div style="background: white; border-radius: 8px; padding: 20px; margin-bottom: 20px; border: 1px solid #e9ecef;">
-        <form method="POST" style="display: flex; gap: 15px; flex-wrap: wrap; align-items: flex-end;">
+    {% if form.errors %}
+    <div class="alert alert-danger mb-4" style="border-radius: 12px; font-weight: 500; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;">
+        <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i> <strong>Could not save field:</strong> 
+        {% for field, errors in form.errors.items %}
+            {{ field|title }}: {{ errors|striptags }}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div class="premium-card p-4 mb-4">
+        <form method="POST" class="custom-inline-form">
             {% csrf_token %}
-            <div style="flex: 1; min-width: 150px;">
-                <label class="dash-label">Category</label>
-                <input type="text" name="category" class="dash-input" value="Base" required>
+            
+            <div class="form-group col-cat">
+                <label class="form-label">Category</label>
+                <input type="text" name="category" class="form-control-custom" value="Base" required>
             </div>
-            <div style="flex: 2; min-width: 200px;">
-                <label class="dash-label">Field Name</label>
-                <input type="text" name="field_name" class="dash-input" placeholder="e.g. Insurance Company" required>
+            
+            <div class="form-group col-name">
+                <label class="form-label">Field Name</label>
+                <input type="text" name="field_name" class="form-control-custom" placeholder="e.g. Insurance Company" required>
             </div>
-            <div style="flex: 1; min-width: 150px;">
-                <label class="dash-label">Extraction Method</label>
-                <select name="extraction_method" class="dash-input">
-                    <option value="AI">AI Read</option>
-                    <option value="MANUAL">Manual</option>
-                </select>
+            
+            <div class="form-group col-method">
+                <label class="form-label">Method</label>
+                <div class="radio-group">
+                    <input type="radio" id="method_ai_new" name="extraction_method" value="AI Read" checked>
+                    <label for="method_ai_new" class="radio-label">
+                        <i class="bi bi-robot"></i> AI
+                    </label>
+                    
+                    <input type="radio" id="method_regex_new" name="extraction_method" value="Regex">
+                    <label for="method_regex_new" class="radio-label">
+                        <i class="bi bi-person"></i> Regex
+                    </label>
+                </div>
             </div>
-            <div style="display: flex; gap: 15px; padding-bottom: 8px; color: #495057;">
-                <label style="font-size: 14px; display: flex; align-items: center; gap: 5px;">
-                    <input type="checkbox" name="is_mandatory" checked> Mandatory
+            
+            <div class="form-group col-man">
+                <label class="form-label">Mandatory</label>
+                <label class="cb-button">
+                   <input type="checkbox" name="is_mandatory" checked>
+                   <span class="btn-state off">No</span>
+                   <span class="btn-state on">Yes</span>
                 </label>
-                <label style="font-size: 14px; display: flex; align-items: center; gap: 5px;">
-                    <input type="checkbox" name="is_active" checked> Active
-                </label>
-                <label style="font-size: 14px; display: flex; align-items: center; gap: 5px;">
-                    <input type="checkbox" name="has_dropdown"> Dropdown
+            </div>
+            
+            <div class="form-group col-act" style="align-items: center;">
+                <label class="form-label" title="Show to all users">Active</label>
+                <label class="switch" title="Toggle to enable/disable for all users">
+                  <input type="checkbox" name="is_active" checked>
+                  <span class="slider"></span>
                 </label>
             </div>
-            <div>
-                <button type="submit" class="dash-btn">Apply / Add</button>
+            
+            <div class="form-group col-btn">
+                <button type="submit" class="btn-gradient">Apply / Add</button>
             </div>
+            
         </form>
     </div>
 
-    <div style="background: white; border-radius: 8px; border: 1px solid #e9ecef; overflow: hidden;">
-        <table style="width: 100%; border-collapse: collapse; font-size: 14px; text-align: left;">
-            <thead class="table-hdr">
-                <tr>
-                    <th style="padding: 12px 15px;">#</th>
-                    <th style="padding: 12px 15px;">Field Name</th>
-                    <th style="padding: 12px 15px;">Synonyms / Aliases</th>
-                    <th style="padding: 12px 15px;">Mandatory</th>
-                    <th style="padding: 12px 15px;">Method</th>
-                    <th style="padding: 12px 15px;">Active</th>
-                    <th style="padding: 12px 15px;">Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for field in fields %}
-                <tr style="border-bottom: 1px solid #e9ecef; background-color: #fff;">
-                    <td style="padding: 12px 15px; color: #6c757d;">:: {{ field.order_index }}</td>
-                    <td style="padding: 12px 15px; color: #212529;">
-                        <strong>{{ field.field_name }}</strong>
-                        {% if field.has_dropdown %}<span style="background: #e9ecef; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-left: 8px; color: #495057;">Dropdown</span>{% endif %}
-                    </td>
-                    <td style="padding: 12px 15px; color: #6c757d; font-size: 13px;">
-                        {% for syn in field.synonyms.all %}
-                            {{ syn.synonym_text }}{% if not forloop.last %}, {% endif %}
-                        {% empty %}
-                            <em>No synonyms</em>
-                        {% endfor %}
-                    </td>
-                    <td style="padding: 12px 15px;">
-                        {% if field.is_mandatory %}<span style="color: #dc3545; background: #f8d7da; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 500;">Yes</span>
-                        {% else %}<span style="color: #6c757d;">No</span>{% endif %}
-                    </td>
-                    <td style="padding: 12px 15px;">
-                        {% if field.extraction_method == 'AI' %}<span style="color: #0d6efd; background: #cce5ff; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 500;">🤖 AI Read</span>
-                        {% else %}<span style="color: #856404; background: #fff3cd; padding: 3px 8px; border-radius: 4px; font-size: 12px; font-weight: 500;">✋ Manual</span>{% endif %}
-                    </td>
-                    <td style="padding: 12px 15px;">
-                        {% if field.is_active %}<span style="color: #198754; font-weight: bold;">ON</span>
-                        {% else %}<span style="color: #dc3545;">OFF</span>{% endif %}
-                    </td>
-                    <td style="padding: 12px 15px;">
-                        <form action="{% url 'delete_field' field.pk %}" method="POST" style="margin: 0;">
-                            {% csrf_token %}
-                            <button type="submit" style="background: none; border: none; color: #dc3545; cursor: pointer; text-decoration: underline; font-size: 13px; padding: 0;" onclick="return confirm('Delete this field?');">Delete</button>
-                        </form>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+    <div class="premium-card">
+        <div class="table-responsive">
+            <table class="table-modern">
+                <thead>
+                    <tr>
+                        <th style="width: 5%;">#</th>
+                        <th style="width: 15%;">Field Name</th>
+                        <th style="width: 25%;">Synonyms / Aliases</th>
+                        <th style="width: 12%;">Method</th>
+                        <th style="width: 12%;">Mandatory</th>
+                        <th style="width: 15%;">Active Status</th>
+                        <th class="text-end" style="width: 15%;">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for field in fields %}
+                    <tr>
+                        <td style="color: #94a3b8; font-weight: 500;">:: {{ forloop.counter0 }}</td>
+                        <td>
+                            <strong style="color: #0f172a;">{{ field.field_name }}</strong>
+                            {% if field.has_dropdown %}
+                                <span style="display:block; margin-top:4px; font-size:11px; color:#64748b;"><i class="bi bi-menu-button-wide me-1"></i>Dropdown</span>
+                            {% endif %}
+                        </td>
+                        
+                        <td class="wrap-cell" style="font-style: italic; color: #64748b; font-size: 13px;">
+                            {% if field.synonyms.all %}
+                                {{ field.synonyms.all|join:", " }}
+                            {% else %}
+                                No synonyms
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            <div class="radio-group" style="height: 34px;">
+                                <input type="radio" id="tbl_ai_{{ field.pk }}" name="method_{{ field.pk }}" value="AI Read" {% if field.extraction_method == 'AI Read' %}checked{% endif %} onchange="updateRow(this)">
+                                <label for="tbl_ai_{{ field.pk }}" class="radio-label" style="padding: 2px 10px;"><i class="bi bi-robot"></i> AI</label>
+                                
+                                <input type="radio" id="tbl_man_{{ field.pk }}" name="method_{{ field.pk }}" value="Regex" {% if field.extraction_method != 'AI Read' %}checked{% endif %} onchange="updateRow(this)">
+                                <label for="tbl_man_{{ field.pk }}" class="radio-label" style="padding: 2px 10px;"><i class="bi bi-person"></i> Manual</label>
+                            </div>
+                        </td>
+
+                        <td>
+                            <label class="cb-button" style="height: 34px;" onclick="updateRow(this)">
+                               <input type="checkbox" {% if field.is_mandatory %}checked{% endif %}>
+                               <span class="btn-state off" style="padding: 2px 10px;">No</span>
+                               <span class="btn-state on" style="padding: 2px 10px;">Yes</span>
+                            </label>
+                        </td>
+                        
+                        <td>
+                            <div class="d-flex align-items-center gap-2" style="margin-top: -8px;">
+                                <label class="switch" title="Show this field to all users">
+                                  <input type="checkbox" {% if field.is_active %}checked{% endif %} onchange="updateRow(this)">
+                                  <span class="slider"></span>
+                                </label>
+                                <span class="active-label" style="font-size: 12px; font-weight: 700; color: {% if field.is_active %}#059669{% else %}#94a3b8{% endif %}; margin-top: 8px;">
+                                    {% if field.is_active %}ON{% else %}OFF{% endif %}
+                                </span>
+                            </div>
+                        </td>
+                        
+                        <td class="action-cell text-end">
+                            <a href="{% url 'edit_field' field.pk %}" class="btn-action text-primary" title="Edit Rule">Edit</a>
+                            <form method="POST" action="{% url 'delete_field' field.pk %}" style="display:inline; margin-left: 4px;">
+                                {% csrf_token %}
+                                <button type="submit" class="btn-action text-danger" title="Delete Rule">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5 text-muted" style="font-size: 15px;">No extraction fields configured yet.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
+
+<div id="saveToast" style="position: fixed; bottom: 20px; right: 20px; background: #0f172a; color: white; padding: 12px 24px; border-radius: 8px; font-size: 14px; font-weight: 500; box-shadow: 0 10px 25px rgba(0,0,0,0.2); transform: translateY(100px); opacity: 0; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); z-index: 9999;">
+    <i class="bi bi-check-circle-fill text-success me-2"></i> Setting updated successfully
+</div>
+
+<script>
+    // Handles visual updates when table switches are clicked
+    function updateRow(el) {
+        if (el.type === 'checkbox') {
+            const labelSpan = el.closest('td').querySelector('.active-label');
+            if (labelSpan) {
+                labelSpan.textContent = el.checked ? 'ON' : 'OFF';
+                labelSpan.style.color = el.checked ? '#059669' : '#94a3b8';
+            }
+        }
+        
+        const toast = document.getElementById('saveToast');
+        toast.style.transform = 'translateY(0)';
+        toast.style.opacity = '1';
+        
+        setTimeout(() => {
+            toast.style.transform = 'translateY(100px)';
+            toast.style.opacity = '0';
+        }, 2500);
+    }
+</script>
 {% endblock %}

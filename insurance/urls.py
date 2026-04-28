@@ -1,10 +1,15 @@
 from django.urls import path
 from django.contrib.auth import views as auth_views
+from django.conf import settings
+from django.conf.urls.static import static
 from . import views
 
 urlpatterns = [
     # Home / Login
     path("", auth_views.LoginView.as_view(template_name="registration/login.html"), name="home"),
+
+    # NEW: Unified Home Page Dashboard
+    path("home/", views.home_dashboard, name="home_dashboard"),
 
     # Core portal pages
     path("upload/", views.upload_csv, name="upload"),
@@ -22,6 +27,7 @@ urlpatterns = [
     path("my-mis/", views.my_mis, name="my_mis"),
     path('mis-review/<int:pk>/', views.mis_review, name='mis_review'),
     path('configurator/', views.field_configurator, name='field_configurator'),
+    path('configurator/edit/<int:pk>/', views.edit_field, name='edit_field'),
     path('configurator/delete/<int:pk>/', views.delete_field, name='delete_field'),
 
     # Policy Lock System
@@ -67,3 +73,8 @@ urlpatterns = [
     # ==========================================
     path('api/v1/export-rates/', views.ExportRatesAPIView.as_view(), name='api-export-rates'),
 ]
+
+# --- THIS FIXES THE PDF PREVIEW ---
+# Tells Django's development server how to route and serve media files safely
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

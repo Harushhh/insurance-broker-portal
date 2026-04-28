@@ -8,6 +8,9 @@ load_dotenv(BASE_DIR / ".env")
 
 SECRET_KEY = os.getenv("SECRET_KEY")
 
+# Added for AI Document Extraction
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")]
@@ -97,7 +100,7 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 LOGIN_URL = "/login/"
-LOGIN_REDIRECT_URL = "/dashboard/"
+LOGIN_REDIRECT_URL = "/home/"  # ✅ CHANGED from /dashboard/ to /home/
 LOGOUT_REDIRECT_URL = "/login/"
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -135,3 +138,9 @@ SPECTACULAR_SETTINGS = {
         }
     },
 }
+
+# =========================================================
+# SECURITY OVERRIDES FOR PDF PREVIEWS
+# =========================================================
+# Allows the <object> tag to load PDFs from our own domain without clickjacking errors
+X_FRAME_OPTIONS = 'SAMEORIGIN'

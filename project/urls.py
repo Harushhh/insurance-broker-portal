@@ -32,5 +32,6 @@ urlpatterns = [
 ]
 
 # ✅ NEW: This tells Django how to serve the files uploaded in the Grid Management page
+# (This also makes the PDF embedding work on the MIS Review screen!)
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
