@@ -1,115 +1,171 @@
 {% extends 'base.html' %}
 {% load static %}
 
+{% block title %}Upload Document - Insurance Portal{% endblock %}
+
 {% block content %}
 <style>
-    /* Premium Styling Overrides */
+    /* Premium Card & Table Styling */
     .premium-card { background: #ffffff; border-radius: 16px; border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03); overflow: hidden; }
     
-    .table-modern { border-collapse: separate; border-spacing: 0; width: 100%; }
-    .table-modern th { background: #f8fafc; padding: 16px 24px; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid #e2e8f0; font-weight: 600; }
+    .table-modern { border-collapse: separate; border-spacing: 0; width: 100%; margin-bottom: 0;}
+    .table-modern th { background: #f8fafc; padding: 16px 24px; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid #e2e8f0; font-weight: 700; white-space: nowrap;}
     .table-modern td { padding: 18px 24px; font-size: 14px; vertical-align: middle; border-bottom: 1px solid #f1f5f9; color: #334155; }
     .table-modern tbody tr { transition: background-color 0.2s; }
     .table-modern tbody tr:hover { background-color: #f8fafc; }
     
-    .upload-zone { border: 2px dashed #cbd5e1; border-radius: 12px; padding: 40px; text-align: center; background: #f8fafc; transition: all 0.2s; }
+    /* Upload Zone */
+    .upload-zone { 
+        border: 2px dashed #cbd5e1; 
+        border-radius: 12px; 
+        padding: 40px; 
+        text-align: center; 
+        background: #f8fafc; 
+        transition: all 0.2s; 
+        position: relative;
+    }
     .upload-zone:hover { border-color: #94a3b8; background: #f1f5f9; }
+    .upload-zone input[type="file"] {
+        width: 100%;
+        padding: 10px;
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        color: #475569;
+        font-size: 14px;
+        cursor: pointer;
+    }
     
     /* Button Styling */
-    .btn-gradient { background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%); color: white; border: none; font-weight: 600; border-radius: 8px; padding: 10px 24px; transition: all 0.2s; }
+    .btn-gradient { 
+        background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%); 
+        color: white; border: none; font-weight: 600; border-radius: 8px; 
+        padding: 12px 24px; transition: all 0.2s; font-size: 15px; width: 100%;
+    }
     .btn-gradient:hover:not(:disabled) { box-shadow: 0 8px 20px rgba(37, 99, 235, 0.2); transform: translateY(-1px); color: white; }
-    .btn-gradient:disabled { background: #94a3b8; cursor: not-allowed; transform: none; box-shadow: none; opacity: 0.8; }
+    .btn-gradient:disabled { background: #94a3b8; cursor: not-allowed; transform: none; box-shadow: none; opacity: 0.9; color: #f1f5f9;}
     
-    .status-badge { padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+    /* Badges */
+    .status-badge { padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; }
     .badge-success { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
     .badge-warning { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
     .badge-danger { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
 
     /* Custom Spinner Animation */
     @keyframes spin { 100% { transform: rotate(360deg); } }
-    .spinner-icon { display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; border-top-color: #fff; animation: spin 1s ease-in-out infinite; margin-right: 8px; vertical-align: middle; }
+    .spinner-icon { 
+        display: inline-block; width: 18px; height: 18px; 
+        border: 3px solid rgba(255,255,255,0.3); border-radius: 50%; 
+        border-top-color: #fff; animation: spin 1s ease-in-out infinite; 
+    }
 </style>
 
-<div class="container-fluid py-5 mx-auto" style="max-width: 1200px; padding-left: 2rem; padding-right: 2rem;">
+<div class="container-fluid py-2 mx-auto" style="max-width: 1400px;">
     
-    <div class="mb-5">
-        <h2 class="mb-1" style="font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">
-            <i class="bi bi-file-earmark-arrow-up text-primary me-2"></i>Upload Policy Document
+    <div class="mb-4">
+        <h2 class="mb-1" style="font-weight: 800; color: #0f172a; letter-spacing: -0.02em; font-size: 24px;">
+            Upload Policy Document
         </h2>
-        <p class="text-muted mb-0" style="font-size: 15px;">Upload a PDF or Image (JPG/PNG). The AI will automatically extract the fields configured in your rulebook.</p>
+        <p class="text-muted mb-0" style="font-size: 14px;">Upload a PDF or Image (JPG/PNG). Gemini AI will automatically extract the fields configured in your rulebook.</p>
     </div>
 
     {% if msg %}
-    <div class="alert alert-success d-flex align-items-center mb-4" style="border-radius: 12px; font-weight: 500; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46;">
-        <i class="bi bi-check-circle-fill me-2 fs-5"></i> {{ msg }}
+    <div class="alert alert-success d-flex align-items-center shadow-sm mb-4" style="border-radius: 12px; font-weight: 500; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46;">
+        <i class="bi bi-check-circle-fill me-3 fs-5"></i> {{ msg }}
     </div>
     {% endif %}
     {% if error %}
-    <div class="alert alert-danger d-flex align-items-center mb-4" style="border-radius: 12px; font-weight: 500; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;">
-        <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i> {{ error }}
+    <div class="alert alert-danger d-flex align-items-center shadow-sm mb-4" style="border-radius: 12px; font-weight: 500; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;">
+        <i class="bi bi-exclamation-triangle-fill me-3 fs-5"></i> {{ error }}
     </div>
     {% endif %}
 
-    <div class="premium-card p-4 mb-5">
-        <form method="POST" enctype="multipart/form-data" id="extractionForm">
-            {% csrf_token %}
-            <div class="upload-zone mb-4">
-                {{ upload_form.uploaded_file }}
+    <div class="row mb-5">
+        <div class="col-lg-6">
+            <div class="premium-card p-4 h-100">
+                <form method="POST" enctype="multipart/form-data" id="extractionForm">
+                    {% csrf_token %}
+                    
+                    <div class="upload-zone mb-4">
+                        <i class="bi bi-cloud-arrow-up text-primary mb-3 d-block" style="font-size: 40px;"></i>
+                        <h6 style="font-weight: 700; color: #1e293b;">Select a Document</h6>
+                        <p style="font-size: 13px; color: #64748b; margin-bottom: 16px;">Supports .PDF, .PNG, .JPG, and .JPEG</p>
+                        {{ upload_form.uploaded_file }}
+                    </div>
+                    
+                    <button type="submit" class="btn-gradient d-flex justify-content-center align-items-center gap-2" id="extractBtn">
+                        <span id="btnIcon"><i class="bi bi-magic"></i></span>
+                        <span id="btnText">Extract Data with AI</span>
+                    </button>
+                </form>
             </div>
-            <button type="submit" class="btn btn-gradient px-4 py-2" id="extractBtn">
-                <span id="btnIcon"><i class="bi bi-magic me-2"></i></span>
-                <span id="btnText">Extract Data</span>
-            </button>
-        </form>
+        </div>
+        
+        <div class="col-lg-6">
+            <div class="premium-card p-4 h-100 d-flex flex-column justify-content-center" style="background: linear-gradient(145deg, #f8fafc 0%, #f1f5f9 100%);">
+                <h5 style="font-weight: 800; color: #0f172a; margin-bottom: 16px;"><i class="bi bi-info-circle text-primary me-2"></i>How it works</h5>
+                <ul class="text-muted" style="font-size: 14px; line-height: 1.8; padding-left: 20px; margin-bottom: 0;">
+                    <li><strong>Upload:</strong> Select a clear, legible insurance policy document.</li>
+                    <li><strong>Process:</strong> The file is securely sent to Gemini 2.5 Flash for Multimodal OCR.</li>
+                    <li><strong>Extract:</strong> The AI reads your <a href="{% url 'field_configurator' %}" class="text-primary fw-bold text-decoration-none">Rulebook</a> and extracts exactly what you asked for.</li>
+                    <li><strong>Review:</strong> You will find the extracted data in your MIS table, ready for human verification.</li>
+                </ul>
+            </div>
+        </div>
     </div>
 
     <div class="premium-card">
-        <div class="bg-white py-4 px-4 border-bottom">
-            <h5 class="mb-0" style="font-weight: 700; color: #0f172a; font-size: 18px;">Recent Uploads</h5>
+        <div class="bg-white py-3 px-4 border-bottom">
+            <h5 class="mb-0" style="font-weight: 800; color: #0f172a; font-size: 16px;">Your Recent Uploads</h5>
         </div>
         <div class="table-responsive">
             <table class="table-modern">
                 <thead>
                     <tr>
-                        <th>File Name</th>
-                        <th>Uploaded By</th>
-                        <th>Date</th>
-                        <th>Status</th>
-                        <th class="text-end">Action</th>
+                        <th style="width: 35%;">File Name</th>
+                        <th style="width: 15%;">Uploaded By</th>
+                        <th style="width: 20%;">Date</th>
+                        <th style="width: 15%;">Status</th>
+                        <th class="text-end" style="width: 15%;">Action</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for doc in documents %}
                     <tr>
-                        <td style="font-weight: 600; color: #0f172a;">{{ doc.original_filename|default:"Unnamed File"|truncatechars:40 }}</td>
+                        <td style="font-weight: 600; color: #0f172a;">
+                            <i class="bi bi-file-earmark-text text-muted me-2"></i>
+                            {{ doc.original_filename|default:"Unnamed File"|truncatechars:40 }}
+                        </td>
                         <td>
-                            <span style="background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; color: #475569;">
+                            <span style="background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; color: #475569;">
                                 {{ doc.uploaded_by.username|default:"System" }}
                             </span>
                         </td>
                         <td>
-                            <span style="color: #475569; font-weight: 500;">{{ doc.created_at|date:"M d, Y" }}</span><br>
-                            <span style="color: #94a3b8; font-size: 12px;">{{ doc.created_at|time:"H:i A" }}</span>
+                            <span style="color: #334155; font-weight: 600; font-size: 13px;">{{ doc.created_at|date:"M d, Y" }}</span><br>
+                            <span style="color: #94a3b8; font-size: 11px; font-weight: 500;">{{ doc.created_at|time:"H:i A" }}</span>
                         </td>
                         <td>
                             {% if doc.status == 'COMPLETED' %}
-                                <span class="status-badge badge-success"><i class="bi bi-check-circle me-1"></i>Completed</span>
+                                <span class="status-badge badge-success"><i class="bi bi-check-circle-fill"></i> Completed</span>
                             {% elif doc.status == 'FAILED' %}
-                                <span class="status-badge badge-danger"><i class="bi bi-x-circle me-1"></i>Failed</span>
-                                <div style="font-size: 11px; color: #dc2626; margin-top: 6px; font-weight: 500; line-height: 1.2;">
-                                    {{ doc.error_message }}
+                                <span class="status-badge badge-danger"><i class="bi bi-x-circle-fill"></i> Failed</span>
+                                <div style="font-size: 11px; color: #dc2626; margin-top: 6px; font-weight: 600; line-height: 1.3; max-width: 200px; white-space: normal;">
+                                    {{ doc.error_message|truncatechars:60 }}
                                 </div>
                             {% elif doc.status == 'PROCESSING' %}
-                                <span class="status-badge badge-warning"><i class="bi bi-hourglass-split me-1"></i>Processing...</span>
+                                <span class="status-badge badge-warning"><i class="bi bi-hourglass-split"></i> Processing</span>
                             {% else %}
-                                <span class="status-badge" style="background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;"><i class="bi bi-clock me-1"></i>Pending</span>
+                                <span class="status-badge" style="background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0;"><i class="bi bi-clock"></i> Pending</span>
                             {% endif %}
                         </td>
                         <td class="text-end">
-                            {% if doc.status == 'COMPLETED' %}
-                                <a href="{% url 'my_mis' %}?policy_number={{ doc.mis_record.policy_number }}" class="btn btn-sm btn-light border text-primary" style="font-weight: 600; border-radius: 6px; padding: 6px 14px;">Review Data <i class="bi bi-arrow-right ms-1"></i></a>
+                            {% if doc.status == 'COMPLETED' and doc.mis_record %}
+                                <a href="{% url 'mis_review' doc.mis_record.pk %}" class="btn btn-sm" style="background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; font-weight: 600; border-radius: 6px; padding: 6px 14px;">
+                                    Review Data <i class="bi bi-arrow-right ms-1"></i>
+                                </a>
                             {% else %}
-                                <span class="text-muted" style="font-size: 13px; font-weight: 500;">Waiting...</span>
+                                <span class="text-muted" style="font-size: 12px; font-weight: 600;">—</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -117,8 +173,8 @@
                     <tr>
                         <td colspan="5" class="text-center py-5">
                             <div style="color: #cbd5e1; font-size: 40px; margin-bottom: 10px;"><i class="bi bi-inbox"></i></div>
-                            <h6 style="color: #475569; font-weight: 600;">No Uploads Yet</h6>
-                            <p style="color: #94a3b8; font-size: 14px; margin-bottom: 0;">Documents you upload will appear here.</p>
+                            <h6 style="color: #475569; font-weight: 700;">No Documents Processed</h6>
+                            <p style="color: #94a3b8; font-size: 13px; margin-bottom: 0;">Documents you upload for extraction will appear here.</p>
                         </td>
                     </tr>
                     {% endfor %}
@@ -129,20 +185,21 @@
 </div>
 
 <script>
+    // Intercept form submission to show loading spinner and prevent double clicks
     document.getElementById('extractionForm').addEventListener('submit', function(e) {
-        // Prevent multiple submissions
+        const fileInput = document.querySelector('input[type="file"]');
+        if (!fileInput.value) return; // Let Django handle the standard "required" validation if empty
+
         const btn = document.getElementById('extractBtn');
         if (btn.disabled) {
             e.preventDefault();
             return;
         }
         
-        // Disable the button and change the UI
+        // Disable the button and swap the UI state
         btn.disabled = true;
-        
-        // Swap the icon to our CSS spinner and update the text
         document.getElementById('btnIcon').innerHTML = '<span class="spinner-icon"></span>';
-        document.getElementById('btnText').innerHTML = 'Processing Document...';
+        document.getElementById('btnText').innerHTML = 'AI Processing...';
     });
 </script>
 {% endblock %}

@@ -688,8 +688,6 @@ def upload_csv(request):
                     "tariff_max": float(row.get("tariff_max") or 0),
                     "is_ncb": is_ncb_obj,
                     "is_cpa": is_cpa_obj,
-                    "cc_min": float(row.get("cc_min") or 0),
-                    "cc_max": float(row.get("cc_max") or 0),
                     "is_zd": is_zd_obj,
                     "from_date": parse_date(row.get("from_date")),
                     "to_date": parse_date(row.get("to_date")),
@@ -1276,8 +1274,7 @@ def upload_extract_pdf(request):
         if upload_form.is_valid():
             uploaded_file = request.FILES['uploaded_file']
             
-            # --- NEW: DUPLICATE PREVENTION LOGIC ---
-            # Check if a file with this exact name has already been uploaded
+            # --- DUPLICATE PREVENTION LOGIC ---
             if PolicyDocumentUpload.objects.filter(original_filename=uploaded_file.name).exists():
                 error = f"⚠️ Duplicate File: A document named '{uploaded_file.name}' has already been processed."
             else:
@@ -2505,29 +2502,27 @@ class ExportRatesAPIView(generics.ListAPIView):
     queryset = RateMaster.objects.filter(is_deleted="NO") 
     serializer_class = RateMasterSerializer
 
-
+# -------------------------
+# MIS REVIEW 
+# -------------------------
 @login_required
 @user_passes_test(can_view_alias_management)
 def mis_review(request, pk):
     record = get_object_or_404(PolicyMISRecord.objects.select_related('source_document'), pk=pk)
     
-    # 1. Grab the active rulebook
     rules = ExtractionField.objects.filter(is_active=True).order_by('category', 'order_index')
     
     if request.method == 'POST':
         updated_json = record.raw_ai_json or {}
         
-        # 2. Loop through the submitted form and update our JSON
         for rule in rules:
             field_key = rule.field_name.strip().lower().replace(" ", "_")
             new_val = request.POST.get(field_key)
             if new_val is not None:
                 updated_json[field_key] = new_val
                 
-        # 3. Save the corrected data back to the database
         record.raw_ai_json = updated_json
         
-        # Update the hard database columns if they match standard keys
         record.policy_number = updated_json.get("policy_number", record.policy_number)
         record.insurer_name = updated_json.get("insurance_company", record.insurer_name)
         record.insured_name = updated_json.get("insured_name", record.insured_name)
@@ -2535,7 +2530,6 @@ def mis_review(request, pk):
         
         return redirect('my_mis')
 
-    # 4. Prepare the data for the template
     field_data = []
     parsed = record.raw_ai_json or {}
     
@@ -2543,10 +2537,8 @@ def mis_review(request, pk):
         field_key = rule.field_name.strip().lower().replace(" ", "_")
         val = parsed.get(field_key, "")
         
-        # Flag if the AI missed a mandatory field
         is_missing_mandatory = rule.is_mandatory and not val
         
-        # Check if this field should be a dropdown and split the options
         dropdown_choices = []
         if getattr(rule, 'has_dropdown', False) and getattr(rule, 'dropdown_options', None):
             dropdown_choices = [x.strip() for x in rule.dropdown_options.split(',') if x.strip()]

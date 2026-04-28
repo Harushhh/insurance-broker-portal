@@ -1,67 +1,166 @@
 {% extends "base.html" %}
-{% block title %}Dashboard{% endblock %}
+{% block title %}Import Data - Insurance Portal{% endblock %}
+
 {% block content %}
-<!DOCTYPE html>
-<html>
-<head>
-    <title>CSV Upload</title>
-    <style>
-        .btn {
-            display: inline-block;
-            padding: 10px 15px;
-            background: #007bff;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
-            font-weight: bold;
-            margin-bottom: 15px;
-        }
-        .btn:hover {
-            background: #0056b3;
-        }
-    </style>
-</head>
-<body>
+<style>
+    /* =========================================
+       PREMIUM DESIGN SYSTEM 
+       ========================================= */
+    .premium-card {
+        background: #ffffff;
+        border-radius: 16px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 4px 20px rgba(15, 23, 42, 0.03);
+        margin-bottom: 24px;
+    }
 
-<a href="{% url 'dashboard' %}" class="btn">📊 Go To Dashboard</a>
+    /* Typography */
+    .text-overline { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
 
-<h2>Upload CSV Data</h2>
+    /* Form Controls */
+    .form-select-premium {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 8px 14px;
+        font-size: 14px;
+        color: #0f172a;
+        background-color: #fff;
+        transition: all 0.2s ease;
+        height: 44px;
+        width: 100%;
+        cursor: pointer;
+    }
+    .form-select-premium:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+
+    /* Upload Zone */
+    .upload-zone { 
+        border: 2px dashed #cbd5e1; 
+        border-radius: 12px; 
+        padding: 40px 20px; 
+        text-align: center; 
+        background: #f8fafc; 
+        transition: all 0.2s; 
+    }
+    .upload-zone:hover { border-color: #94a3b8; background: #f1f5f9; }
+    .upload-zone input[type="file"] {
+        width: 100%;
+        max-width: 350px;
+        padding: 10px;
+        background: #fff;
+        border-radius: 8px;
+        border: 1px solid #e2e8f0;
+        color: #475569;
+        font-size: 14px;
+        cursor: pointer;
+        margin-top: 16px;
+    }
+
+    /* Buttons */
+    .btn-gradient { background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%); color: white; border: none; border-radius: 8px; padding: 10px 24px; font-weight: 600; font-size: 15px; transition: all 0.2s; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.1); display: inline-flex; align-items: center; gap: 8px;}
+    .btn-gradient:hover { transform: translateY(-1px); box-shadow: 0 6px 15px rgba(37, 99, 235, 0.25); color: white; }
+    
+    .btn-soft { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 20px; font-weight: 600; font-size: 14px; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; text-decoration: none;}
+    .btn-soft:hover { background: #e2e8f0; color: #0f172a; border-color: #cbd5e1; }
+</style>
+
+<div class="mb-4 d-flex justify-content-between align-items-end flex-wrap gap-3">
+    <div>
+        <h2 class="mb-1" style="font-weight: 800; color: #0f172a; letter-spacing: -0.02em; font-size: 26px;">
+            Import Data
+        </h2>
+        <p class="text-muted mb-0" style="font-size: 14px;">Upload CSV files to update Rate Master, RTO Master, or Make Model Master.</p>
+    </div>
+    <div>
+        <a href="{% url 'dashboard' %}" class="btn-soft bg-white">
+            <i class="bi bi-grid-1x2 text-primary"></i> Go To Dashboard
+        </a>
+    </div>
+</div>
 
 {% if summary %}
-<div style="color:green;font-weight:bold;margin-bottom:15px;">
-    Inserted: {{ summary.inserted }} |
-    Duplicates Skipped: {{ summary.duplicates }} |
-    Errors: {{ summary.errors }}
+<div class="alert alert-success d-flex align-items-center shadow-sm mb-4" style="border-radius: 12px; font-weight: 500; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46;">
+    <i class="bi bi-check-circle-fill me-3 fs-3"></i>
+    <div>
+        <strong class="d-block mb-1" style="font-size: 15px;">Upload Processed Successfully</strong>
+        <span style="font-size: 14px; opacity: 0.9;">
+            Inserted: <b>{{ summary.inserted }}</b> &nbsp;|&nbsp; 
+            Duplicates Skipped: <b>{{ summary.duplicates }}</b> &nbsp;|&nbsp; 
+            Errors: <b {% if summary.errors > 0 %}class="text-danger"{% endif %}>{{ summary.errors }}</b>
+        </span>
+    </div>
 </div>
 {% endif %}
 
 {% if errors %}
-<div style="color:red;font-weight:bold;margin-bottom:15px;">
-    <h3>CSV Validation Errors</h3>
-    <ul>
-        {% for e in errors %}
-            <li>{{ e }}</li>
-        {% endfor %}
-    </ul>
+<div class="alert alert-danger shadow-sm mb-4" style="border-radius: 12px; font-weight: 500; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;">
+    <div class="d-flex align-items-center mb-3">
+        <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
+        <h6 class="mb-0 fw-bold">CSV Validation Errors Encountered</h6>
+    </div>
+    <div style="max-height: 200px; overflow-y: auto; padding-right: 10px;">
+        <ul class="mb-0 ps-4" style="font-size: 13px; line-height: 1.6;">
+            {% for e in errors %}
+                <li>{{ e }}</li>
+            {% endfor %}
+        </ul>
+    </div>
 </div>
 {% endif %}
 
-<form method="post" enctype="multipart/form-data">
-  {% csrf_token %}
+<div class="row g-4">
+    <div class="col-lg-6">
+        <div class="premium-card p-4 h-100">
+            <form method="post" enctype="multipart/form-data">
+                {% csrf_token %}
+                
+                <div class="mb-4">
+                    <label class="text-overline d-block mb-2">Target Database Table</label>
+                    <select name="upload_type" class="form-select-premium" required>
+                        <option value="rate_master">RateMaster (Rates CSV)</option>
+                        <option value="rto_master">RTO Master (Clusters CSV)</option>
+                        <option value="make_model_master">Make Model Master (Clusters CSV)</option>
+                    </select>
+                </div>
 
-  <div style="max-width:520px; display:flex; flex-direction:column; gap:10px;">
-    <label style="font-weight:700;">What data are you uploading?</label>
-    <select name="upload_type" style="padding:10px; border:1px solid #e5e7eb; border-radius:10px;">
-      <option value="rate_master">RateMaster (Rates CSV)</option>
-      <option value="rto_master">RTO Master</option>
-      <option value="make_model_master">Make Model Master</option>
-    </select>
+                <div class="upload-zone mb-4">
+                    <i class="bi bi-filetype-csv text-primary mb-3 d-block" style="font-size: 44px;"></i>
+                    <h6 style="font-weight: 700; color: #1e293b;">Select CSV File</h6>
+                    <p style="font-size: 13px; color: #64748b; margin-bottom: 0;">File must be formatted with the exact column headers.</p>
+                    <input type="file" name="file" accept=".csv" required>
+                </div>
 
-    <input type="file" name="file" required>
-    <button class="btn primary" type="submit">Upload</button>
-  </div>
-</form>
+                <button class="btn-gradient w-100 justify-content-center" type="submit" id="uploadBtn">
+                    <i class="bi bi-cloud-arrow-up"></i> Start Upload
+                </button>
+            </form>
+        </div>
+    </div>
 
-</body>
-</html>
+    <div class="col-lg-6">
+        <div class="premium-card p-4 h-100 d-flex flex-column justify-content-center" style="background: linear-gradient(145deg, #f8fafc 0%, #f1f5f9 100%);">
+            <h5 style="font-weight: 800; color: #0f172a; margin-bottom: 16px;">
+                <i class="bi bi-info-circle-fill text-primary me-2"></i>Import Guidelines
+            </h5>
+            <ul class="text-muted" style="font-size: 14px; line-height: 1.8; padding-left: 20px; margin-bottom: 0;">
+                <li><strong>Format:</strong> Only valid <code>.csv</code> (Comma Separated Values) files are supported.</li>
+                <li><strong>Headers:</strong> The first row must contain the exact column headers expected by the system. Do not rename columns.</li>
+                <li><strong>Rate Master:</strong> Ensure all RTO strings and Make/Model strings match exactly with the existing master data to prevent validation rejections.</li>
+                <li><strong>Validation:</strong> The system will automatically skip duplicate records based on your defined hash keys.</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Optional: Show loading state on button press
+    document.querySelector('form').addEventListener('submit', function() {
+        const btn = document.getElementById('uploadBtn');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> Uploading...';
+    });
+</script>
 {% endblock %}

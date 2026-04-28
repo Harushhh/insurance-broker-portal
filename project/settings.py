@@ -1,20 +1,32 @@
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+import dj_database_url  # <-- ADDED FOR RENDER DEPLOYMENT
 
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load environment variables from .env file
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.getenv("SECRET_KEY")
+# =========================================================
+# SECURITY & CORE SETTINGS
+# =========================================================
+SECRET_KEY = os.getenv("SECRET_KEY", "fallback-secret-key-for-dev")
 
-# Added for AI Document Extraction
+# Automatically set DEBUG to False if deployed on Render
+DEBUG = 'RENDER' not in os.environ and os.getenv("DEBUG", "False").lower() == "true"
+
+# Allow Render's URL in production, fallback to localhost for dev
+if 'RENDER' in os.environ:
+    ALLOWED_HOSTS = ['*'] # Allows Render domains automatically
+else:
+    ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")]
+
+# Gemini AI API Key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-DEBUG = os.getenv("DEBUG", "False").lower() == "true"
-
-ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")]
-
+# Application definition
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -26,15 +38,16 @@ INSTALLED_APPS = [
     # --- SWAGGER & API ---
     'rest_framework',
     'drf_spectacular',
-    'rest_framework_api_key',  # ✅ ADDED FOR API KEY SECURITY
-    # -------------------------
-
+    'rest_framework_api_key', 
+    
+    # --- LOCAL APPS ---
     'insurance',
     'config',
 ]
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware', # <-- ADDED WHITENOISE HERE
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -48,7 +61,7 @@ ROOT_URLCONF = 'project.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, 'insurance', 'templates')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -62,17 +75,24 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'project.wsgi.application'
 
+# =========================================================
+# DATABASE (Render + Local Postgres Support)
+# =========================================================
+# This smart config uses Render's DATABASE_URL if it exists. 
+# If not, it builds a URL from your local .env Postgres variables.
+local_db_url = f"postgres://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME')}" if os.getenv('DB_NAME') else f"sqlite:///{BASE_DIR / 'db.sqlite3'}"
+
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME'),
-        'USER': os.getenv('DB_USER'),
-        'PASSWORD': os.getenv('DB_PASSWORD'),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '5432'),
-    }
+    'default': dj_database_url.config(
+        default=os.getenv('DATABASE_URL', local_db_url),
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
 }
 
+# =========================================================
+# PASSWORD VALIDATION
+# =========================================================
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -88,30 +108,52 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
+# =========================================================
+# INTERNATIONALIZATION
+# =========================================================
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'Asia/Kolkata'
 USE_I18N = True
 USE_TZ = True
 
+# =========================================================
+# STATIC FILES (CSS, JavaScript, Images)
+# =========================================================
 STATIC_URL = 'static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')] if os.path.exists(os.path.join(BASE_DIR, 'static')) else []
 
+# Tell WhiteNoise to compress and cache static files in production
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+
+# =========================================================
+# MEDIA UPLOADS & SECURITY OVERRIDES (PDF PREVIEWS)
+# =========================================================
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
+# ⚠️ CRITICAL FOR MIS REVIEW: 
+# Allows the <object> or <iframe> tag to load PDFs from your own domain 
+# without triggering Django's default Clickjacking protection errors.
+X_FRAME_OPTIONS = 'SAMEORIGIN'
+
+# Default primary key field type
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Auth Redirects
 LOGIN_URL = "/login/"
-LOGIN_REDIRECT_URL = "/home/"  # ✅ CHANGED from /dashboard/ to /home/
+LOGIN_REDIRECT_URL = "/home/"  
 LOGOUT_REDIRECT_URL = "/login/"
 
+# =========================================================
+# EMAIL CONFIGURATION
+# =========================================================
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = os.getenv('EMAIL_HOST')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
-
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
 
 # =========================================================
 # DRF & SWAGGER (SPECTACULAR) SETTINGS
@@ -125,7 +167,6 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'API documentation for the Insurance Broker Portal',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
-    # ✅ Tells Swagger UI to show an "Authorize" button for API Keys
     'SECURITY': [{'ApiKeyAuth': []}],
     'COMPONENTS': {
         'securitySchemes': {
@@ -138,9 +179,3 @@ SPECTACULAR_SETTINGS = {
         }
     },
 }
-
-# =========================================================
-# SECURITY OVERRIDES FOR PDF PREVIEWS
-# =========================================================
-# Allows the <object> tag to load PDFs from our own domain without clickjacking errors
-X_FRAME_OPTIONS = 'SAMEORIGIN'
