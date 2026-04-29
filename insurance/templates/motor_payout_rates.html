@@ -1,362 +1,435 @@
 {% extends "base.html" %}
 {% load custom_filters %}
-{% block title %}Motor Payout Rates{% endblock %}
+{% block title %}Motor Payout Rates - Insurance Portal{% endblock %}
 
 {% block content %}
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 
-<div class="card">
-  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom: 10px;">
-    <div>
-      <h2 style="margin:0;">Motor Payout Rates Checker</h2>
-      <div class="subtext"><b>Valid Matches Found:</b> {{ total_found }}</div>
-    </div>
-  </div>
+<style>
+    /* =========================================
+       ULTRA-MODERN SAAS DESIGN SYSTEM 
+       ========================================= */
+    :root {
+        --tb-font: 13px;
+        --tb-pad: 12px 16px;
+        --radius-card: 24px;
+        --radius-inner: 16px;
+        --radius-input: 12px;
+        --input-height: 48px;
+    }
 
-  <form method="GET" class="card" style="margin-top:14px; padding:20px; border:2px solid #38bdf8; background:#f0f9ff; border-radius: 12px;">
-    <p style="margin-top:0; font-weight:600; color:#0284c7; font-size:15px; margin-bottom: 20px;">
-      🔍 Enter vehicle details below to find matching eligibility rates:
-    </p>
+    /* Master Container Card */
+    .master-card {
+        background: #ffffff;
+        border-radius: var(--radius-card);
+        box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
+        padding: 32px;
+        margin-bottom: 24px;
+        border: 1px solid #f1f5f9;
+    }
+
+    .page-title {
+        font-size: 28px;
+        font-weight: 800;
+        color: #0f172a;
+        margin-bottom: 8px;
+        letter-spacing: -0.02em;
+    }
+    .page-subtitle {
+        font-size: 15px;
+        color: #64748b;
+        margin-bottom: 24px;
+        font-weight: 500;
+    }
+
+    /* Nested Form Box */
+    .inner-form-box {
+        border: 1px solid #e0e7ff;
+        border-radius: var(--radius-inner);
+        padding: 24px;
+        background: #ffffff;
+    }
+    .inner-form-header {
+        font-size: 16px;
+        font-weight: 700;
+        color: #2563eb;
+        margin-bottom: 24px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    /* Form Controls */
+    .text-overline { 
+        font-size: 11px; 
+        font-weight: 700; 
+        text-transform: uppercase; 
+        letter-spacing: 0.05em; 
+        color: #475569; 
+        margin-bottom: 8px; 
+        display: block; 
+    }
+    .form-control-saas, .form-select-saas {
+        border: 1px solid #cbd5e1;
+        border-radius: var(--radius-input);
+        padding: 10px 16px;
+        font-size: 14px;
+        color: #334155;
+        background-color: #ffffff;
+        transition: all 0.2s ease;
+        height: var(--input-height);
+        width: 100%;
+        font-weight: 500;
+    }
+    .form-control-saas::placeholder { color: #94a3b8; font-weight: 400; }
+    .form-select-saas { cursor: pointer; appearance: auto; color: #64748b; }
+    .form-control-saas:focus, .form-select-saas:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+    }
+
+    /* Segmented Controls (Exact Match) */
+    .segmented-control {
+        display: flex;
+        width: 100%;
+        height: var(--input-height); 
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        padding: 4px;
+        border-radius: var(--radius-input);
+        box-sizing: border-box;
+    }
+    .segmented-control label { flex: 1; margin: 0; position: relative; cursor: pointer; }
+    .segmented-control input[type="radio"] { position: absolute; opacity: 0; }
+    .segmented-control span {
+        display: flex; align-items: center; justify-content: center; height: 100%; width: 100%;
+        font-size: 13px; font-weight: 700; color: #64748b; border-radius: 8px; transition: all 0.2s ease;
+    }
+    .segmented-control input[type="radio"]:checked + span {
+        background: #ffffff; color: #2563eb; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    }
+
+    /* Select2 Overrides for SaaS look */
+    .select2-container--default .select2-selection--single {
+        border: 1px solid #cbd5e1; border-radius: var(--radius-input); height: var(--input-height); display: flex; align-items: center; background: #fff;
+    }
+    .select2-container--default .select2-selection--single .select2-selection__rendered { color: #64748b; font-size: 14px; font-weight: 500; padding-left: 16px; }
+    .select2-container--default .select2-selection--single .select2-selection__arrow { height: calc(var(--input-height) - 2px); right: 10px; }
+    .select2-dropdown { border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border-top: none; padding: 4px; }
+    .select2-results__option { border-radius: 8px; margin-bottom: 2px; font-size: 14px; }
+
+    /* Action Area */
+    .action-bar { border-top: 1px solid #f1f5f9; padding-top: 24px; margin-top: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+    .btn-gradient { background: #2563eb; color: white; border: none; border-radius: 10px; padding: 0 28px; font-weight: 600; font-size: 14px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2); height: 44px; display: inline-flex; align-items: center;}
+    .btn-gradient:hover { background: #1d4ed8; transform: translateY(-1px); color: white; }
+    .btn-clear { color: #64748b; font-weight: 600; font-size: 14px; text-decoration: none; padding: 0 16px; display: inline-flex; align-items: center; height: 44px; transition: color 0.2s; }
+    .btn-clear:hover { color: #0f172a; }
+
+    /* Modern Table */
+    .table-responsive-custom { max-height: 60vh; overflow-y: auto; overflow-x: auto; border: 1px solid #e2e8f0; border-radius: var(--radius-inner); margin-top: 24px; }
+    .table-modern { width: 100%; border-collapse: separate; border-spacing: 0; min-width: max-content; }
+    .table-modern th { background: #f8fafc; color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 800; padding: 16px 24px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 10; white-space: nowrap; }
+    .table-modern td { padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; border-bottom: 1px solid #f1f5f9; vertical-align: middle; white-space: nowrap; transition: all 0.15s ease; font-weight: 500;}
+    .table-modern tbody tr:hover td { background-color: #f8fafc; }
+    .cell-wrap { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 400px; line-height: 1.5; }
     
-    <div class="filters-grid">
-      
-      <div>
-        <div class="subtext">SELECT DATE</div>
-        <input type="date" name="target_date" value="{{ selected.target_date }}" class="form-input">
-      </div>
+    .inactive-row td { background-color: #fff1f2 !important; color: #991b1b !important; }
+    .table-modern tbody tr.inactive-row:hover td { background-color: #ffe4e6 !important; }
+</style>
 
-      <div>
-        <div class="subtext">Product</div>
-        <select name="product" class="form-input">
-          <option value="">All</option>
-          {% for p in product_list %}
-            <option value="{{ p.id }}" {% if selected.product|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
+<div class="master-card">
+    
+    <h1 class="page-title">Motor Payout Rates Checker</h1>
+    <p class="page-subtitle">Search matching payout records to check eligibility for specific vehicles.</p>
 
-      <div>
-        <div class="subtext">Make Model Class</div>
-        <select name="make_model_class" class="form-input">
-          <option value="">All</option>
-          <option value="NA" {% if selected.make_model_class == "NA" %}selected{% endif %}>NA</option>
-          {% for mmc in make_model_class_list %}
-            <option value="{{ mmc.id }}" {% if selected.make_model_class|stringformat:"s" == mmc.id|stringformat:"s" %}selected{% endif %}>{{ mmc.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div>
-        <div class="subtext">Make Name (Code)</div>
-        <select name="make_names" class="form-input">
-          <option value="">All</option>
-        </select>
-      </div>
-
-      <div>
-        <div class="subtext">Sub Product</div>
-        <select name="sub_product" class="form-input">
-          <option value="">All</option>
-          {% for sp in sub_product_list %}
-            <option value="{{ sp.id }}" {% if selected.sub_product|stringformat:"s" == sp.id|stringformat:"s" %}selected{% endif %}>{{ sp.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div>
-        <div class="subtext">RTO Code</div>
-        <input type="text" name="rto_code" placeholder="e.g. MH03" value="{{ selected.rto_code|default_if_none:'' }}" class="form-input">
-      </div>
-      
-      <div>
-        <div class="subtext">CC / GVW</div>
-        <input type="number" name="cc" placeholder="e.g. 1197" value="{{ selected.cc|default_if_none:'' }}" class="form-input">
-      </div>
-      
-      <div>
-        <div class="subtext">Fuel</div>
-        <select name="fuel" class="form-input">
-          <option value="">All</option>
-          {% for f in fuel_list %}
-            <option value="{{ f.id }}" {% if selected.fuel|stringformat:"s" == f.id|stringformat:"s" %}selected{% endif %}>{{ f.name }}</option>
-          {% endfor %}
-        </select>
-      </div>
-
-      <div>
-        <div class="subtext">Exact SC</div>
-        <input type="number" step="any" name="sc" placeholder="e.g. 4" value="{{ selected.sc|default_if_none:'' }}" class="form-input">
-      </div>
-
-      <div>
-        <div class="subtext">Manufacturing Year</div>
-        <input type="number" name="mfg_year" placeholder="e.g. 2021" value="{{ selected.mfg_year|default_if_none:'' }}" class="form-input">
-      </div>
-
-      <div>
-        <div class="subtext">Zero Dep (ZD)</div>
-        <div class="segmented-control">
-          <label>
-            <input type="radio" name="is_zd" value="YES" {% if selected.is_zd == 'YES' %}checked{% endif %}>
-            <span>YES</span>
-          </label>
-          <label>
-            <input type="radio" name="is_zd" value="NO" {% if selected.is_zd == 'NO' or not selected.is_zd %}checked{% endif %}>
-            <span>NO</span>
-          </label>
+    <div class="inner-form-box">
+        <div class="inner-form-header">
+            <i class="bi bi-search"></i> Enter vehicle details below to find matching eligibility rates:
         </div>
-      </div>
 
-      <div>
-        <div class="subtext">CPA</div>
-        <div class="segmented-control">
-          <label>
-            <input type="radio" name="is_cpa" value="YES" {% if selected.is_cpa == 'YES' %}checked{% endif %}>
-            <span>YES</span>
-          </label>
-          <label>
-            <input type="radio" name="is_cpa" value="NO" {% if selected.is_cpa == 'NO' or not selected.is_cpa %}checked{% endif %}>
-            <span>NO</span>
-          </label>
-        </div>
-      </div>
+        <form method="GET">
+            <div class="row g-4">
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Select Date</label>
+                    <input type="date" name="target_date" value="{{ selected.target_date }}" class="form-control-saas">
+                </div>
 
-      <div>
-        <div class="subtext">NCB</div>
-        <div class="segmented-control">
-          <label>
-            <input type="radio" name="is_ncb" value="YES" {% if selected.is_ncb == 'YES' %}checked{% endif %}>
-            <span>YES</span>
-          </label>
-          <label>
-            <input type="radio" name="is_ncb" value="NO" {% if selected.is_ncb == 'NO' or not selected.is_ncb %}checked{% endif %}>
-            <span>NO</span>
-          </label>
-        </div>
-      </div>
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Product</label>
+                    <select name="product" class="form-select-saas select2-init">
+                        <option value="">Select...</option>
+                        {% for p in product_list %}
+                            <option value="{{ p.id }}" {% if selected.product|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
 
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Make Model Class</label>
+                    <select name="make_model_class" class="form-select-saas select2-init">
+                        <option value="">Select...</option>
+                        <option value="NA" {% if selected.make_model_class == "NA" %}selected{% endif %}>NA</option>
+                        {% for mmc in make_model_class_list %}
+                            <option value="{{ mmc.id }}" {% if selected.make_model_class|stringformat:"s" == mmc.id|stringformat:"s" %}selected{% endif %}>{{ mmc.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Make Name (Code)</label>
+                    <select name="make_names" class="form-select-saas select2-init">
+                        <option value="">Select...</option>
+                        </select>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Sub Product</label>
+                    <select name="sub_product" class="form-select-saas select2-init">
+                        <option value="">Select...</option>
+                        {% for sp in sub_product_list %}
+                            <option value="{{ sp.id }}" {% if selected.sub_product|stringformat:"s" == sp.id|stringformat:"s" %}selected{% endif %}>{{ sp.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">RTO Code</label>
+                    <input type="text" name="rto_code" placeholder="e.g. MH03" value="{{ selected.rto_code|default_if_none:'' }}" class="form-control-saas">
+                </div>
+                
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">CC / GVW</label>
+                    <input type="number" name="cc" placeholder="e.g. 1197" value="{{ selected.cc|default_if_none:'' }}" class="form-control-saas">
+                </div>
+                
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Fuel</label>
+                    <select name="fuel" class="form-select-saas select2-init">
+                        <option value="">Select...</option>
+                        {% for f in fuel_list %}
+                            <option value="{{ f.id }}" {% if selected.fuel|stringformat:"s" == f.id|stringformat:"s" %}selected{% endif %}>{{ f.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Exact SC</label>
+                    <input type="number" step="any" name="sc" placeholder="e.g. 4" value="{{ selected.sc|default_if_none:'' }}" class="form-control-saas">
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Manufacturing Year</label>
+                    <input type="number" name="mfg_year" placeholder="e.g. 2021" value="{{ selected.mfg_year|default_if_none:'' }}" class="form-control-saas">
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-2">
+                    <label class="text-overline">Zero Dep (ZD)</label>
+                    <div class="segmented-control">
+                        <label>
+                            <input type="radio" name="is_zd" value="YES" {% if selected.is_zd == 'YES' %}checked{% endif %}>
+                            <span>YES</span>
+                        </label>
+                        <label>
+                            <input type="radio" name="is_zd" value="NO" {% if selected.is_zd == 'NO' or not selected.is_zd %}checked{% endif %}>
+                            <span>NO</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-2">
+                    <label class="text-overline">CPA</label>
+                    <div class="segmented-control">
+                        <label>
+                            <input type="radio" name="is_cpa" value="YES" {% if selected.is_cpa == 'YES' %}checked{% endif %}>
+                            <span>YES</span>
+                        </label>
+                        <label>
+                            <input type="radio" name="is_cpa" value="NO" {% if selected.is_cpa == 'NO' or not selected.is_cpa %}checked{% endif %}>
+                            <span>NO</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-2">
+                    <label class="text-overline">NCB</label>
+                    <div class="segmented-control">
+                        <label>
+                            <input type="radio" name="is_ncb" value="YES" {% if selected.is_ncb == 'YES' %}checked{% endif %}>
+                            <span>YES</span>
+                        </label>
+                        <label>
+                            <input type="radio" name="is_ncb" value="NO" {% if selected.is_ncb == 'NO' or not selected.is_ncb %}checked{% endif %}>
+                            <span>NO</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <div class="action-bar">
+                <div class="d-flex align-items-center">
+                    <button class="btn-gradient me-3" type="submit">Check Eligibility</button>
+                    <a class="btn-clear" href="{% url 'motor_payout_rates' %}">Clear All</a>
+                </div>
+                
+                <div class="d-flex gap-2 align-items-center">
+                    <span class="text-overline mb-0">Table Zoom</span>
+                    <div class="d-flex bg-white rounded-3 border p-1" style="border-color: #cbd5e1 !important;">
+                        <button type="button" class="btn btn-sm text-secondary border-0" onclick="zoomTable(-1)" title="Zoom Out" style="background: transparent;"><i class="bi bi-zoom-out"></i></button>
+                        <div class="border-end mx-1"></div>
+                        <button type="button" class="btn btn-sm text-secondary border-0" onclick="zoomTable(1)" title="Zoom In" style="background: transparent;"><i class="bi bi-zoom-in"></i></button>
+                    </div>
+                </div>
+            </div>
+        </form>
     </div>
 
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-top:24px; flex-wrap:wrap; gap:10px; border-top: 1px solid #bae6fd; padding-top: 16px;">
-      <div style="display:flex; gap:12px;">
-        <button class="btn primary" type="submit" style="padding: 10px 24px; font-size: 14px;">🔍 Check Eligibility</button>
-        <a class="btn" href="{% url 'motor_payout_rates' %}" style="padding: 10px 24px; font-size: 14px;">Clear All</a>
-      </div>
-      
-      <div style="display:flex; gap:8px; align-items:center;">
-        <span style="font-size:11px; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:0.05em;">Table Zoom</span>
-        <button type="button" class="btn" onclick="zoomTable(1)" style="height:34px; width:34px; padding:0; border-radius:8px; background: #fff; border: 1px solid #cbd5e1;" title="Zoom In">🔍+</button>
-        <button type="button" class="btn" onclick="zoomTable(-1)" style="height:34px; width:34px; padding:0; border-radius:8px; background: #fff; border: 1px solid #cbd5e1;" title="Zoom Out">🔍-</button>
-      </div>
-    </div>
-  </form>
+    <div class="mt-4 pt-2">
+        <h6 class="fw-bold" style="color: #0f172a; font-size: 15px;">Valid Matches Found: <span style="color: #2563eb;">{{ total_found }}</span></h6>
+        
+        {% if data %}
+            <div class="table-responsive-custom">
+                <table class="table-modern">
+                    <thead>
+                        <tr>
+                            {% for field in field_names %}
+                                <th>{{ field|cut:"_"|title }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in data %}
+                            <tr class="{% if row.status == 'LOCKED' or row.status == 'INACTIVE' %}inactive-row{% endif %}">
+                                {% for field in field_names %}
+                                    {% with val=row|get_attr:field %}
+                                    <td {% if field == 'new_rto_list' or field == 'new_vehicle_makes' or field == 'add_tnc' %}class="cell-wrap"{% endif %}>
+                                        
+                                        {% if field == 'status' %}
+                                            {% if val == 'LOCKED' or val == 'INACTIVE' %}
+                                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 px-3 py-1 rounded-pill" style="font-size: 10px; letter-spacing: 0.5px;">🔒 LOCKED</span>
+                                            {% else %}
+                                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-1 rounded-pill" style="font-size: 10px; letter-spacing: 0.5px;">🔓 UNLOCKED</span>
+                                            {% endif %}
+                                        {% elif val is None or val == "" %}
+                                            <span class="text-muted opacity-50">-</span>
+                                        {% else %}
+                                            {{ val|display_value }}
+                                        {% endif %}
 
-  {% if data %}
-    <div class="table-wrap">
-      <table class="styled-table">
-        <thead>
-          <tr>
-            {% for field in field_names %}
-              <th>{{ field|cut:"_"|title }}</th>
-            {% endfor %}
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in data %}
-            <tr class="{% if row.status == 'LOCKED' or row.status == 'INACTIVE' %}inactive-row{% endif %}">
-              {% for field in field_names %}
-                {% with val=row|get_attr:field %}
-                <td {% if field == 'new_rto_list' or field == 'new_vehicle_makes' or field == 'add_tnc' %}class="wrap-text"{% endif %}>
-                  
-                  {% if field == 'status' %}
-                      {% if val == 'LOCKED' or val == 'INACTIVE' %}
-                          <span style="display:inline-block; background:#fee2e2; color:#b91c1c; border:1px solid #fecaca; padding:4px 10px; border-radius:20px; font-size:10px; font-weight:800; letter-spacing:0.5px;">
-                              🔒 LOCKED
-                          </span>
-                      {% else %}
-                          <span style="display:inline-block; background:#dcfce7; color:#15803d; border:1px solid #bbf7d0; padding:4px 10px; border-radius:20px; font-size:10px; font-weight:800; letter-spacing:0.5px;">
-                              🔓 UNLOCKED
-                          </span>
-                      {% endif %}
-                  {% elif val is None or val == "" %}
-                  {% else %}
-                    {{ val|display_value }}
-                  {% endif %}
+                                    </td>
+                                    {% endwith %}
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="p-5 text-center mt-3" style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: var(--radius-inner);">
+                <i class="bi bi-clipboard-x text-muted opacity-50 d-block mb-3" style="font-size: 48px;"></i>
+                <h5 class="fw-bold text-slate-800">No eligible payout records found.</h5>
+                <p class="text-muted mb-0">Try adjusting your filters or vehicle details above to find a match.</p>
+            </div>
+        {% endif %}
+    </div>
 
-                </td>
-                {% endwith %}
-              {% endfor %}
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% else %}
-    <div class="card" style="margin-top:20px; text-align:center; padding: 50px; color:#64748b; background: #f8fafc; border: 1px dashed #cbd5e1;">
-      <div style="font-size: 30px; margin-bottom: 10px;">📋</div>
-      <b style="font-size: 16px;">No eligible payout records found for this combination.</b>
-      <p style="margin-top: 5px; font-size: 13px;">Try adjusting your filters or vehicle details.</p>
-    </div>
-  {% endif %}
 </div>
 
 <script>
-  $(document).ready(function() {
-      $('.filters-grid select').select2({ width: '100%', placeholder: "Select..." });
+    $(document).ready(function() {
+        // Init Select2
+        $('.select2-init').select2({ width: '100%', placeholder: "Select..." });
 
-      const productClassMap = {
-          "TW": ["Scooter", "Bike"],
-          "Private Car": ["Car"],
-          "GCV 4W": ["Truck", "Pick Up Van", "Dumper Tipper", "Trailer", "Tanker", "Goods Carrying Tractor"],
-          "GCV 3W": ["Goods Carrying Rickshaw"],
-          "PCV 3W": ["Passenger Carrying Rickshaw"],
-          "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
-          "MISCD": ["MISCD-Tractor", "MISCD-Others"]
-      };
+        const productClassMap = {
+            "TW": ["Scooter", "Bike"],
+            "Private Car": ["Car"],
+            "GCV 4W": ["Truck", "Pick Up Van", "Dumper Tipper", "Trailer", "Tanker", "Goods Carrying Tractor"],
+            "GCV 3W": ["Goods Carrying Rickshaw"],
+            "PCV 3W": ["Passenger Carrying Rickshaw"],
+            "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
+            "MISCD": ["MISCD-Tractor", "MISCD-Others"]
+        };
 
-      const classMakesMapping = {{ class_makes_mapping_json|safe }};
-      const allMakes = {{ all_makes_json|safe }};
-      
-      const productSelect = $('select[name="product"]');
-      const classSelect = $('select[name="make_model_class"]');
-      const makeSelect = $('select[name="make_names"]');
+        const classMakesMapping = {{ class_makes_mapping_json|safe }};
+        const allMakes = {{ all_makes_json|safe }};
+        
+        const productSelect = $('select[name="product"]');
+        const classSelect = $('select[name="make_model_class"]');
+        const makeSelect = $('select[name="make_names"]');
 
-      const allClassOptions = classSelect.find('option').clone();
-      const initialClass = "{{ selected.make_model_class|escapejs }}";
-      const selectedMake = "{{ selected.make_names|escapejs }}";
+        const allClassOptions = classSelect.find('option').clone();
+        const initialClass = "{{ selected.make_model_class|escapejs }}";
+        const selectedMake = "{{ selected.make_names|escapejs }}";
 
-      function updateClassDropdown() {
-          const selectedProductText = productSelect.find('option:selected').text().trim();
-          const currentClassVal = classSelect.val() || initialClass;
-          classSelect.empty();
-          classSelect.append(allClassOptions.filter(function() {
-              return $(this).val() === "" || $(this).val() === "NA";
-          }));
-          if (selectedProductText && selectedProductText !== "All" && productClassMap[selectedProductText]) {
-              const allowedClasses = productClassMap[selectedProductText];
-              classSelect.append(allClassOptions.filter(function() {
-                  return allowedClasses.includes($(this).text().trim());
-              }));
-          } else {
-              classSelect.append(allClassOptions.filter(function() {
-                  return $(this).val() !== "" && $(this).val() !== "NA";
-              }));
-          }
-          if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) {
-              classSelect.val(currentClassVal);
-          } else {
-              classSelect.val('');
-          }
-          classSelect.trigger('change.select2');
-          updateMakesDropdown();
-      }
+        function updateClassDropdown() {
+            const selectedProductText = productSelect.find('option:selected').text().trim();
+            const currentClassVal = classSelect.val() || initialClass;
+            
+            classSelect.empty();
+            classSelect.append(allClassOptions.filter(function() {
+                return $(this).val() === "" || $(this).val() === "NA";
+            }));
+            
+            if (selectedProductText && selectedProductText !== "All" && productClassMap[selectedProductText]) {
+                const allowedClasses = productClassMap[selectedProductText];
+                classSelect.append(allClassOptions.filter(function() {
+                    return allowedClasses.includes($(this).text().trim());
+                }));
+            } else {
+                classSelect.append(allClassOptions.filter(function() {
+                    return $(this).val() !== "" && $(this).val() !== "NA";
+                }));
+            }
+            
+            if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) {
+                classSelect.val(currentClassVal);
+            } else {
+                classSelect.val('');
+            }
+            classSelect.trigger('change.select2');
+            updateMakesDropdown();
+        }
 
-      function updateMakesDropdown() {
-          const selectedClass = classSelect.val();
-          makeSelect.empty();
-          makeSelect.append(new Option('All', ''));
-          let makesToShow = allMakes;
-          if (selectedClass && selectedClass !== "NA" && classMakesMapping[selectedClass]) {
-              makesToShow = classMakesMapping[selectedClass];
-          }
-          makesToShow.forEach(function(make) {
-              const opt = new Option(make, make);
-              if (make === selectedMake) opt.selected = true;
-              makeSelect.append(opt);
-          });
-          makeSelect.trigger('change.select2');
-      }
+        function updateMakesDropdown() {
+            const selectedClass = classSelect.val();
+            makeSelect.empty();
+            makeSelect.append(new Option('Select...', ''));
+            
+            let makesToShow = allMakes;
+            if (selectedClass && selectedClass !== "NA" && classMakesMapping[selectedClass]) {
+                makesToShow = classMakesMapping[selectedClass];
+            }
+            
+            makesToShow.forEach(function(make) {
+                const opt = new Option(make, make);
+                if (make === selectedMake) opt.selected = true;
+                makeSelect.append(opt);
+            });
+            makeSelect.trigger('change.select2');
+        }
 
-      updateClassDropdown();
-      productSelect.on('change', updateClassDropdown);
-      classSelect.on('change', updateMakesDropdown);
-  });
+        updateClassDropdown();
+        productSelect.on('change', updateClassDropdown);
+        classSelect.on('change', updateMakesDropdown);
+    });
 
-  let currentFont = 13;
-  let currentPadV = 12;
-  let currentPadH = 16;
+    // Table Zoom Logic
+    let currentFont = 13;
+    let currentPadV = 16;
+    let currentPadH = 24;
 
-  function zoomTable(direction) {
-      currentFont += (direction * 1.5);
-      currentPadV += (direction * 1.0);
-      currentPadH += (direction * 1.5);
-      if (currentFont < 8) { currentFont = 8; currentPadV = 6; currentPadH = 8; }
-      if (currentFont > 22) { currentFont = 22; currentPadV = 18; currentPadH = 26; }
-      document.documentElement.style.setProperty('--tb-font', currentFont + 'px');
-      document.documentElement.style.setProperty('--tb-pad', `${currentPadV}px ${currentPadH}px`);
-  }
+    function zoomTable(direction) {
+        currentFont += (direction * 1.5);
+        currentPadV += (direction * 1.0);
+        currentPadH += (direction * 1.5);
+        
+        if (currentFont < 10) { currentFont = 10; currentPadV = 10; currentPadH = 14; }
+        if (currentFont > 20) { currentFont = 20; currentPadV = 20; currentPadH = 32; }
+        
+        document.documentElement.style.setProperty('--tb-font', currentFont + 'px');
+        document.documentElement.style.setProperty('--tb-pad', `${currentPadV}px ${currentPadH}px`);
+    }
 </script>
-
-<style>
-  :root { --tb-font: 13px; --tb-pad: 12px 16px; }
-  
-  .filters-grid { 
-    display:grid; 
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); 
-    gap:20px 16px; 
-    align-items:start; 
-  }
-
-  .subtext { margin: 0 0 6px 0; font-weight: 700; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;}
-  .form-input {
-    width: 100%; 
-    padding: 10px 12px; 
-    border: 1px solid #cbd5e1; 
-    border-radius: 10px;
-    height: 42px;
-    background-color: #fff;
-    box-sizing: border-box;
-    font-family: inherit;
-    font-size: 14px;
-    transition: border-color 0.2s;
-  }
-  .form-input:focus { border-color: #38bdf8; outline: none; box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.1); }
-
-  .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 12px; margin-top: 20px; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05); background: #fff; }
-  .styled-table { width: 100%; border-collapse: collapse; min-width: max-content; }
-  .styled-table th, .styled-table td { border-bottom: 1px solid #f1f5f9; padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; vertical-align: middle; white-space: nowrap; transition: all 0.1s ease; }
-  .wrap-text { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 400px; }
-  .styled-table th { background-color: #f8fafc; font-weight: 800; text-transform: uppercase; font-size: 11px; letter-spacing: 0.05em; color: #475569; border-bottom: 2px solid #e2e8f0; position: sticky; top:0; z-index:10; }
-  
-  /* ✅ INACTIVE/LOCKED ROW STYLING */
-  .inactive-row { background-color: #fff1f2 !important; }
-  .inactive-row:hover { background-color: #ffe4e6 !important; }
-  
-  .styled-table tr:hover { background-color: #f1f5f9; }
-
-  .select2-container--default .select2-selection--single { height: 42px; border: 1px solid #cbd5e1; border-radius: 10px; background-color: #fff; display: flex; align-items: center; }
-  .select2-container--default .select2-selection--single .select2-selection__rendered { color: #1e293b; padding-left: 12px; font-size:14px; }
-  .select2-container--default .select2-selection--single .select2-selection__arrow { height: 40px; right: 8px; }
-  
-  .segmented-control {
-    display: flex;
-    width: 100%;
-    height: 42px; 
-    background: #f1f5f9;
-    padding: 3px;
-    border-radius: 10px;
-    box-sizing: border-box;
-  }
-  .segmented-control label { flex: 1; margin: 0; }
-  .segmented-control input[type="radio"] { position: absolute; opacity: 0; }
-  .segmented-control span {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    width: 100%;
-    font-size: 12px;
-    font-weight: 700;
-    color: #64748b;
-    border-radius: 8px;
-    transition: all 0.2s ease;
-  }
-  .segmented-control input[type="radio"]:checked + span {
-    background: #fff;
-    color: #2563eb;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  }
-</style>
 {% endblock %}

@@ -10,6 +10,8 @@ from django.http import HttpResponse, JsonResponse
 from django.db.models import Q, F, Count, Avg, Sum, Case, When, Value, CharField
 from django.core.mail import send_mail
 from django.conf import settings
+from django.views.decorators.csrf import csrf_exempt
+from django.db import transaction
 from django import forms
 import csv
 import json
@@ -88,7 +90,7 @@ def can_view_alias_management(user):
     return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Alias_Management"]).exists()
 
 # =========================================================
-# NA CONFIGURATION
+# NA CONFIGURATION & HELPERS
 # =========================================================
 NA_MAKE_MODEL_MAP = {
     "TW": ["Scooter", "Bike"],
@@ -99,6 +101,42 @@ NA_MAKE_MODEL_MAP = {
     "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
     "MISCD": ["MISCD-Tractor", "MISCD-Others"],
 }
+
+# Bulletproof case-insensitive dictionary matcher
+def get_translated_make_model(product_name):
+    if not product_name:
+        return None
+    # Standardize map keys to uppercase and strip spaces
+    normalized_map = {str(k).strip().upper(): v for k, v in NA_MAKE_MODEL_MAP.items()}
+    # Standardize the incoming database string
+    clean_product = str(product_name).strip().upper()
+    
+    if clean_product in normalized_map:
+        return ", ".join(normalized_map[clean_product])
+    return None
+
+# Dynamic filter translator for frontend dropdowns
+def get_dynamic_make_model_class_list(product_id):
+    """
+    Translates 'NA' in the filter dropdown to 'Scooter, Bike' (etc) 
+    based on the currently selected product.
+    """
+    mmc_list = list(MakeModelClassMaster.objects.all().order_by("name"))
+    translated_name = None
+    
+    if product_id and str(product_id).isdigit():
+        prod_obj = ProductMaster.objects.filter(id=int(product_id)).first()
+        if prod_obj and prod_obj.name in NA_MAKE_MODEL_MAP:
+            translated_name = ", ".join(NA_MAKE_MODEL_MAP[prod_obj.name])
+            
+    for m in mmc_list:
+        if m.name.strip().upper() == "NA":
+            if translated_name:
+                m.name = translated_name
+            else:
+                m.name = "NA (Select Product First)"
+                
+    return mmc_list
 
 # =========================================================
 # UTILITY FUNCTIONS
@@ -125,15 +163,20 @@ def parse_date(value):
         return None
 
 def parse_yes_no_na(value):
+    def _get_or_create_code(code_str):
+        obj, _ = YesNoNAMaster.objects.get_or_create(code=code_str)
+        return obj
+
     if not value:
-        return YesNoNAMaster.objects.get(code="NA")
+        return _get_or_create_code("NA")
+    
     v_clean = str(value).strip().lower()
     if v_clean in ["yes", "y", "true", "1"]:
-        return YesNoNAMaster.objects.get(code="YES")
+        return _get_or_create_code("YES")
     elif v_clean in ["no", "n", "false", "0"]:
-        return YesNoNAMaster.objects.get(code="NO")
+        return _get_or_create_code("NO")
     else:
-        return YesNoNAMaster.objects.get(code="NA")
+        return _get_or_create_code("NA")
 
 GROUP_FIELDS = [
     "new_vehicle_makes", "insurer_vertical", "insurance_company", "product", "sub_product",
@@ -318,9 +361,6 @@ def safe_date_multi(value):
     return None
 
 def process_policy_document(document_obj):
-    """
-    Passes the uploaded file to Gemini for AI extraction and saves the MIS record.
-    """
     try:
         document_obj.status = PolicyDocumentUpload.STATUS_PROCESSING
         document_obj.error_message = ""
@@ -328,10 +368,8 @@ def process_policy_document(document_obj):
 
         file_path = document_obj.uploaded_file.path
         
-        # 1. Call Gemini to do the heavy lifting
         mapped_data = extract_data_with_gemini(file_path)
 
-        # 2. Update the document record
         document_obj.extracted_text = "Extracted directly via Gemini Multimodal API."
         document_obj.extraction_method = "Gemini 2.5 Flash"
         document_obj.parsed_json = mapped_data
@@ -339,7 +377,6 @@ def process_policy_document(document_obj):
         document_obj.processed_at = timezone.now()
         document_obj.save()
 
-        # 3. Create the MIS Record for the UI to review
         PolicyMISRecord.objects.update_or_create(
             source_document=document_obj,
             defaults={
@@ -563,210 +600,253 @@ def home_dashboard(request):
     }
     return render(request, 'insurance/home.html', context)
 
-# -------------------------
-# Upload CSV
-# -------------------------
+# ---------------------------------------------------------
+# NEW ENTERPRISE STREAMING CSV UPLOAD & API CHUNKING LOGIC
+# ---------------------------------------------------------
+
 @login_required
 @user_passes_test(can_upload)
-def upload_csv(request):
-    if request.method == "POST" and request.FILES.get("file"):
-        csv_file = request.FILES["file"]
-        upload_type = (request.POST.get("upload_type") or "").strip()
-        decoded_file = csv_file.read().decode("utf-8-sig").splitlines()
-        reader = csv.DictReader(decoded_file, skipinitialspace=True)
-
-        inserted = 0
-        errors = []
-
-        if upload_type == "rto_master":
-            for i, row in enumerate(reader, start=2):
-                try:
-                    rto_name = (row.get("rto_name") or "").strip()
-                    rto_cluster = (row.get("rto_cluster") or "").strip()
-                    if not rto_name:
-                        raise ValueError("rto_name is blank")
-                    RTOMaster.objects.update_or_create(
-                        rto_name=rto_name,
-                        defaults={"rto_cluster": rto_cluster or None}
-                    )
-                    inserted += 1
-                except Exception as e:
-                    errors.append(f"Row {i}: {str(e)}")
-
-            return render(request, "upload.html", {
-                "summary": {"inserted": inserted, "duplicates": 0, "errors": len(errors)},
-                "errors": errors
-            })
-
-        if upload_type == "make_model_master":
-            for i, row in enumerate(reader, start=2):
-                try:
-                    make_model_name = (row.get("make_model_name") or "").strip()
-                    make_model_cluster = (row.get("make_model_cluster") or "").strip()
-                    if not make_model_name:
-                        raise ValueError("make_model_name is blank")
-                    MakeModelMaster.objects.update_or_create(
-                        make_model_name=make_model_name,
-                        defaults={"make_model_cluster": make_model_cluster or None}
-                    )
-                    inserted += 1
-                except Exception as e:
-                    errors.append(f"Row {i}: {str(e)}")
-
-            return render(request, "upload.html", {
-                "summary": {"inserted": inserted, "duplicates": 0, "errors": len(errors)},
-                "errors": errors
-            })
-
-        valid_rtos = set(RTOMaster.objects.values_list("rto_name", flat=True))
-        valid_makes = set(MakeModelMaster.objects.values_list("make_model_name", flat=True))
-
-        def resolve_master(value, ModelClass):
-            if value is None:
-                return None
-            v = str(value).strip()
-            if not v:
-                return None
-            if v.isdigit():
-                return ModelClass.objects.filter(id=int(v)).first()
-            obj, _ = ModelClass.objects.get_or_create(name=v)
-            return obj
-
-        for i, row in enumerate(reader, start=2):
-            try:
-                raw_rtos = row.get("new_rto_list") or ""
-                rto_items = [x.strip() for x in raw_rtos.split(",") if x.strip()]
-                for rto in rto_items:
-                    if rto not in valid_rtos:
-                        raise ValueError(f"RTO '{rto}' does not exist in RTOMaster. Please add it first.")
-
-                raw_makes = row.get("new_vehicle_makes") or ""
-                make_items = [x.strip() for x in raw_makes.split(",") if x.strip()]
-                for make in make_items:
-                    if make not in valid_makes:
-                        raise ValueError(f"Vehicle Make '{make}' does not exist in MakeModelMaster. Please add it first.")
-
-                product_val = str(row.get("product", "")).strip()
-                product_obj = None
-                if product_val:
-                    if product_val.isdigit():
-                        product_obj = ProductMaster.objects.filter(id=int(product_val)).first()
-                    else:
-                        product_obj = ProductMaster.objects.filter(name=product_val).first()
-                        if not product_obj:
-                            product_obj = ProductMaster.objects.create(name=product_val)
-
-                sub_product_obj = resolve_master(row.get("sub_product"), SubProductMaster)
-                policy_type_obj = resolve_master(row.get("policy_type"), PolicyTypeMaster)
-                fuel_type_obj = resolve_master(row.get("fuel_type"), FuelTypeMaster)
-                mmc_obj = resolve_master(row.get("make_model_class"), MakeModelClassMaster)
-                is_ncb_obj = parse_yes_no_na(row.get("is_ncb"))
-                is_cpa_obj = parse_yes_no_na(row.get("is_cpa"))
-                is_zd_obj = parse_yes_no_na(row.get("is_zd"))
-
-                cleaned = {
-                    "new_vehicle_makes": row.get("new_vehicle_makes") or None,
-                    "insurer_vertical": row.get("insurer_vertical") or None,
-                    "insurance_company": str(row.get("insurance_company", "")).strip(),
-                    "product": product_obj,
-                    "sub_product": sub_product_obj,
-                    "policy_type": policy_type_obj,
-                    "vehicle_age_min": float(row.get("vehicle_age_min") or 0),
-                    "vehicle_age_max": float(row.get("vehicle_age_max") or 0),
-                    "make_model_class": mmc_obj,
-                    "pi_od_rate": float(row.get("pi_od_rate") or 0),
-                    "pi_tp_rate": float(row.get("pi_tp_rate") or 0),
-                    "pi_tp_2": float(row.get("pi_tp_2") or 0),
-                    "pi_tp_3": float(row.get("pi_tp_3") or 0),
-                    "pi_tp_4": float(row.get("pi_tp_4") or 0),
-                    "pi_tp_5": float(row.get("pi_tp_5") or 0),
-                    "pi_net_rate": float(row.get("pi_net_rate") or 0),
-                    "pi_flat_amount": float(row.get("pi_flat_amount") or 0),
-                    "pi_vli": float(row.get("pi_vli") or 0),
-                    "pi_type": row.get("pi_type") or None,
-                    "tariff_min": float(row.get("tariff_min") or 0),
-                    "tariff_max": float(row.get("tariff_max") or 0),
-                    "is_ncb": is_ncb_obj,
-                    "is_cpa": is_cpa_obj,
-                    "is_zd": is_zd_obj,
-                    "from_date": parse_date(row.get("from_date")),
-                    "to_date": parse_date(row.get("to_date")),
-                    "sc_min": float(row.get("sc_min") or 0),
-                    "sc_max": float(row.get("sc_max") or 0),
-                    "user_id": int(float(row.get("user_id") or 0)) if row.get("user_id") else None,
-                    "veh_use": row.get("veh_use") or None,
-                    "add_tnc": row.get("add_tnc") or None,
-                    "remarks": row.get("remarks") or None,
-                    "po_type": row.get("po_type") or None,
-                    "po_od_rate": float(row.get("po_od_rate") or 0),
-                    "po_tp_rate": float(row.get("po_tp_rate") or 0),
-                    "po_net_rate": float(row.get("po_net_rate") or 0),
-                    "po_flat_amount": float(row.get("po_flat_amount") or 0),
-                }
-
-                key_hash, key_text = build_key_hash(cleaned)
-                group_obj, _ = RateGroup.objects.get_or_create(
-                    key_hash=key_hash,
-                    defaults={"key_text": key_text}
-                )
-
-                RateMaster.objects.create(
-                    group=group_obj,
-                    status="INACTIVE",
-                    is_deleted="NO",
-                    new_vehicle_makes=cleaned["new_vehicle_makes"],
-                    new_rto_list=row.get("new_rto_list") or None,
-                    insurer_vertical=cleaned["insurer_vertical"],
-                    insurance_company=cleaned["insurance_company"],
-                    product=product_obj,
-                    sub_product=sub_product_obj,
-                    policy_type=policy_type_obj,
-                    fuel_type=fuel_type_obj,
-                    make_model_class=mmc_obj,
-                    vehicle_age_min=cleaned["vehicle_age_min"],
-                    vehicle_age_max=cleaned["vehicle_age_max"],
-                    pi_od_rate=cleaned["pi_od_rate"],
-                    pi_tp_rate=cleaned["pi_tp_rate"],
-                    pi_tp_2=cleaned["pi_tp_2"],
-                    pi_tp_3=cleaned["pi_tp_3"],
-                    pi_tp_4=cleaned["pi_tp_4"],
-                    pi_tp_5=cleaned["pi_tp_5"],
-                    pi_net_rate=cleaned["pi_net_rate"],
-                    pi_flat_amount=cleaned["pi_flat_amount"],
-                    pi_vli=cleaned["pi_vli"],
-                    pi_type=cleaned["pi_type"],
-                    tariff_min=cleaned["tariff_min"],
-                    tariff_max=cleaned["tariff_max"],
-                    is_ncb=is_ncb_obj,
-                    is_cpa=is_cpa_obj,
-                    is_zd=is_zd_obj,
-                    cc_min=cleaned["cc_min"],
-                    cc_max=cleaned["cc_max"],
-                    from_date=cleaned["from_date"],
-                    to_date=cleaned["to_date"],
-                    user_id=int(float(row.get("user_id") or 0)) if row.get("user_id") else None,
-                    sc_min=cleaned["sc_min"],
-                    sc_max=cleaned["sc_max"],
-                    veh_use=row.get("veh_use") or None,
-                    add_tnc=cleaned["add_tnc"],
-                    remarks=row.get("remarks") or None,
-                    po_type=row.get("po_type") or None,
-                    po_od_rate=float(row.get("po_od_rate") or 0),
-                    po_tp_rate=float(row.get("po_tp_rate") or 0),
-                    po_net_rate=float(row.get("po_net_rate") or 0),
-                    po_flat_amount=float(row.get("po_flat_amount") or 0),
-                )
-                inserted += 1
-
-            except Exception as e:
-                errors.append(f"Row {i}: {str(e)}")
-
-        return render(request, "upload.html", {
-            "summary": {"inserted": inserted, "duplicates": 0, "errors": len(errors)},
-            "errors": errors
-        })
-
+def import_data_view(request):
+    """
+    Renders the beautiful SaaS upload interface. 
+    The heavy lifting is handled via JS (PapaParse) to bypass Server RAM and timeouts.
+    """
     return render(request, "upload.html")
+
+
+@csrf_exempt 
+def api_upload_chunk(request):
+    """
+    Receives JSON chunks from the PapaParse frontend uploader.
+    Uses bulk_create to efficiently insert data while mapping your specific schemas.
+    """
+    if request.method == 'POST':
+        try:
+            data = json.loads(request.body)
+            rows = data.get('rows', [])
+            target_table = data.get('target_table', 'rate_master')
+            
+            if not rows:
+                return JsonResponse({'status': 'error', 'message': 'No data provided'}, status=400)
+
+            inserted = 0
+
+            with transaction.atomic():
+                # ----------------------------------------------------------------
+                # TABLE MAPPING LOGIC
+                # ----------------------------------------------------------------
+                if target_table == 'rto_master':
+                    for row in rows:
+                        rto_name = (row.get("rto_name") or "").strip()
+                        rto_cluster = (row.get("rto_cluster") or "").strip()
+                        if not rto_name:
+                            raise ValueError("rto_name is blank")
+                        RTOMaster.objects.update_or_create(
+                            rto_name=rto_name,
+                            defaults={"rto_cluster": rto_cluster or None}
+                        )
+                        inserted += 1
+
+                elif target_table == 'make_model_master':
+                    for row in rows:
+                        make_model_name = (row.get("make_model_name") or "").strip()
+                        make_model_cluster = (row.get("make_model_cluster") or "").strip()
+                        if not make_model_name:
+                            raise ValueError("make_model_name is blank")
+                        MakeModelMaster.objects.update_or_create(
+                            make_model_name=make_model_name,
+                            defaults={"make_model_cluster": make_model_cluster or None}
+                        )
+                        inserted += 1
+
+                elif target_table == 'rate_master':
+                    valid_rtos = {str(rto).lower() for rto in RTOMaster.objects.values_list("rto_name", flat=True) if rto}
+                    valid_makes = {str(make).lower() for make in MakeModelMaster.objects.values_list("make_model_name", flat=True) if make}
+
+                    products_map = {p.name.lower(): p for p in ProductMaster.objects.all()}
+                    sub_products_map = {sp.name.lower(): sp for sp in SubProductMaster.objects.all()}
+                    policy_types_map = {pt.name.lower(): pt for pt in PolicyTypeMaster.objects.all()}
+                    fuel_types_map = {ft.name.lower(): ft for ft in FuelTypeMaster.objects.all()}
+                    mmc_classes_map = {m.name.lower(): m for m in MakeModelClassMaster.objects.all()}
+                    
+                    ynn_map = {y.code.lower(): y for y in YesNoNAMaster.objects.all()}
+                    for code in ["YES", "NO", "NA"]:
+                        if code.lower() not in ynn_map:
+                            ynn_map[code.lower()] = YesNoNAMaster.objects.create(code=code)
+
+                    existing_groups = {g.key_hash: g for g in RateGroup.objects.all()}
+
+                    def get_ynn(val):
+                        if not val: return ynn_map["na"]
+                        v = str(val).strip().lower()
+                        if v in ["yes", "y", "true", "1"]: return ynn_map["yes"]
+                        if v in ["no", "n", "false", "0"]: return ynn_map["no"]
+                        return ynn_map["na"]
+
+                    def get_master(val, mapping_dict, ModelClass):
+                        if not val: return None
+                        v = str(val).strip()
+                        if not v: return None
+                        if v.isdigit() and ModelClass != ProductMaster:
+                            obj = ModelClass.objects.filter(id=int(v)).first()
+                            if obj:
+                                mapping_dict[obj.name.lower()] = obj
+                                return obj
+                        v_low = v.lower()
+                        if v_low in mapping_dict:
+                            return mapping_dict[v_low]
+                        obj = ModelClass.objects.create(name=v)
+                        mapping_dict[v_low] = obj
+                        return obj
+
+                    instances_to_create = []
+
+                    for row in rows:
+                        raw_rtos = row.get("new_rto_list") or ""
+                        rto_items = [x.strip() for x in raw_rtos.split(",") if x.strip()]
+                        for rto in rto_items:
+                            if rto.lower() not in valid_rtos:
+                                raise ValueError(f"RTO '{rto}' does not exist in RTOMaster. Please add it first.")
+
+                        raw_makes = row.get("new_vehicle_makes") or ""
+                        make_items = [x.strip() for x in raw_makes.split(",") if x.strip()]
+                        for make in make_items:
+                            if make.lower() not in valid_makes:
+                                raise ValueError(f"Vehicle Make '{make}' does not exist in MakeModelMaster. Please add it first.")
+
+                        product_val = str(row.get("product", "")).strip()
+                        product_obj = None
+                        if product_val:
+                            if product_val.isdigit():
+                                product_obj = ProductMaster.objects.filter(id=int(product_val)).first()
+                            else:
+                                if product_val.lower() in products_map:
+                                    product_obj = products_map[product_val.lower()]
+                                else:
+                                    product_obj = ProductMaster.objects.create(name=product_val)
+                                    products_map[product_val.lower()] = product_obj
+
+                        sub_product_obj = get_master(row.get("sub_product"), sub_products_map, SubProductMaster)
+                        policy_type_obj = get_master(row.get("policy_type"), policy_types_map, PolicyTypeMaster)
+                        fuel_type_obj = get_master(row.get("fuel_type"), fuel_types_map, FuelTypeMaster)
+                        mmc_obj = get_master(row.get("make_model_class"), mmc_classes_map, MakeModelClassMaster)
+                        
+                        is_ncb_obj = get_ynn(row.get("is_ncb"))
+                        is_cpa_obj = get_ynn(row.get("is_cpa"))
+                        is_zd_obj = get_ynn(row.get("is_zd"))
+
+                        cleaned = {
+                            "new_vehicle_makes": row.get("new_vehicle_makes") or None,
+                            "insurer_vertical": row.get("insurer_vertical") or None,
+                            "insurance_company": str(row.get("insurance_company", "")).strip(),
+                            "product": product_obj,
+                            "sub_product": sub_product_obj,
+                            "policy_type": policy_type_obj,
+                            "vehicle_age_min": float(row.get("vehicle_age_min") or 0),
+                            "vehicle_age_max": float(row.get("vehicle_age_max") or 0),
+                            "make_model_class": mmc_obj,
+                            "pi_od_rate": float(row.get("pi_od_rate") or 0),
+                            "pi_tp_rate": float(row.get("pi_tp_rate") or 0),
+                            "pi_tp_2": float(row.get("pi_tp_2") or 0),
+                            "pi_tp_3": float(row.get("pi_tp_3") or 0),
+                            "pi_tp_4": float(row.get("pi_tp_4") or 0),
+                            "pi_tp_5": float(row.get("pi_tp_5") or 0),
+                            "pi_net_rate": float(row.get("pi_net_rate") or 0),
+                            "pi_flat_amount": float(row.get("pi_flat_amount") or 0),
+                            "pi_vli": float(row.get("pi_vli") or 0),
+                            "pi_type": row.get("pi_type") or None,
+                            "tariff_min": float(row.get("tariff_min") or 0),
+                            "tariff_max": float(row.get("tariff_max") or 0),
+                            "is_ncb": is_ncb_obj,
+                            "is_cpa": is_cpa_obj,
+                            "is_zd": is_zd_obj,
+                            "cc_min": float(row.get("cc_min") or 0),
+                            "cc_max": float(row.get("cc_max") or 0),
+                            "from_date": parse_date(row.get("from_date")),
+                            "to_date": parse_date(row.get("to_date")),
+                            "sc_min": float(row.get("sc_min") or 0),
+                            "sc_max": float(row.get("sc_max") or 0),
+                            "user_id": int(float(row.get("user_id") or 0)) if row.get("user_id") else None,
+                            "veh_use": row.get("veh_use") or None,
+                            "add_tnc": row.get("add_tnc") or None,
+                            "remarks": row.get("remarks") or None,
+                            "po_type": row.get("po_type") or None,
+                            "po_od_rate": float(row.get("po_od_rate") or 0),
+                            "po_tp_rate": float(row.get("po_tp_rate") or 0),
+                            "po_net_rate": float(row.get("po_net_rate") or 0),
+                            "po_flat_amount": float(row.get("po_flat_amount") or 0),
+                        }
+
+                        key_hash, key_text = build_key_hash(cleaned)
+                        if key_hash in existing_groups:
+                            group_obj = existing_groups[key_hash]
+                        else:
+                            group_obj = RateGroup.objects.create(key_hash=key_hash, key_text=key_text)
+                            existing_groups[key_hash] = group_obj
+
+                        instances_to_create.append(
+                            RateMaster(
+                                group=group_obj,
+                                status="INACTIVE",
+                                is_deleted="NO",
+                                new_vehicle_makes=cleaned["new_vehicle_makes"],
+                                new_rto_list=row.get("new_rto_list") or None,
+                                insurer_vertical=cleaned["insurer_vertical"],
+                                insurance_company=cleaned["insurance_company"],
+                                product=product_obj,
+                                sub_product=sub_product_obj,
+                                policy_type=policy_type_obj,
+                                fuel_type=fuel_type_obj,
+                                make_model_class=mmc_obj,
+                                vehicle_age_min=cleaned["vehicle_age_min"],
+                                vehicle_age_max=cleaned["vehicle_age_max"],
+                                pi_od_rate=cleaned["pi_od_rate"],
+                                pi_tp_rate=cleaned["pi_tp_rate"],
+                                pi_tp_2=cleaned["pi_tp_2"],
+                                pi_tp_3=cleaned["pi_tp_3"],
+                                pi_tp_4=cleaned["pi_tp_4"],
+                                pi_tp_5=cleaned["pi_tp_5"],
+                                pi_net_rate=cleaned["pi_net_rate"],
+                                pi_flat_amount=cleaned["pi_flat_amount"],
+                                pi_vli=cleaned["pi_vli"],
+                                pi_type=cleaned["pi_type"],
+                                tariff_min=cleaned["tariff_min"],
+                                tariff_max=cleaned["tariff_max"],
+                                is_ncb=is_ncb_obj,
+                                is_cpa=is_cpa_obj,
+                                is_zd=is_zd_obj,
+                                cc_min=cleaned["cc_min"],
+                                cc_max=cleaned["cc_max"],
+                                from_date=cleaned["from_date"],
+                                to_date=cleaned["to_date"],
+                                user_id=cleaned["user_id"],
+                                sc_min=cleaned["sc_min"],
+                                sc_max=cleaned["sc_max"],
+                                veh_use=cleaned["veh_use"],
+                                add_tnc=cleaned["add_tnc"],
+                                remarks=cleaned["remarks"],
+                                po_type=cleaned["po_type"],
+                                po_od_rate=cleaned["po_od_rate"],
+                                po_tp_rate=cleaned["po_tp_rate"],
+                                po_net_rate=cleaned["po_net_rate"],
+                                po_flat_amount=cleaned["po_flat_amount"],
+                            )
+                        )
+
+                    # Bulk Insert
+                    RateMaster.objects.bulk_create(instances_to_create, ignore_conflicts=True)
+                    inserted = len(instances_to_create)
+
+                else:
+                    return JsonResponse({'status': 'error', 'message': 'Invalid table selected'}, status=400)
+
+            return JsonResponse({'status': 'success', 'inserted': inserted})
+
+        except Exception as e:
+            print(f"\n❌ UPLOAD ERROR: {str(e)}\n") 
+            return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+    return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
 
 # -------------------------
 # Dashboard (GROUPED view)
@@ -927,7 +1007,21 @@ def dashboard(request):
         first.display_group_id = gid
         first.display_rto_list = unique_join(all_rtos)
         first.display_fuel_types = unique_join(all_fuels)
-        first.display_make_model_class = first.make_model_class.name if first.make_model_class else ""
+
+        # --- SMART "NA" AND "BLANK" TRANSLATOR FOR TEMPLATES ---
+        mmc_name = first.make_model_class.name.strip().upper() if first.make_model_class else "NA"
+        
+        if mmc_name in ["NA", ""]:
+            prod_name = first.product.name if first.product else ""
+            translated_name = get_translated_make_model(prod_name)
+            if translated_name:
+                first.make_model_class = MakeModelClassMaster(name=translated_name)
+                first.display_make_model_class = translated_name
+            else:
+                first.display_make_model_class = "NA"
+        else:
+            first.display_make_model_class = first.make_model_class.name
+        # --------------------------------------------------
 
         age_min_str = f"{first.vehicle_age_min:.2f}" if first.vehicle_age_min is not None else ""
         age_max_str = f"{first.vehicle_age_max:.2f}" if first.vehicle_age_max is not None else ""
@@ -961,7 +1055,6 @@ def dashboard(request):
     product_list = ProductMaster.objects.all().order_by("name")
     fuel_list = FuelTypeMaster.objects.all().order_by("name")
     sub_product_list = SubProductMaster.objects.all().order_by("name")
-    make_model_class_list = list(MakeModelClassMaster.objects.all().order_by("name"))
     yes_no_na_list = YesNoNAMaster.objects.all().order_by("code")
 
     return render(request, "dashboard.html", {
@@ -974,7 +1067,7 @@ def dashboard(request):
         "product_list": product_list,
         "fuel_list": fuel_list,
         "sub_product_list": sub_product_list,
-        "make_model_class_list": make_model_class_list,
+        "make_model_class_list": get_dynamic_make_model_class_list(product),
         "yes_no_na_list": yes_no_na_list,
         "selected": {
             "q": q,
@@ -1149,11 +1242,15 @@ def export_rates_xlsx(request):
 
         for make_item in makes_list:
             for rto_item in rtos_list:
+                
+                # --- EXPORT KEEPS RAW DATA ---
+                mmc_name = r.make_model_class.name if r.make_model_class else ""
+
                 ws.append([
                     r.id, r.group_id, make_item, rto_item, r.insurer_vertical or "",
                     r.insurance_company or "", r.product.name if r.product else "",
                     r.sub_product.name if r.sub_product else "", r.policy_type.name if r.policy_type else "",
-                    r.fuel_type.name if r.fuel_type else "", r.make_model_class.name if r.make_model_class else "",
+                    r.fuel_type.name if r.fuel_type else "", mmc_name,
                     age_min_val, age_max_val,
                     r.pi_od_rate if r.pi_od_rate is not None else "",
                     r.pi_tp_rate if r.pi_tp_rate is not None else "",
@@ -1846,6 +1943,21 @@ def motor_payout_rates(request):
         if gid not in seen_groups:
             row.display_group_id = gid
 
+            # --- SMART "NA" AND "BLANK" TRANSLATOR FOR TEMPLATES ---
+            mmc_name = row.make_model_class.name.strip().upper() if row.make_model_class else "NA"
+            
+            if mmc_name in ["NA", ""]:
+                prod_name = row.product.name if row.product else ""
+                translated_name = get_translated_make_model(prod_name)
+                if translated_name:
+                    row.make_model_class = MakeModelClassMaster(name=translated_name)
+                    row.display_make_model_class = translated_name
+                else:
+                    row.display_make_model_class = "NA"
+            else:
+                row.display_make_model_class = row.make_model_class.name
+            # -----------------------------------------
+
             if row.po_net_rate and row.po_net_rate > 0:
                 row.po_rate = row.po_net_rate
             elif row.po_od_rate and row.po_od_rate > 0:
@@ -1871,7 +1983,7 @@ def motor_payout_rates(request):
         "product_list": ProductMaster.objects.all().order_by("name"),
         "sub_product_list": SubProductMaster.objects.all().order_by("name"),
         "fuel_list": FuelTypeMaster.objects.all().order_by("name"),
-        "make_model_class_list": list(MakeModelClassMaster.objects.all().order_by("name")),
+        "make_model_class_list": get_dynamic_make_model_class_list(product),
         "all_makes_json": all_makes_json,
         "class_makes_mapping_json": class_makes_mapping_json,
         "selected": {
@@ -2063,6 +2175,21 @@ def policy_lock_checker(request):
             if gid not in seen_groups:
                 row.display_group_id = gid
 
+                # --- SMART "NA" AND "BLANK" TRANSLATOR FOR TEMPLATES ---
+                mmc_name = row.make_model_class.name.strip().upper() if row.make_model_class else "NA"
+                
+                if mmc_name in ["NA", ""]:
+                    prod_name = row.product.name if row.product else ""
+                    translated_name = get_translated_make_model(prod_name)
+                    if translated_name:
+                        row.make_model_class = MakeModelClassMaster(name=translated_name)
+                        row.display_make_model_class = translated_name
+                    else:
+                        row.display_make_model_class = "NA"
+                else:
+                    row.display_make_model_class = row.make_model_class.name
+                # -----------------------------------------
+
                 if row.po_net_rate and row.po_net_rate > 0:
                     row.po_rate = row.po_net_rate
                 elif row.po_od_rate and row.po_od_rate > 0:
@@ -2104,7 +2231,7 @@ def policy_lock_checker(request):
         "product_list": ProductMaster.objects.all().order_by("name"),
         "sub_product_list": SubProductMaster.objects.all().order_by("name"),
         "fuel_list": FuelTypeMaster.objects.all().order_by("name"),
-        "make_model_class_list": MakeModelClassMaster.objects.all().order_by("name"),
+        "make_model_class_list": get_dynamic_make_model_class_list(product),
         "make_name_list": make_name_list,
         "selected": {
             "target_date": target_date,
@@ -2214,7 +2341,12 @@ def lock_unlock_policy(request, rate_id):
 @login_required
 @user_passes_test(can_view_motor_payout)
 def locked_policy_dashboard(request):
-    qs = LockedPolicy.objects.select_related("source_rate", "locked_by").all()
+    qs = LockedPolicy.objects.select_related(
+        "source_rate", 
+        "source_rate__product", 
+        "source_rate__make_model_class", 
+        "locked_by"
+    ).all()
 
     vehicle_no = (request.GET.get("vehicle_no") or "").strip()
     policy_holder_name = (request.GET.get("policy_holder_name") or "").strip()
@@ -2237,8 +2369,25 @@ def locked_policy_dashboard(request):
     unique_companies = sorted(list(set(all_locked.exclude(insurance_company__isnull=True).exclude(insurance_company="").values_list("insurance_company", flat=True))))
     unique_users = sorted(list(set(all_locked.exclude(locked_by__isnull=True).values_list("locked_by__username", flat=True))))
 
+    records = list(qs.order_by("-created_at")[:300])
+
+    for row in records:
+        if row.source_rate:
+            mmc_name = row.source_rate.make_model_class.name.strip().upper() if row.source_rate.make_model_class else "NA"
+            
+            if mmc_name in ["NA", ""]:
+                prod_name = row.source_rate.product.name if row.source_rate.product else ""
+                translated_name = get_translated_make_model(prod_name)
+                if translated_name:
+                    row.source_rate.make_model_class = MakeModelClassMaster(name=translated_name)
+                    row.display_make_model_class = translated_name
+                else:
+                    row.display_make_model_class = "NA"
+            else:
+                row.display_make_model_class = row.source_rate.make_model_class.name if row.source_rate.make_model_class else ""
+
     return render(request, "locked_policy_dashboard.html", {
-        "records": qs.order_by("-created_at")[:300],
+        "records": records,
         "total_records": qs.count(),
         "unique_vehicles": unique_vehicles,
         "unique_holders": unique_holders,

@@ -2,6 +2,8 @@
 {% block title %}Import Data - Insurance Portal{% endblock %}
 
 {% block content %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+
 <style>
     /* =========================================
        PREMIUM DESIGN SYSTEM 
@@ -81,45 +83,15 @@
     </div>
 </div>
 
-{% if summary %}
-<div class="alert alert-success d-flex align-items-center shadow-sm mb-4" style="border-radius: 12px; font-weight: 500; background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46;">
-    <i class="bi bi-check-circle-fill me-3 fs-3"></i>
-    <div>
-        <strong class="d-block mb-1" style="font-size: 15px;">Upload Processed Successfully</strong>
-        <span style="font-size: 14px; opacity: 0.9;">
-            Inserted: <b>{{ summary.inserted }}</b> &nbsp;|&nbsp; 
-            Duplicates Skipped: <b>{{ summary.duplicates }}</b> &nbsp;|&nbsp; 
-            Errors: <b {% if summary.errors > 0 %}class="text-danger"{% endif %}>{{ summary.errors }}</b>
-        </span>
-    </div>
-</div>
-{% endif %}
-
-{% if errors %}
-<div class="alert alert-danger shadow-sm mb-4" style="border-radius: 12px; font-weight: 500; background: #fef2f2; border: 1px solid #fecaca; color: #991b1b;">
-    <div class="d-flex align-items-center mb-3">
-        <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
-        <h6 class="mb-0 fw-bold">CSV Validation Errors Encountered</h6>
-    </div>
-    <div style="max-height: 200px; overflow-y: auto; padding-right: 10px;">
-        <ul class="mb-0 ps-4" style="font-size: 13px; line-height: 1.6;">
-            {% for e in errors %}
-                <li>{{ e }}</li>
-            {% endfor %}
-        </ul>
-    </div>
-</div>
-{% endif %}
-
 <div class="row g-4">
     <div class="col-lg-6">
         <div class="premium-card p-4 h-100">
-            <form method="post" enctype="multipart/form-data">
+            <form id="uploadForm" onsubmit="event.preventDefault(); startUpload();">
                 {% csrf_token %}
                 
                 <div class="mb-4">
                     <label class="text-overline d-block mb-2">Target Database Table</label>
-                    <select name="upload_type" class="form-select-premium" required>
+                    <select id="uploadTypeSelect" name="upload_type" class="form-select-premium" required>
                         <option value="rate_master">RateMaster (Rates CSV)</option>
                         <option value="rto_master">RTO Master (Clusters CSV)</option>
                         <option value="make_model_master">Make Model Master (Clusters CSV)</option>
@@ -130,12 +102,22 @@
                     <i class="bi bi-filetype-csv text-primary mb-3 d-block" style="font-size: 44px;"></i>
                     <h6 style="font-weight: 700; color: #1e293b;">Select CSV File</h6>
                     <p style="font-size: 13px; color: #64748b; margin-bottom: 0;">File must be formatted with the exact column headers.</p>
-                    <input type="file" name="file" accept=".csv" required>
+                    <input type="file" id="csvFileInput" name="file" accept=".csv" required>
                 </div>
 
                 <button class="btn-gradient w-100 justify-content-center" type="submit" id="uploadBtn">
                     <i class="bi bi-cloud-arrow-up"></i> Start Upload
                 </button>
+
+                <div id="progressContainer" class="mt-4 p-3" style="display: none; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px;">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span id="statusText" class="fw-bold text-primary" style="font-size: 13px;">Preparing...</span>
+                        <span id="percentageText" class="fw-bold text-primary" style="font-size: 13px;">0%</span>
+                    </div>
+                    <div class="progress" style="height: 8px; border-radius: 10px; background: #e2e8f0;">
+                        <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-primary" role="progressbar" style="width: 0%; border-radius: 10px;"></div>
+                    </div>
+                </div>
             </form>
         </div>
     </div>
@@ -156,11 +138,90 @@
 </div>
 
 <script>
-    // Optional: Show loading state on button press
-    document.querySelector('form').addEventListener('submit', function() {
+    const CHUNK_SIZE = 2500; 
+    const API_URL = '/api/upload-chunk/';
+
+    async function startUpload() {
+        const fileInput = document.getElementById('csvFileInput');
+        const targetTable = document.getElementById('uploadTypeSelect').value;
+        const csrfToken = document.querySelector('[name=csrfmiddlewaretoken]').value;
+        
+        if (!fileInput.files.length) {
+            alert('Please select a CSV file first.');
+            return;
+        }
+
+        const file = fileInput.files[0];
         const btn = document.getElementById('uploadBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const statusText = document.getElementById('statusText');
+        const percentageText = document.getElementById('percentageText');
+
         btn.disabled = true;
-        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span> Uploading...';
-    });
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span> Uploading...';
+        progressContainer.style.display = 'block';
+        progressBar.style.width = '0%';
+        progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-primary';
+        
+        statusText.innerText = "Reading file locally (No Server RAM used)...";
+        
+        Papa.parse(file, {
+            header: true,
+            skipEmptyLines: true,
+            complete: async function(results) {
+                const allRows = results.data;
+                const totalRows = allRows.length;
+                let rowsProcessed = 0;
+
+                for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
+                    const chunk = allRows.slice(i, i + CHUNK_SIZE);
+                    
+                    try {
+                        const response = await fetch(API_URL, {
+                            method: 'POST',
+                            headers: { 
+                                'Content-Type': 'application/json',
+                                'X-CSRFToken': csrfToken 
+                            },
+                            body: JSON.stringify({ 
+                                target_table: targetTable,
+                                rows: chunk 
+                            })
+                        });
+
+                        // THIS IS THE NEW FIX: Pulling the exact error message
+                        if (!response.ok) {
+                            const errData = await response.json();
+                            throw new Error(errData.message || 'Server rejected the batch.');
+                        }
+
+                        rowsProcessed += chunk.length;
+                        const percentage = Math.round((rowsProcessed / totalRows) * 100);
+                        
+                        progressBar.style.width = percentage + '%';
+                        percentageText.innerText = percentage + '%';
+                        statusText.innerText = `Saving to database... (${rowsProcessed.toLocaleString()} / ${totalRows.toLocaleString()})`;
+
+                    } catch (error) {
+                        console.error('Error:', error);
+                        // DISPLAYING THE EXACT ERROR ON SCREEN
+                        statusText.innerText = `⚠️ Upload failed: ${error.message}`;
+                        progressBar.className = 'progress-bar bg-danger';
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="bi bi-cloud-arrow-up me-2"></i> Retry Upload';
+                        return; // Halt process
+                    }
+                }
+
+                statusText.innerText = "Upload Complete!";
+                progressBar.className = 'progress-bar bg-success';
+                btn.disabled = false;
+                btn.innerHTML = '<i class="bi bi-check-circle me-2"></i> Upload Successful';
+                
+                fileInput.value = '';
+            }
+        });
+    }
 </script>
 {% endblock %}

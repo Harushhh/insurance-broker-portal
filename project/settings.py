@@ -179,3 +179,10 @@ SPECTACULAR_SETTINGS = {
         }
     },
 }
+
+# =========================================================
+# LARGE DATA UPLOADS CONFIGURATION
+# =========================================================
+# Increase max payload size for bulk API JSON uploads (20 MB)
+# This prevents the 500 error when processing large PapaParse chunks
+DATA_UPLOAD_MAX_MEMORY_SIZE = 20971520

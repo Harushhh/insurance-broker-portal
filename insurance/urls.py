@@ -12,7 +12,8 @@ urlpatterns = [
     path("home/", views.home_dashboard, name="home_dashboard"),
 
     # Core portal pages
-    path("upload/", views.upload_csv, name="upload"),
+    path("upload/", views.import_data_view, name="upload"),
+    path("api/upload-chunk/", views.api_upload_chunk, name="api_upload_chunk"), # NEW: Streaming CSV Upload API
     path("dashboard/", views.dashboard, name="dashboard"),
     path("edit-rate/<str:group_id>/", views.edit_rate, name="edit_rate"),
     path("bulk-update/", views.bulk_update_rates, name="bulk_update_rates"),
