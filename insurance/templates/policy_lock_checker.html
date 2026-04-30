@@ -3,6 +3,8 @@
 
 {% block content %}
 <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/css/tom-select.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.2.2/dist/js/tom-select.complete.min.js"></script>
 
 <style>
   /* Base Reset for Form Elements */
@@ -633,7 +635,29 @@
 
 <script>
   document.addEventListener("DOMContentLoaded", function () {
-    // 1. Initialize TomSelect
+    
+    // --- 1. DYNAMIC DROPDOWN LOGIC SETUP ---
+    // We must read the raw database options BEFORE TomSelect modifies the DOM
+    const rawClassSelect = document.querySelector('select[name="make_model_class"]');
+    const allDbClasses = Array.from(rawClassSelect.options)
+      .filter(opt => opt.value !== "" && opt.text.toUpperCase() !== "NA")
+      .map(opt => ({ value: opt.value, text: opt.text }));
+
+    const productClassMap = {
+        "TW": ["Scooter", "Bike"],
+        "Private Car": ["Car"],
+        "GCV 4W": ["Truck", "Pick Up Van", "Dumper Tipper", "Trailer", "Tanker", "Goods Carrying Tractor"],
+        "GCV 3W": ["Goods Carrying Rickshaw"],
+        "PCV 3W": ["Passenger Carrying Rickshaw"],
+        "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
+        "MISCD": ["MISCD-Tractor", "MISCD-Others"]
+    };
+
+    // Store what was initially searched so we can re-select it
+    const initialClassVal = "{{ selected.make_model_class|escapejs }}";
+
+
+    // --- 2. INITIALIZE TOMSELECT ---
     document.querySelectorAll(".smart-dropdown").forEach(function (el) {
       if (el.tomselect) return;
 
@@ -654,7 +678,51 @@
       });
     });
 
-    // 2. Strict Date Logic (Disable locking for past dates)
+
+    // --- 3. DYNAMIC CLASS REBUILDING VIA TOMSELECT API ---
+    const productTs = document.querySelector('select[name="product"]').tomselect;
+    const classTs = document.querySelector('select[name="make_model_class"]').tomselect;
+
+    function updateClasses() {
+      const selectedProductId = productTs.getValue();
+      let productText = "";
+      
+      if (selectedProductId && productTs.options[selectedProductId]) {
+          productText = productTs.options[selectedProductId].text.trim();
+      }
+
+      // Completely clear existing TomSelect options
+      classTs.clear(true);
+      classTs.clearOptions();
+
+      // If mapped product selected -> Inject descriptive strings
+      if (productText && productClassMap[productText]) {
+          const allowedClasses = productClassMap[productText];
+          allowedClasses.forEach(cls => {
+              // Value = String (e.g. "Truck"), Text = String (e.g. "Truck")
+              classTs.addOption({value: cls, text: cls}); 
+          });
+      } else {
+          // Otherwise, populate with normal Database IDs (excluding 'NA')
+          allDbClasses.forEach(cls => {
+              classTs.addOption(cls);
+          });
+      }
+
+      // Restore previously searched value if it exists in the newly generated options
+      if (initialClassVal && classTs.options[initialClassVal]) {
+          classTs.setValue(initialClassVal, true);
+      }
+    }
+
+    // Trigger update logic when product dropdown changes
+    productTs.on('change', updateClasses);
+    
+    // Trigger on page load to set initial state correctly
+    updateClasses();
+
+
+    // --- 4. STRICT DATE LOGIC (Disable locking for past dates) ---
     const dateInput = document.getElementById("target_date_input");
     const todayObj = new Date();
     const todayStr = todayObj.getFullYear() + '-' + 
@@ -675,7 +743,6 @@
         });
       } else {
         lockButtons.forEach(btn => {
-          // Only reset if it hasn't been locked yet
           if(btn.innerHTML !== "Locked") {
              btn.disabled = false;
              btn.title = "Lock this rate";
@@ -688,16 +755,15 @@
     validateLocking();
     dateInput.addEventListener("change", validateLocking);
 
-    // 3. AJAX Submission for Lock Forms
+    // --- 5. AJAX SUBMISSION FOR LOCK FORMS ---
     document.querySelectorAll('.ajax-lock-form').forEach(form => {
         form.addEventListener('submit', function(e) {
-            e.preventDefault(); // Stop page reload!
+            e.preventDefault(); 
             
             const formData = new FormData(this);
             const url = this.action;
             const btn = this.querySelector('.lock-submit-btn');
 
-            // Set to loading state
             btn.disabled = true;
             btn.innerHTML = "Locking...";
 
@@ -711,7 +777,6 @@
             .then(response => response.json())
             .then(data => {
                 if(data.success) {
-                    // Success Popup
                     Swal.fire({
                         icon: 'success',
                         title: 'Locked!',
@@ -720,14 +785,12 @@
                         timer: 2500
                     });
                     
-                    // Visually disable the button permanently 
                     btn.innerHTML = "Locked";
                     btn.classList.remove('mini-lock');
                     btn.style.background = "#cbd5e1";
                     btn.style.color = "#f1f5f9";
                     btn.style.cursor = "not-allowed";
                 } else {
-                    // Error Popup (e.g. Missing Vehicle No)
                     Swal.fire({
                         icon: 'error',
                         title: 'Wait a second...',

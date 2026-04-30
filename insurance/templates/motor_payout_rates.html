@@ -171,9 +171,12 @@
                     <label class="text-overline">Make Model Class</label>
                     <select name="make_model_class" class="form-select-saas select2-init">
                         <option value="">Select...</option>
-                        <option value="NA" {% if selected.make_model_class == "NA" %}selected{% endif %}>NA</option>
+                        <!-- Removed hardcoded NA option to fulfill logic requirements -->
                         {% for mmc in make_model_class_list %}
-                            <option value="{{ mmc.id }}" {% if selected.make_model_class|stringformat:"s" == mmc.id|stringformat:"s" %}selected{% endif %}>{{ mmc.name }}</option>
+                            <!-- Only render non-NA items initially -->
+                            {% if mmc.name|upper != "NA" %}
+                                <option value="{{ mmc.id }}" {% if selected.make_model_class|stringformat:"s" == mmc.id|stringformat:"s" %}selected{% endif %}>{{ mmc.name }}</option>
+                            {% endif %}
                         {% endfor %}
                     </select>
                 </div>
@@ -352,14 +355,18 @@
             "MISCD": ["MISCD-Tractor", "MISCD-Others"]
         };
 
-        const classMakesMapping = {{ class_makes_mapping_json|safe }};
-        const allMakes = {{ all_makes_json|safe }};
+        const classMakesMapping = {{ class_makes_mapping_json|safe|default:"{}" }};
+        const allMakes = {{ all_makes_json|safe|default:"[]" }};
         
         const productSelect = $('select[name="product"]');
         const classSelect = $('select[name="make_model_class"]');
         const makeSelect = $('select[name="make_names"]');
 
-        const allClassOptions = classSelect.find('option').clone();
+        // Clone all valid class options from DB, actively stripping out any rogue "NA" options
+        const allClassOptions = classSelect.find('option').filter(function() {
+            return $(this).text().trim().toUpperCase() !== "NA" && $(this).val().toUpperCase() !== "NA";
+        }).clone();
+        
         const initialClass = "{{ selected.make_model_class|escapejs }}";
         const selectedMake = "{{ selected.make_names|escapejs }}";
 
@@ -368,26 +375,35 @@
             const currentClassVal = classSelect.val() || initialClass;
             
             classSelect.empty();
+            
+            // Add the default empty placeholder back
             classSelect.append(allClassOptions.filter(function() {
-                return $(this).val() === "" || $(this).val() === "NA";
+                return $(this).val() === "";
             }));
             
             if (selectedProductText && selectedProductText !== "All" && productClassMap[selectedProductText]) {
                 const allowedClasses = productClassMap[selectedProductText];
-                classSelect.append(allClassOptions.filter(function() {
-                    return allowedClasses.includes($(this).text().trim());
-                }));
+                
+                allowedClasses.forEach(function(clsName) {
+                    // Create an option where BOTH value and text are the string name (e.g. "Truck")
+                    const opt = new Option(clsName, clsName);
+                    if (clsName === currentClassVal) {
+                        opt.selected = true;
+                    }
+                    classSelect.append(opt);
+                });
             } else {
+                // If it's a standard product, populate the standard non-NA classes from DB
                 classSelect.append(allClassOptions.filter(function() {
-                    return $(this).val() !== "" && $(this).val() !== "NA";
+                    return $(this).val() !== "";
                 }));
+                
+                // Preserve selection if the original ID is in the list
+                if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) {
+                    classSelect.val(currentClassVal);
+                }
             }
             
-            if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) {
-                classSelect.val(currentClassVal);
-            } else {
-                classSelect.val('');
-            }
             classSelect.trigger('change.select2');
             updateMakesDropdown();
         }
@@ -398,7 +414,22 @@
             makeSelect.append(new Option('Select...', ''));
             
             let makesToShow = allMakes;
-            if (selectedClass && selectedClass !== "NA" && classMakesMapping[selectedClass]) {
+            
+            // If the selectedClass is a descriptive string (like "Truck"), map it to "NA" logic behind the scenes for Make mapping
+            let mappingKey = selectedClass;
+            let isStringClass = false;
+            
+            for (const [prod, classes] of Object.entries(productClassMap)) {
+                if (classes.includes(selectedClass)) {
+                    isStringClass = true;
+                    // Usually string classes map to the "NA" group in the DB for Make/Model relations
+                    // Assuming class_makes_mapping_json maps standard class IDs to their makes
+                    // We show all makes if no specific NA-ID map is passed, or you can tailor this further
+                    break;
+                }
+            }
+            
+            if (selectedClass && !isStringClass && classMakesMapping[selectedClass]) {
                 makesToShow = classMakesMapping[selectedClass];
             }
             
