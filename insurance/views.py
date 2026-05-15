@@ -1076,7 +1076,7 @@ def dashboard(request):
     })
 
 # -------------------------
-# Export UNGROUPED to Excel
+# Export UNGROUPED to CSV
 # -------------------------
 @login_required
 @user_passes_test(can_view_dashboard)
@@ -1085,10 +1085,144 @@ def export_rates_xlsx(request):
         "product", "sub_product", "policy_type", "fuel_type", "make_model_class", "is_ncb", "is_cpa", "is_zd"
     ).all()
 
-    # (Export logic remains identical...)
-    # [Omitted pure spreadsheet generation lines for brevity, leave them as they were]
+    # Apply identical filtering logic as the dashboard so exports match what the user sees
     q = (request.GET.get("q") or "").strip()
-    # ... 
+    status_filter = (request.GET.get("status") or "").strip()
+    is_deleted_filter = (request.GET.get("is_deleted") or "").strip().upper()
+    created_date = (request.GET.get("created_date") or "").strip()
+    date_range = (request.GET.get("date_range") or "").strip()
+
+    insurance_company = (request.GET.get("insurance_company") or "").strip()
+    product = (request.GET.get("product") or "").strip()
+    fuel = (request.GET.get("fuel") or "").strip()
+    sub_product = (request.GET.get("sub_product") or "").strip()
+    make_model_class = (request.GET.get("make_model_class") or "").strip()
+    rto_code = (request.GET.get("rto_code") or "").strip()
+    make_model_code = (request.GET.get("make_model_code") or "").strip()
+    age_range = (request.GET.get("age_range") or "").strip()
+    cc_range = (request.GET.get("cc_range") or "").strip()
+    sc_range = (request.GET.get("sc_range") or "").strip()
+    is_zd = (request.GET.get("is_zd") or "").strip()
+    is_ncb = (request.GET.get("is_ncb") or "").strip()
+    is_cpa = (request.GET.get("is_cpa") or "").strip()
+
+    if q:
+        group_ids = [int(gid.strip()) for gid in q.split(",") if gid.strip().isdigit()]
+        if group_ids:
+            qs = qs.filter(Q(group_id__in=group_ids) | Q(group_id__isnull=True, id__in=group_ids))
+        else:
+            qs = qs.none()
+
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    if is_deleted_filter:
+        qs = qs.filter(is_deleted=is_deleted_filter)
+    if created_date:
+        qs = qs.filter(created_at__date=created_date)
+
+    if date_range:
+        dates = date_range.split(" - ")
+        if len(dates) == 2:
+            d_from = dates[0].strip()
+            d_to = dates[1].strip()
+            if d_from and d_to:
+                qs = qs.filter(
+                    (Q(from_date__lte=d_to) | Q(from_date__isnull=True)) &
+                    (Q(to_date__gte=d_from) | Q(to_date__isnull=True))
+                )
+
+    if insurance_company:
+        qs = qs.filter(insurance_company=insurance_company)
+    if product:
+        qs = qs.filter(product_id=product)
+    if fuel:
+        qs = qs.filter(fuel_type_id=fuel)
+    if sub_product:
+        qs = qs.filter(sub_product_id=sub_product)
+
+    matching_rto_names = []
+    if rto_code:
+        for rto_record in RTOMaster.objects.filter(rto_cluster__icontains=rto_code):
+            if strict_match_in_cluster(rto_code, rto_record.rto_cluster):
+                matching_rto_names.append(rto_record.rto_name.strip().upper())
+        if matching_rto_names:
+            q_rto = Q()
+            for rto_name in matching_rto_names:
+                q_rto |= Q(new_rto_list__icontains=rto_name)
+            qs = qs.filter(q_rto)
+        else:
+            qs = qs.none()
+
+    matching_make_names = []
+    if make_model_code:
+        for make_record in MakeModelMaster.objects.filter(make_model_cluster__icontains=make_model_code):
+            if strict_match_in_cluster(make_model_code, make_record.make_model_cluster):
+                matching_make_names.append(make_record.make_model_name.strip().upper())
+        if matching_make_names:
+            q_make = Q()
+            for make_name in matching_make_names:
+                q_make |= Q(new_vehicle_makes__icontains=make_name)
+            qs = qs.filter(q_make)
+        else:
+            qs = qs.none()
+
+    qs = apply_make_model_filter(qs, product, make_model_class)
+    qs = apply_range_filter(qs, "vehicle_age_min", "vehicle_age_max", age_range)
+    qs = apply_range_filter(qs, "cc_min", "cc_max", cc_range)
+    qs = apply_range_filter(qs, "sc_min", "sc_max", sc_range)
+
+    if is_zd:
+        qs = qs.filter(is_zd__code=is_zd)
+    if is_ncb:
+        qs = qs.filter(is_ncb__code=is_ncb)
+    if is_cpa:
+        qs = qs.filter(is_cpa__code=is_cpa)
+
+    qs = qs.order_by("-id")
+
+    # Set up the CSV response
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="rates_export.csv"'
+
+    writer = csv.writer(response)
+    writer.writerow([
+        "ID", "Group ID", "Status", "Insurance Company", "Insurer Vertical", 
+        "Product", "Sub Product", "Policy Type", "Fuel Type", "Make Model Class",
+        "Vehicle Makes", "RTO List",
+        "Age Min", "Age Max", "CC Min", "CC Max", "SC Min", "SC Max",
+        "OD Rate", "TP Rate", "Net Rate", "Flat Amount",
+        "PO Type", "PO OD Rate", "PO TP Rate", "PO Net Rate", "PO Flat Amount",
+        "Is NCB", "Is CPA", "Is ZD", "From Date", "To Date", "Remarks"
+    ])
+
+    for r in qs.iterator(chunk_size=2000):
+        writer.writerow([
+            r.id,
+            r.group_id,
+            r.status,
+            r.insurance_company,
+            r.insurer_vertical,
+            r.product.name if r.product else "",
+            r.sub_product.name if r.sub_product else "",
+            r.policy_type.name if r.policy_type else "",
+            r.fuel_type.name if r.fuel_type else "",
+            r.make_model_class.name if r.make_model_class else "",
+            r.new_vehicle_makes,
+            r.new_rto_list,
+            r.vehicle_age_min, r.vehicle_age_max,
+            r.cc_min, r.cc_max,
+            r.sc_min, r.sc_max,
+            r.pi_od_rate, r.pi_tp_rate, r.pi_net_rate, r.pi_flat_amount,
+            r.po_type, r.po_od_rate, r.po_tp_rate, r.po_net_rate, r.po_flat_amount,
+            r.is_ncb.code if r.is_ncb else "",
+            r.is_cpa.code if r.is_cpa else "",
+            r.is_zd.code if r.is_zd else "",
+            r.from_date,
+            r.to_date,
+            r.remarks
+        ])
+
+    return response
 
 # -------------------------
 # Alias / Field Management Configurator
