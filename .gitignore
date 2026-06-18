@@ -30,7 +30,6 @@ env/
 # Media & Static
 # ===============================
 media/
-media/*
 staticfiles/
 
 # ===============================
@@ -51,5 +50,5 @@ Thumbs.db
 # Backup & Temp
 # ===============================
 *.bak
-# Note: If you ever need to commit JSON config files or fixtures, you may need to remove this next line.
-*.json
+my_backup.json
+backup_migrations/

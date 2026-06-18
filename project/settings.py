@@ -22,6 +22,17 @@ if 'RENDER' in os.environ:
     ALLOWED_HOSTS = ['*'] # Allows Render domains automatically
 else:
     ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")]
+    # Ensure ngrok is always allowed for local tunneling
+    if '.ngrok-free.app' not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append('.ngrok-free.app')
+    if '.ngrok-free.dev' not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append('.ngrok-free.dev')
+
+# Trust secure POST requests from ngrok domains
+CSRF_TRUSTED_ORIGINS = [
+    'https://*.ngrok-free.app',
+    'https://*.ngrok-free.dev',
+]
 
 # Gemini AI API Key
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
