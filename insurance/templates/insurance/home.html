@@ -11,6 +11,15 @@
         font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
     }
     
+    /* Hide ugly scrollbar for the sidebar but keep functionality */
+    .sidebar-scroll::-webkit-scrollbar {
+        display: none;
+    }
+    .sidebar-scroll {
+        -ms-overflow-style: none;  /* IE and Edge */
+        scrollbar-width: none;  /* Firefox */
+    }
+
     /* Modern Apple/Fintech-style Cards */
     .dash-card { 
         background: #ffffff; 
@@ -71,91 +80,134 @@
     /* Center chart constraint */
     .chart-wrapper { width: 100%; height: 180px; position: relative; }
 
-    /* Sidebar and Layout adjustments */
-    .sidebar { background: #1a202c; }
-    .nav-link:hover { background: #2d3748; color: #63b3ed; }
+    /* Custom Premium Sidebar Colors */
+    .sidebar-bg { background-color: #0f172a; } /* Slate 900 */
+    .sidebar-border { border-color: #1e293b; } /* Slate 800 */
+    .sidebar-hover:hover { background-color: #1e293b; color: #f8fafc; }
+    .sidebar-active { background-color: rgba(37, 99, 235, 0.15); color: #60a5fa; }
 </style>
 
 <div class="flex h-screen overflow-hidden">
-    <aside class="w-64 sidebar text-white flex flex-col justify-between flex-shrink-0 z-10 shadow-lg">
+    <aside class="w-64 sidebar-bg text-slate-400 flex flex-col justify-between flex-shrink-0 z-20 shadow-2xl border-r sidebar-border transition-all duration-300">
         <div>
-            <div class="h-20 flex items-center px-6 border-b border-gray-700">
+            <div class="h-20 flex items-center px-6 border-b sidebar-border">
                 <div class="flex items-center space-x-3">
-                    <i class="fas fa-shield-alt text-2xl text-blue-400"></i>
-                    <span class="text-xl font-bold tracking-wider text-white">Arham Secure</span>
+                    <div class="bg-gradient-to-br from-blue-500 to-indigo-600 p-2 rounded-lg shadow-lg">
+                        <i class="fas fa-shield-alt text-white text-lg"></i>
+                    </div>
+                    <span class="text-xl font-extrabold tracking-wide text-white">Arham Secure</span>
                 </div>
             </div>
 
-            <nav class="mt-6 px-4 space-y-1 overflow-y-auto" style="max-height: calc(100vh - 160px);">
-                <a href="{% url 'home_dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors bg-gray-800 text-blue-400">
-                    <i class="fas fa-home mr-3 text-lg"></i> Dashboard
-                </a>
-                <a href="{% url 'upload' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-upload mr-3 text-lg"></i> Import Rate Master
-                </a>
-                <a href="{% url 'dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-th-large mr-3 text-lg"></i> Rate Master Matrix
-                </a>
-                <a href="{% url 'motor_payout_rates' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-calculator mr-3 text-lg"></i> Quote Simulator
-                </a>
-                <a href="{% url 'policy_lock_checker' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-lock mr-3 text-lg"></i> Policy Lock Checker
-                </a>
-                <a href="{% url 'locked_policy_dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-history mr-3 text-lg"></i> Locked Policies Log
-                </a>
-                <a href="{% url 'business_analysis' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-chart-line mr-3 text-lg"></i> Payout Analytics
-                </a>
-                <a href="{% url 'grid_management' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-folder-open mr-3 text-lg"></i> Grid Management
-                </a>
-                <a href="{% url 'ticket_dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-ticket-alt mr-3 text-lg"></i> Ticket Support
-                </a>
-                <a href="{% url 'upload_extract_pdf' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-brain mr-3 text-lg"></i> AI OCR Pipeline
-                </a>
-                <a href="{% url 'my_mis' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-file-invoice-dollar mr-3 text-lg"></i> Policy MIS Register
-                </a>
-                <a href="{% url 'field_configurator' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-cogs mr-3 text-lg"></i> Extraction Configurator
-                </a>
-                <a href="{% url 'rto_dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-map-marked-alt mr-3 text-lg"></i> RTO Master Data
-                </a>
-                <a href="{% url 'make_model_dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-truck-pickup mr-3 text-lg"></i> Make/Model Master Data
-                </a>
-                <a href="{% url 'user_management' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-users-cog mr-3 text-lg"></i> User Access Control
-                </a>
-                <a href="{% url 'audit_logs' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
-                    <i class="fas fa-clipboard-list mr-3 text-lg"></i> Audit Database Logs
-                </a>
+            <nav class="mt-4 px-4 pb-6 space-y-6 overflow-y-auto sidebar-scroll" style="max-height: calc(100vh - 160px);">
+                
+                <div>
+                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Overview</h3>
+                    <div class="space-y-1">
+                        <a href="{% url 'home_dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-active transition-all duration-200">
+                            <i class="fas fa-home w-5 text-center mr-3 text-blue-400"></i> <span class="text-blue-100">Dashboard</span>
+                        </a>
+                        <a href="{% url 'business_analysis' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-chart-line w-5 text-center mr-3 text-slate-500 group-hover:text-indigo-400 transition-colors"></i> Payout Analytics
+                        </a>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Operations</h3>
+                    <div class="space-y-1">
+                        <a href="{% url 'motor_payout_rates' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-calculator w-5 text-center mr-3 text-slate-500 group-hover:text-emerald-400 transition-colors"></i> Quote Simulator
+                        </a>
+                        <a href="{% url 'my_mis' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-file-invoice-dollar w-5 text-center mr-3 text-slate-500 group-hover:text-emerald-400 transition-colors"></i> Policy MIS Register
+                        </a>
+                        <a href="{% url 'ticket_dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-ticket-alt w-5 text-center mr-3 text-slate-500 group-hover:text-amber-400 transition-colors"></i> Ticket Support
+                        </a>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Policy Control</h3>
+                    <div class="space-y-1">
+                        <a href="{% url 'policy_lock_checker' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-lock w-5 text-center mr-3 text-slate-500 group-hover:text-rose-400 transition-colors"></i> Policy Lock Checker
+                        </a>
+                        <a href="{% url 'locked_policy_dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-history w-5 text-center mr-3 text-slate-500 group-hover:text-rose-400 transition-colors"></i> Locked Policies Log
+                        </a>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Master Data</h3>
+                    <div class="space-y-1">
+                        <a href="{% url 'upload' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-upload w-5 text-center mr-3 text-slate-500 group-hover:text-cyan-400 transition-colors"></i> Import Rate Master
+                        </a>
+                        <a href="{% url 'dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-th-large w-5 text-center mr-3 text-slate-500 group-hover:text-cyan-400 transition-colors"></i> Rate Master Matrix
+                        </a>
+                        <a href="{% url 'rto_dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-map-marked-alt w-5 text-center mr-3 text-slate-500 group-hover:text-cyan-400 transition-colors"></i> RTO Master Data
+                        </a>
+                        <a href="{% url 'make_model_dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-truck-pickup w-5 text-center mr-3 text-slate-500 group-hover:text-cyan-400 transition-colors"></i> Make/Model Master
+                        </a>
+                        <a href="{% url 'grid_management' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-folder-open w-5 text-center mr-3 text-slate-500 group-hover:text-cyan-400 transition-colors"></i> Grid Management
+                        </a>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">AI Automation</h3>
+                    <div class="space-y-1">
+                        <a href="{% url 'upload_extract_pdf' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-brain w-5 text-center mr-3 text-slate-500 group-hover:text-purple-400 transition-colors"></i> AI OCR Pipeline
+                        </a>
+                        <a href="{% url 'field_configurator' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-cogs w-5 text-center mr-3 text-slate-500 group-hover:text-purple-400 transition-colors"></i> Configurator
+                        </a>
+                    </div>
+                </div>
+
+                <div>
+                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Administration</h3>
+                    <div class="space-y-1">
+                        <a href="{% url 'user_management' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-users-cog w-5 text-center mr-3 text-slate-500 group-hover:text-gray-300 transition-colors"></i> Access Control
+                        </a>
+                        <a href="{% url 'audit_logs' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
+                            <i class="fas fa-clipboard-list w-5 text-center mr-3 text-slate-500 group-hover:text-gray-300 transition-colors"></i> Audit Logs
+                        </a>
+                    </div>
+                </div>
+
             </nav>
         </div>
         
-        <div class="p-4 border-t border-gray-700 mx-2 mb-2">
-            <div class="flex items-center space-x-3 px-2 py-2 bg-gray-800 rounded-lg">
-                <div class="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center font-bold text-white uppercase">
-                    R
+        <div class="p-4 border-t sidebar-border bg-slate-900 mt-auto">
+            <div class="flex items-center space-x-3 px-3 py-2.5 rounded-xl border sidebar-border hover:bg-slate-800 transition-all duration-300 cursor-pointer shadow-sm group">
+                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center font-bold text-white shadow-md">
+                    {{ request.user.username|default:"R"|make_list|first|upper }}
                 </div>
                 <div class="flex flex-col overflow-hidden">
-                    <span class="text-sm font-semibold text-white">System Root</span>
-                    <span class="text-xs text-gray-400 truncate">Public Access Mode</span>
+                    <span class="text-sm font-bold text-slate-200 group-hover:text-white transition-colors">{{ request.user.username|default:"System Root" }}</span>
+                    <span class="text-xs text-emerald-400 flex items-center mt-0.5">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span> Public Access
+                    </span>
                 </div>
             </div>
         </div>
     </aside>
 
-    <main class="flex-1 overflow-y-auto bg-gray-50 p-10 h-screen">
+    <main class="flex-1 overflow-y-auto bg-slate-50 p-10 h-screen">
         
         <div class="d-flex justify-content-between align-items-center mb-5 border-b pb-6">
             <div>
-                <h2 class="mb-1" style="font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">Welcome back, {{ request.user.first_name|default:request.user.username }}!</h2>
+                <h2 class="mb-1" style="font-weight: 800; color: #0f172a; letter-spacing: -0.02em;">Welcome back, {{ request.user.first_name|default:request.user.username|default:"Admin" }}!</h2>
                 <p class="text-muted mb-0" style="font-size: 15px;">
                     {% if is_admin_user %}
                         <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 me-2 rounded-pill px-3 py-1">Admin View</span> 
@@ -167,7 +219,7 @@
                 </p>
             </div>
             <div>
-                <a href="{% url 'upload_extract_pdf' %}" class="btn btn-primary px-4 py-2" style="border-radius: 8px; font-weight: 500; box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2);"><i class="bi bi-cloud-upload me-2"></i>Upload Document</a>
+                <a href="{% url 'upload_extract_pdf' %}" class="btn btn-primary px-4 py-2" style="border-radius: 8px; font-weight: 600; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);"><i class="bi bi-cloud-upload me-2"></i>Upload Document</a>
             </div>
         </div>
 
@@ -243,10 +295,10 @@
             </div>
         </div>
 
-        <div class="table-card">
+        <div class="table-card mb-10">
             <div class="bg-white py-4 px-4 border-bottom d-flex justify-content-between align-items-center">
-                <h5 class="mb-0" style="font-weight: 700; color: #0f172a; font-size: 18px;">Recent Activity</h5>
-                <a href="{% url 'my_mis' %}" class="btn btn-sm btn-light border px-3 py-2" style="font-weight: 500; border-radius: 8px; color: #475569;">View All MIS</a>
+                <h5 class="mb-0" style="font-weight: 800; color: #0f172a; font-size: 18px;">Recent Activity</h5>
+                <a href="{% url 'my_mis' %}" class="btn btn-sm btn-light border px-3 py-2 hover:bg-gray-50" style="font-weight: 600; border-radius: 8px; color: #475569; transition: all 0.2s;">View All MIS</a>
             </div>
             <div class="table-responsive">
                 <table class="table-modern">
@@ -266,38 +318,38 @@
                         {% for record in recent_activity %}
                         <tr>
                             <td>
-                                <span style="color: #475569; font-weight: 500;">{{ record.created_at|date:"M d, Y" }}</span><br>
-                                <span style="color: #94a3b8; font-size: 12px;">{{ record.created_at|time:"H:i A" }}</span>
+                                <span style="color: #475569; font-weight: 600;">{{ record.created_at|date:"M d, Y" }}</span><br>
+                                <span style="color: #94a3b8; font-size: 12px; font-weight: 500;">{{ record.created_at|time:"H:i A" }}</span>
                             </td>
-                            <td style="color: #0f172a; font-weight: 600;">{{ record.insured_name|default:"--" }}</td>
+                            <td style="color: #0f172a; font-weight: 700;">{{ record.insured_name|default:"--" }}</td>
                             <td>
-                                <span style="background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; color: #475569;">
+                                <span style="background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; color: #475569; border: 1px solid #e2e8f0;">
                                     {{ record.insurer_name|default:"--" }}
                                 </span>
                             </td>
-                            <td class="text-success" style="font-weight: 700;">{% if record.gross_premium %}₹{{ record.gross_premium }}{% else %}--{% endif %}</td>
+                            <td class="text-emerald-600" style="font-weight: 800;">{% if record.gross_premium %}₹{{ record.gross_premium }}{% else %}--{% endif %}</td>
                             
                             {% if is_admin_user %}
                             <td>
                                 <div class="d-flex align-items-center">
-                                    <div style="width: 28px; height: 28px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #475569; margin-right: 8px;">
+                                    <div style="width: 28px; height: 28px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #475569; margin-right: 8px;">
                                         {{ record.source_document.uploaded_by.username|default:"S"|make_list|first|upper }}
                                     </div>
-                                    <span style="font-weight: 500; color: #334155;">{{ record.source_document.uploaded_by.username|default:"System" }}</span>
+                                    <span style="font-weight: 600; color: #334155;">{{ record.source_document.uploaded_by.username|default:"System" }}</span>
                                 </div>
                             </td>
                             {% endif %}
                             
                             <td class="text-end">
-                                <a href="{% url 'mis_review' record.pk %}" class="btn btn-sm btn-light border text-primary" style="font-weight: 600; border-radius: 6px; padding: 6px 14px;">Review <i class="bi bi-arrow-right ms-1"></i></a>
+                                <a href="{% url 'mis_review' record.pk %}" class="btn btn-sm btn-light border text-primary hover:bg-blue-50" style="font-weight: 600; border-radius: 6px; padding: 6px 14px; transition: all 0.2s;">Review <i class="bi bi-arrow-right ms-1"></i></a>
                             </td>
                         </tr>
                         {% empty %}
                         <tr>
                             <td colspan="{% if is_admin_user %}6{% else %}5{% endif %}" class="text-center py-5">
                                 <div style="color: #cbd5e1; font-size: 40px; margin-bottom: 10px;"><i class="bi bi-inbox"></i></div>
-                                <h6 style="color: #475569; font-weight: 600;">No Activity Yet</h6>
-                                <p style="color: #94a3b8; font-size: 14px; margin-bottom: 0;">Documents processed by the AI will appear here.</p>
+                                <h6 style="color: #475569; font-weight: 700;">No Activity Yet</h6>
+                                <p style="color: #94a3b8; font-size: 14px; margin-bottom: 0; font-weight: 500;">Documents processed by the AI will appear here.</p>
                             </td>
                         </tr>
                         {% endfor %}
