@@ -1,44 +1,37 @@
 from django.contrib import admin
 from django.urls import path, include
+from django.contrib.auth import views as auth_views
 from django.conf import settings
 from django.conf.urls.static import static
 
-# --- Swagger / API Docs ---
-from drf_spectacular.views import (
-    SpectacularAPIView,
-    SpectacularSwaggerView,
-    SpectacularRedocView
-)
+# --- ADDED FOR SWAGGER ---
+from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
+# -------------------------
 
 urlpatterns = [
-    # Admin panel
     path("admin/", admin.site.urls),
 
-    # Your main app
+    # login page at /login/
+    path("login/", auth_views.LoginView.as_view(template_name="registration/login.html"), name="login"),
+    path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+
+    # your app
     path("", include("insurance.urls")),
-
+    
     # ==========================================
-    # API SCHEMA & DOCUMENTATION
+    # SWAGGER & API DOCUMENTATION URLS
     # ==========================================
-
-    # Raw schema (JSON/YAML)
-    path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
-
-    # Swagger UI
-    path(
-        "api/schema/swagger-ui/",
-        SpectacularSwaggerView.as_view(url_name="schema"),
-        name="swagger-ui"
-    ),
-
-    # Redoc UI
-    path(
-        "api/schema/redoc/",
-        SpectacularRedocView.as_view(url_name="schema"),
-        name="redoc"
-    ),
+    # 1. The raw JSON/YAML schema file
+    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    
+    # 2. The interactive Swagger UI
+    path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    
+    # 3. ReDoc UI (Alternative beautiful layout for API docs)
+    path('api/schema/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 ]
 
-# Serve media files in development
+# ✅ NEW: This tells Django how to serve the files uploaded in the Grid Management page
+# (This also makes the PDF embedding work on the MIS Review screen!)
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
