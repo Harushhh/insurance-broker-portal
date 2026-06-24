@@ -73,7 +73,7 @@
     font-size: 15px;
     font-weight: 800;
     color: #2563eb;
-    margin-bottom: 18px;
+    margin-bottom: 0;
   }
 
   .form-grid {
@@ -427,9 +427,39 @@
   </div>
 
   <div class="search-panel">
-    <div class="panel-title">🔎 Enter policy and vehicle details</div>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="panel-title">🔎 Enter policy and vehicle details</div>
+        
+        <button type="button" class="btn btn-warning btn-sm shadow-sm" onclick="openTicketModal()">
+            <i class="bi bi-exclamation-triangle"></i> Raise Issue / Ticket
+        </button>
+    </div>
 
-    <form method="get">
+    <div id="ticketModal" class="modal" tabindex="-1" style="display: none; background: rgba(0,0,0,0.6); position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 9999; align-items: center; justify-content: center;">
+        <div class="modal-dialog" style="background: white; border-radius: 8px; padding: 20px; width: 90%; max-width: 500px;">
+            <div class="modal-content border-0">
+                <div class="modal-header border-0 pb-0 d-flex justify-content-between align-items-center mb-2">
+                    <h5 class="modal-title fw-bold">Raise a Ticket</h5>
+                    <button type="button" class="btn-close" onclick="closeTicketModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer;">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info py-2 px-3 small border-0">
+                        <i class="bi bi-info-circle"></i> The parameters currently entered in the search form will automatically be attached to this ticket.
+                    </div>
+                    <div class="mb-3">
+                        <label for="ticketRemarks" class="form-label fw-bold">Remarks / Issue Details</label>
+                        <textarea id="ticketRemarks" class="form-control" rows="4" placeholder="Please explain what is missing or incorrect with the current rates..."></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer border-0 pt-0 d-flex justify-content-end gap-2">
+                    <button type="button" class="btn btn-secondary" onclick="closeTicketModal()">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="submitTicket()">Submit Ticket</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <form method="get" id="mainSearchForm">
       <div class="form-grid">
         <div class="field-group">
           <label>Select Date</label>
@@ -637,7 +667,6 @@
   document.addEventListener("DOMContentLoaded", function () {
     
     // --- 1. DYNAMIC DROPDOWN LOGIC SETUP ---
-    // We must read the raw database options BEFORE TomSelect modifies the DOM
     const rawClassSelect = document.querySelector('select[name="make_model_class"]');
     const allDbClasses = Array.from(rawClassSelect.options)
       .filter(opt => opt.value !== "" && opt.text.toUpperCase() !== "NA")
@@ -653,9 +682,7 @@
         "MISCD": ["MISCD-Tractor", "MISCD-Others"]
     };
 
-    // Store what was initially searched so we can re-select it
     const initialClassVal = "{{ selected.make_model_class|escapejs }}";
-
 
     // --- 2. INITIALIZE TOMSELECT ---
     document.querySelectorAll(".smart-dropdown").forEach(function (el) {
@@ -678,7 +705,6 @@
       });
     });
 
-
     // --- 3. DYNAMIC CLASS REBUILDING VIA TOMSELECT API ---
     const productTs = document.querySelector('select[name="product"]').tomselect;
     const classTs = document.querySelector('select[name="make_model_class"]').tomselect;
@@ -691,36 +717,27 @@
           productText = productTs.options[selectedProductId].text.trim();
       }
 
-      // Completely clear existing TomSelect options
       classTs.clear(true);
       classTs.clearOptions();
 
-      // If mapped product selected -> Inject descriptive strings
       if (productText && productClassMap[productText]) {
           const allowedClasses = productClassMap[productText];
           allowedClasses.forEach(cls => {
-              // Value = String (e.g. "Truck"), Text = String (e.g. "Truck")
               classTs.addOption({value: cls, text: cls}); 
           });
       } else {
-          // Otherwise, populate with normal Database IDs (excluding 'NA')
           allDbClasses.forEach(cls => {
               classTs.addOption(cls);
           });
       }
 
-      // Restore previously searched value if it exists in the newly generated options
       if (initialClassVal && classTs.options[initialClassVal]) {
           classTs.setValue(initialClassVal, true);
       }
     }
 
-    // Trigger update logic when product dropdown changes
     productTs.on('change', updateClasses);
-    
-    // Trigger on page load to set initial state correctly
     updateClasses();
-
 
     // --- 4. STRICT DATE LOGIC (Disable locking for past dates) ---
     const dateInput = document.getElementById("target_date_input");
@@ -808,7 +825,114 @@
             });
         });
     });
-
   });
+</script>
+
+<script>
+    // --- 6. TICKETING SYSTEM LOGIC (100% BULLETPROOF DJANGO DICTIONARY) ---
+    function openTicketModal() {
+        document.getElementById('ticketModal').style.display = 'flex';
+    }
+
+    function closeTicketModal() {
+        document.getElementById('ticketModal').style.display = 'none';
+        document.getElementById('ticketRemarks').value = '';
+    }
+
+    async function submitTicket() {
+        const remarks = document.getElementById('ticketRemarks').value.trim();
+        if (!remarks) {
+            alert('Please enter your remarks before submitting.');
+            return;
+        }
+
+        const formElement = document.getElementById('mainSearchForm'); 
+        const formData = new FormData(formElement);
+        const formPayload = {};
+
+        // 1. DICTIONARY MAPPING FROM DJANGO
+        // We bypass TomSelect entirely and use Django's literal data to translate IDs to Names instantly.
+        const DB_MAPPINGS = {
+            'product': {
+                {% for item in product_list %}'{{ item.id }}': '{{ item.name|escapejs }}',{% endfor %}
+            },
+            'sub_product': {
+                {% for item in sub_product_list %}'{{ item.id }}': '{{ item.name|escapejs }}',{% endfor %}
+            },
+            'make_model_class': {
+                {% for item in make_model_class_list %}'{{ item.id }}': '{{ item.name|escapejs }}',{% endfor %}
+            },
+            'fuel': {
+                {% for item in fuel_list %}'{{ item.id }}': '{{ item.name|escapejs }}',{% endfor %}
+            }
+        };
+        
+        // 2. Formatting the key names for the dashboard
+        const formatKey = (str) => {
+            const labels = {
+                'mfg_year': 'Manufacturing Year',
+                'vehicle_no': 'Vehicle No.',
+                'cc': 'CC / GVW',
+                'sc': 'Exact SC',
+                'is_zd': 'Zero Dep (ZD)',
+                'is_cpa': 'CPA',
+                'is_ncb': 'NCB',
+                'make_names': 'Make Name (Code)',
+                'rto_code': 'RTO Code',
+                'sub_product': 'Sub Product',
+                'make_model_class': 'Make Model Class',
+                'product': 'Product',
+                'fuel': 'Fuel',
+                'target_date': 'Target Date',
+                'policy_holder_name': 'Policy Holder Name'
+            };
+            return labels[str] || str.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+        };
+
+        // 3. Extract and Translate
+        for (let [key, val] of formData.entries()) {
+            if (key === 'csrfmiddlewaretoken') continue;
+            if (!val || val.trim() === '') continue;
+
+            let finalValue = val;
+
+            // If this key is one of the dropdowns with an ID, swap it for the real Text using our dictionary map
+            if (DB_MAPPINGS[key] && DB_MAPPINGS[key][val]) {
+                finalValue = DB_MAPPINGS[key][val];
+            }
+
+            // Prevent capturing unselected placeholder items
+            if (finalValue.includes('Select...') || finalValue.includes('NA (Select')) {
+                continue; 
+            }
+
+            formPayload[formatKey(key)] = finalValue.trim();
+        }
+
+        // 4. Send to Backend
+        try {
+            const response = await fetch('/api/create-ticket/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    remarks: remarks,
+                    form_payload: formPayload
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                alert('Ticket raised successfully! It will now appear in your Support Tickets dashboard.');
+                closeTicketModal();
+            } else {
+                alert('Error: ' + result.message);
+            }
+        } catch (error) {
+            alert('A network error occurred while submitting the ticket. Please try again.');
+            console.error(error);
+        }
+    }
 </script>
 {% endblock %}

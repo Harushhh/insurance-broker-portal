@@ -473,3 +473,25 @@ class LockedPolicy(models.Model):
 
     def __str__(self):
         return f"{self.vehicle_no} - {self.policy_holder_name} - {self.status}"
+
+# =========================================================
+# SUPPORT TICKET SYSTEM
+# =========================================================
+class SupportTicket(models.Model):
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="support_tickets"
+    )
+    remarks = models.TextField()
+    form_payload = models.JSONField(default=dict, blank=True, null=True)
+    status = models.CharField(max_length=20, default="OPEN")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Ticket #{self.id} - {self.user}"

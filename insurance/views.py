@@ -37,7 +37,7 @@ from .models import (
     FuelTypeMaster, MakeModelClassMaster,
     RateGroup, AuditLog, GridDocument, UserProfile,
     ExtractionField, FieldSynonym, PolicyDocumentUpload, PolicyMISRecord,
-    LockedPolicy
+    LockedPolicy, SupportTicket
 )
 
 # Import our Gemini AI utility
@@ -2693,3 +2693,68 @@ def mis_review(request, pk):
         'record': record,
         'field_data': field_data
     })
+
+# =========================================================
+# TICKETING SYSTEM VIEWS
+# =========================================================
+@login_required
+def ticket_dashboard(request):
+    # Admins see all tickets, regular users see only their own
+    if is_admin(request.user):
+        tickets = SupportTicket.objects.select_related('user').all()
+    else:
+        tickets = SupportTicket.objects.filter(user=request.user).select_related('user')
+        
+    return render(request, "ticket_dashboard.html", {
+        "tickets": tickets
+    })
+
+@login_required
+@csrf_exempt # Using csrf_exempt for the API endpoint to ensure the JS fetch works smoothly
+def create_ticket_api(request):
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            remarks = data.get("remarks", "").strip()
+            form_payload = data.get("form_payload", {})
+
+            if not remarks:
+                return JsonResponse({"success": False, "message": "Remarks are required."})
+
+            # =======================================================
+            # MAGIC BACKEND TRANSLATOR (FOOLPROOF FIX)
+            # Instantly swaps the UI Database IDs for the real Names
+            # =======================================================
+            
+            # 1. Translate Product ID to Name
+            if form_payload.get("Product") and str(form_payload["Product"]).isdigit():
+                obj = ProductMaster.objects.filter(id=int(form_payload["Product"])).first()
+                if obj: form_payload["Product"] = obj.name
+                
+            # 2. Translate Sub Product ID to Name
+            if form_payload.get("Sub Product") and str(form_payload["Sub Product"]).isdigit():
+                obj = SubProductMaster.objects.filter(id=int(form_payload["Sub Product"])).first()
+                if obj: form_payload["Sub Product"] = obj.name
+                
+            # 3. Translate Make Model Class ID to Name
+            if form_payload.get("Make Model Class") and str(form_payload["Make Model Class"]).isdigit():
+                obj = MakeModelClassMaster.objects.filter(id=int(form_payload["Make Model Class"])).first()
+                if obj: form_payload["Make Model Class"] = obj.name
+                
+            # 4. Translate Fuel ID to Name
+            if form_payload.get("Fuel") and str(form_payload["Fuel"]).isdigit():
+                obj = FuelTypeMaster.objects.filter(id=int(form_payload["Fuel"])).first()
+                if obj: form_payload["Fuel"] = obj.name
+                
+            # =======================================================
+
+            ticket = SupportTicket.objects.create(
+                user=request.user,
+                remarks=remarks,
+                form_payload=form_payload
+            )
+            return JsonResponse({"success": True, "ticket_id": ticket.id})
+        except Exception as e:
+            return JsonResponse({"success": False, "message": str(e)})
+            
+    return JsonResponse({"success": False, "message": "Invalid request method."})

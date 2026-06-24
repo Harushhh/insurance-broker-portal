@@ -23,6 +23,10 @@ urlpatterns = [
     path("user-management/", views.user_management, name="user_management"),
     path("grid-management/", views.grid_management, name="grid_management"),
 
+    # Ticketing System
+    path('tickets/', views.ticket_dashboard, name='ticket_dashboard'),
+    path('api/create-ticket/', views.create_ticket_api, name='create_ticket_api'),
+
     # AI OCR & PDF extraction Pipeline
     path("upload-extract-pdf/", views.upload_extract_pdf, name="upload_extract_pdf"),
     path("my-mis/", views.my_mis, name="my_mis"),
