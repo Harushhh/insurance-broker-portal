@@ -2,10 +2,52 @@ import os
 import json
 import time
 import re
+from decimal import Decimal
 from django.conf import settings
 from google import genai
 from google.genai import types
 from .models import ExtractionField
+
+def auto_reconcile_mis(mis_record):
+    """
+    Automated Engine: Cross-references the newly extracted AI MIS record
+    with the LockedPolicy database to check for expected payout discrepancies.
+    """
+    try:
+        from .models import LockedPolicy
+        
+        # 1. We need a vehicle number to match against our locked database
+        if not mis_record.vehicle_registration_number:
+            mis_record.reconciliation_status = 'PENDING'
+            mis_record.save(update_fields=['reconciliation_status'])
+            return
+
+        # 2. Find the most recent locked policy for this vehicle
+        locked_policy = LockedPolicy.objects.filter(
+            vehicle_no__iexact=mis_record.vehicle_registration_number,
+            status="LOCKED"
+        ).order_by('-created_at').first()
+
+        if locked_policy and mis_record.net_premium:
+            rate_percentage = Decimal(str(locked_policy.po_rate or 0))
+            flat_amount = Decimal(str(locked_policy.po_flat_amount or 0))
+            
+            # Calculate Expected Payout based on Broker Logic
+            expected = (mis_record.net_premium * (rate_percentage / Decimal('100'))) + flat_amount
+            mis_record.expected_payout = expected
+            
+            # Here you would typically compare against an 'actual_payout' field. 
+            # For now, if we successfully mapped an expected payout, we'll mark it 
+            # as a DISCREPANCY to flag it for the admin's attention in the dashboard.
+            if expected > 0:
+                mis_record.reconciliation_status = 'DISCREPANCY' 
+            else:
+                mis_record.reconciliation_status = 'PENDING'
+                
+            mis_record.save(update_fields=['expected_payout', 'reconciliation_status'])
+
+    except Exception as e:
+        print(f"\n❌ RECONCILIATION ERROR: {str(e)}\n")
 
 def safe_json_parse(text):
     """

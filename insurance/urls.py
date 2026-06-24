@@ -26,6 +26,7 @@ urlpatterns = [
     # Ticketing System
     path('tickets/', views.ticket_dashboard, name='ticket_dashboard'),
     path('api/create-ticket/', views.create_ticket_api, name='create_ticket_api'),
+    path('api/update-ticket-status/', views.update_ticket_status, name='update_ticket_status'), # <-- ADDED THIS LINE
 
     # AI OCR & PDF extraction Pipeline
     path("upload-extract-pdf/", views.upload_extract_pdf, name="upload_extract_pdf"),

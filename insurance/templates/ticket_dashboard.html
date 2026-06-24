@@ -104,24 +104,37 @@
     background: #f8fafc;
   }
 
-  /* Status Badge Styling */
+  /* Status Badge Styling for Dropdown */
   .status-badge {
     display: inline-flex;
     align-items: center;
-    padding: 6px 12px;
+    padding: 6px 24px 6px 12px;
     border-radius: 8px;
     font-size: 12px;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2364748b%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E');
+    background-repeat: no-repeat;
+    background-position: right 8px top 50%;
+    background-size: 10px auto;
   }
   .status-open {
-    background: #eff6ff;
+    background-color: #eff6ff;
     color: #2563eb;
     border: 1px solid #bfdbfe;
   }
+  .status-followup {
+    background-color: #fef3c7;
+    color: #d97706;
+    border: 1px solid #fde68a;
+  }
   .status-closed {
-    background: #f1f5f9;
+    background-color: #f1f5f9;
     color: #64748b;
     border: 1px solid #e2e8f0;
   }
@@ -223,9 +236,17 @@
               </ul>
             </td>
             <td>
-              <span class="status-badge {% if ticket.status == 'OPEN' %}status-open{% else %}status-closed{% endif %}">
-                {{ ticket.status }}
-              </span>
+              <select 
+                  class="status-badge 
+                      {% if ticket.status == 'OPEN' %}status-open
+                      {% elif ticket.status == 'FOLLOW-UP' %}status-followup
+                      {% elif ticket.status == 'CLOSED' %}status-closed{% endif %}"
+                  onchange="updateTicketStatus({{ ticket.id }}, this.value, this)"
+              >
+                  <option value="OPEN" {% if ticket.status == 'OPEN' %}selected{% endif %}>OPEN</option>
+                  <option value="FOLLOW-UP" {% if ticket.status == 'FOLLOW-UP' %}selected{% endif %}>FOLLOW-UP</option>
+                  <option value="CLOSED" {% if ticket.status == 'CLOSED' %}selected{% endif %}>CLOSED</option>
+              </select>
             </td>
           </tr>
           {% empty %}
@@ -241,4 +262,45 @@
     </div>
   </div>
 </div>
+
+<script>
+function updateTicketStatus(ticketId, newStatus, selectElement) {
+    fetch('/api/update-ticket-status/', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            // If you are enforcing CSRF on this view, uncomment the line below:
+            // 'X-CSRFToken': '{{ csrf_token }}' 
+        },
+        body: JSON.stringify({
+            ticket_id: ticketId,
+            status: newStatus
+        })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Remove old status classes
+            selectElement.classList.remove('status-open', 'status-followup', 'status-closed');
+            
+            // Add the corresponding new status class
+            if (newStatus === "OPEN") {
+                selectElement.classList.add("status-open");
+            } else if (newStatus === "FOLLOW-UP") {
+                selectElement.classList.add("status-followup");
+            } else if (newStatus === "CLOSED") {
+                selectElement.classList.add("status-closed");
+            }
+        } else {
+            alert('Error: ' + data.message);
+            window.location.reload(); // Revert back to the original selection on failure
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('A network error occurred while updating the status.');
+        window.location.reload();
+    });
+}
+</script>
 {% endblock %}

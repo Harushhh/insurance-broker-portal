@@ -21,6 +21,20 @@
     .btn-light-custom:hover { background: #e2e8f0; color: #0f172a; }
 
     .missing-text { color: #ef4444; font-style: italic; font-size: 13px; font-weight: 500; }
+
+    /* New Reconciliation Badges */
+    .recon-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }
+    .recon-pending { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+    .recon-match { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+    .recon-discrepancy { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
 </style>
 
 <div class="container-fluid py-5 mx-auto" style="max-width: 1400px; padding-left: 2rem; padding-right: 2rem;">
@@ -60,9 +74,9 @@
                         <th>Extracted Date</th>
                         <th>Insurer</th>
                         <th>Policy Number</th>
-                        <th>Insured Name</th>
                         <th>Vehicle / Make</th>
                         <th>Net Premium</th>
+                        <th>Reconciliation</th>
                         <th class="text-end">Action</th>
                     </tr>
                 </thead>
@@ -89,8 +103,6 @@
                             {% endif %}
                         </td>
                         
-                        <td style="font-weight: 500;">{{ record.insured_name|default:"-" }}</td>
-                        
                         <td>
                             <div style="font-weight: 600; color: #0f172a;">{{ record.vehicle_registration_number|default:"No Reg" }}</div>
                             <div style="font-size: 12px; color: #64748b; margin-top: 2px;">{{ record.vehicle_make_model|default:"-" }}</div>
@@ -98,6 +110,18 @@
                         
                         <td style="font-weight: 700; color: #059669;">
                             {% if record.net_premium %}₹{{ record.net_premium }}{% else %}<span style="color: #94a3b8; font-weight: 500;">-</span>{% endif %}
+                        </td>
+
+                        <td>
+                            <span class="recon-badge 
+                                {% if record.reconciliation_status == 'MATCH' %}recon-match
+                                {% elif record.reconciliation_status == 'DISCREPANCY' %}recon-discrepancy
+                                {% else %}recon-pending{% endif %}">
+                                {{ record.reconciliation_status }}
+                            </span>
+                            {% if record.expected_payout %}
+                                <div style="font-size: 11px; color: #64748b; margin-top: 4px;">Exp: ₹{{ record.expected_payout }}</div>
+                            {% endif %}
                         </td>
                         
                         <td class="text-end">

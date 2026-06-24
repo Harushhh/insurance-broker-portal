@@ -2758,3 +2758,38 @@ def create_ticket_api(request):
             return JsonResponse({"success": False, "message": str(e)})
             
     return JsonResponse({"success": False, "message": "Invalid request method."})
+
+@login_required
+@csrf_exempt 
+def update_ticket_status(request):
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            ticket_id = data.get("ticket_id")
+            new_status = data.get("status")
+
+            if not ticket_id or not new_status:
+                return JsonResponse({"success": False, "message": "Ticket ID and Status are required."})
+
+            # Security: Admins can update any ticket, regular users only their own
+            if is_admin(request.user):
+                ticket = SupportTicket.objects.get(id=ticket_id)
+            else:
+                ticket = SupportTicket.objects.get(id=ticket_id, user=request.user)
+
+            # Validate the incoming status
+            valid_statuses = ["OPEN", "FOLLOW-UP", "CLOSED"]
+            if new_status.upper() not in valid_statuses:
+                return JsonResponse({"success": False, "message": "Invalid status."})
+
+            ticket.status = new_status.upper()
+            ticket.save()
+            
+            return JsonResponse({"success": True})
+            
+        except SupportTicket.DoesNotExist:
+             return JsonResponse({"success": False, "message": "Ticket not found or unauthorized."})
+        except Exception as e:
+            return JsonResponse({"success": False, "message": str(e)})
+            
+    return JsonResponse({"success": False, "message": "Invalid request method."})

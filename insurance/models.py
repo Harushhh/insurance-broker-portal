@@ -401,6 +401,15 @@ class PolicyMISRecord(models.Model):
     confidence_notes = models.TextField(blank=True, null=True)
     ai_model_name = models.CharField(max_length=100, blank=True, null=True)
 
+    # --- NEW RECONCILIATION FIELDS ---
+    expected_payout = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    actual_payout = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    reconciliation_status = models.CharField(
+        max_length=20,
+        choices=[('PENDING', 'Pending'), ('MATCH', 'Match'), ('DISCREPANCY', 'Discrepancy')],
+        default='PENDING'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
