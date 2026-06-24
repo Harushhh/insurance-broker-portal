@@ -1,12 +1,13 @@
 from pathlib import Path
 import os
 from dotenv import load_dotenv
-import dj_database_url  # <-- ADDED FOR RENDER DEPLOYMENT
+import dj_database_url
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
+# =========================================================
+# BASE SETUP
+# =========================================================
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load environment variables from .env file
 load_dotenv(BASE_DIR / ".env")
 
 # =========================================================
@@ -14,30 +15,27 @@ load_dotenv(BASE_DIR / ".env")
 # =========================================================
 SECRET_KEY = os.getenv("SECRET_KEY", "fallback-secret-key-for-dev")
 
-# Automatically set DEBUG to False if deployed on Render
-DEBUG = 'RENDER' not in os.environ and os.getenv("DEBUG", "False").lower() == "true"
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
-# Allow Render's URL in production, fallback to localhost for dev
-if 'RENDER' in os.environ:
-    ALLOWED_HOSTS = ['*'] # Allows Render domains automatically
-else:
-    ALLOWED_HOSTS = [host.strip() for host in os.getenv("ALLOWED_HOSTS", "127.0.0.1,localhost").split(",")]
-    # Ensure ngrok is always allowed for local tunneling
-    if '.ngrok-free.app' not in ALLOWED_HOSTS:
-        ALLOWED_HOSTS.append('.ngrok-free.app')
-    if '.ngrok-free.dev' not in ALLOWED_HOSTS:
-        ALLOWED_HOSTS.append('.ngrok-free.dev')
+# Railway / Local Hosts
+ALLOWED_HOSTS = os.getenv(
+    "ALLOWED_HOSTS",
+    "127.0.0.1,localhost"
+).split(",")
 
-# Trust secure POST requests from ngrok domains
+# =========================================================
+# CSRF (IMPORTANT FIX FOR 403 ERROR)
+# =========================================================
 CSRF_TRUSTED_ORIGINS = [
-    'https://*.ngrok-free.app',
-    'https://*.ngrok-free.dev',
+    "https://web-production-23c64.up.railway.app",
+    "https://*.up.railway.app",
+    "https://127.0.0.1",
+    "https://localhost",
 ]
 
-# Gemini AI API Key
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-
-# Application definition
+# =========================================================
+# INSTALLED APPS
+# =========================================================
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -45,20 +43,24 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    
-    # --- SWAGGER & API ---
+
+    # API
     'rest_framework',
     'drf_spectacular',
-    'rest_framework_api_key', 
-    
-    # --- LOCAL APPS ---
+    'rest_framework_api_key',
+
+    # LOCAL APPS
     'insurance',
     'config',
 ]
 
+# =========================================================
+# MIDDLEWARE
+# =========================================================
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'whitenoise.middleware.WhiteNoiseMiddleware', # <-- ADDED WHITENOISE HERE
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -69,6 +71,9 @@ MIDDLEWARE = [
 
 ROOT_URLCONF = 'project.urls'
 
+# =========================================================
+# TEMPLATES
+# =========================================================
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
@@ -87,11 +92,16 @@ TEMPLATES = [
 WSGI_APPLICATION = 'project.wsgi.application'
 
 # =========================================================
-# DATABASE (Render + Local Postgres Support)
+# DATABASE (RAILWAY + LOCAL FALLBACK)
 # =========================================================
-# This smart config uses Render's DATABASE_URL if it exists. 
-# If not, it builds a URL from your local .env Postgres variables.
-local_db_url = f"postgres://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST', 'localhost')}:{os.getenv('DB_PORT', '5432')}/{os.getenv('DB_NAME')}" if os.getenv('DB_NAME') else f"sqlite:///{BASE_DIR / 'db.sqlite3'}"
+local_db_url = (
+    f"postgres://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
+    f"@{os.getenv('DB_HOST', 'localhost')}:"
+    f"{os.getenv('DB_PORT', '5432')}/"
+    f"{os.getenv('DB_NAME')}"
+    if os.getenv('DB_NAME')
+    else f"sqlite:///{BASE_DIR / 'db.sqlite3'}"
+)
 
 DATABASES = {
     'default': dj_database_url.config(
@@ -105,18 +115,10 @@ DATABASES = {
 # PASSWORD VALIDATION
 # =========================================================
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
 # =========================================================
@@ -128,36 +130,41 @@ USE_I18N = True
 USE_TZ = True
 
 # =========================================================
-# STATIC FILES (CSS, JavaScript, Images)
+# STATIC FILES (IMPORTANT FOR RAILWAY)
 # =========================================================
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
-STATICFILES_DIRS = [os.path.join(BASE_DIR, 'static')] if os.path.exists(os.path.join(BASE_DIR, 'static')) else []
 
-# Tell WhiteNoise to compress and cache static files in production
+STATICFILES_DIRS = (
+    [os.path.join(BASE_DIR, 'static')]
+    if os.path.exists(os.path.join(BASE_DIR, 'static'))
+    else []
+)
+
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # =========================================================
-# MEDIA UPLOADS & SECURITY OVERRIDES (PDF PREVIEWS)
+# MEDIA FILES
 # =========================================================
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-# ⚠️ CRITICAL FOR MIS REVIEW: 
-# Allows the <object> or <iframe> tag to load PDFs from your own domain 
-# without triggering Django's default Clickjacking protection errors.
+# =========================================================
+# SECURITY
+# =========================================================
 X_FRAME_OPTIONS = 'SAMEORIGIN'
 
-# Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-# Auth Redirects
+# =========================================================
+# AUTH REDIRECTS
+# =========================================================
 LOGIN_URL = "/login/"
-LOGIN_REDIRECT_URL = "/home/"  
+LOGIN_REDIRECT_URL = "/home/"
 LOGOUT_REDIRECT_URL = "/login/"
 
 # =========================================================
-# EMAIL CONFIGURATION
+# EMAIL CONFIG
 # =========================================================
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = os.getenv('EMAIL_HOST')
@@ -167,7 +174,7 @@ EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 
 # =========================================================
-# DRF & SWAGGER (SPECTACULAR) SETTINGS
+# DRF + SWAGGER
 # =========================================================
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
@@ -175,7 +182,7 @@ REST_FRAMEWORK = {
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Insurance Portal API',
-    'DESCRIPTION': 'API documentation for the Insurance Broker Portal',
+    'DESCRIPTION': 'API documentation for Insurance Broker Portal',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
     'SECURITY': [{'ApiKeyAuth': []}],
@@ -185,15 +192,13 @@ SPECTACULAR_SETTINGS = {
                 'type': 'apiKey',
                 'in': 'header',
                 'name': 'Authorization',
-                'description': 'Enter your API key in the format: <b>Api-Key &lt;your-key&gt;</b>'
+                'description': 'Format: Api-Key <your-key>'
             }
         }
     },
 }
 
 # =========================================================
-# LARGE DATA UPLOADS CONFIGURATION
+# FILE UPLOAD LIMIT
 # =========================================================
-# Increase max payload size for bulk API JSON uploads (20 MB)
-# This prevents the 500 error when processing large PapaParse chunks
-DATA_UPLOAD_MAX_MEMORY_SIZE = 20971520
+DATA_UPLOAD_MAX_MEMORY_SIZE = 20971520  # 20 MB
