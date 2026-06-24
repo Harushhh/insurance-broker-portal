@@ -1,5 +1,4 @@
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.models import User, Group
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.http import urlsafe_base64_encode
@@ -45,7 +44,7 @@ from .utils import extract_data_with_gemini
 from .forms import ExtractionFieldForm
 
 # =========================================================
-# PAGE-LEVEL ACCESS GROUPS
+# PAGE-LEVEL ACCESS GROUPS (Retained for legacy UI assignments if needed)
 # =========================================================
 PAGE_GROUPS = [
     "Can_View_Dashboard",
@@ -60,34 +59,31 @@ PAGE_GROUPS = [
 ]
 
 def is_admin(user):
-    return user.is_superuser or user.groups.filter(name="ADMIN").exists()
+    return True # Open access, login completely removed
 
 def can_view_dashboard(user):
-    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Dashboard"]).exists()
-
-def can_view_analysis(user):
-    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Analysis"]).exists()
+    return True # Open access, login completely removed
 
 def can_view_motor_payout(user):
-    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Motor_Payout_Rates"]).exists()
+    return True # Open access, login completely removed
 
 def can_upload(user):
-    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_Upload_CSV"]).exists()
+    return True # Open access, login completely removed
 
 def can_view_rto(user):
-    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_RTO_Dashboard"]).exists()
+    return True # Open access, login completely removed
 
 def can_view_make_model(user):
-    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Make_Model_Dashboard"]).exists()
+    return True # Open access, login completely removed
 
 def can_view_audit_log(user):
-    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Audit_Log"]).exists()
+    return True # Open access, login completely removed
 
 def can_view_grid_management(user):
-    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Grid_Management"]).exists()
+    return True # Open access, login completely removed
 
 def can_view_alias_management(user):
-    return user.is_superuser or user.groups.filter(name__in=["ADMIN", "Can_View_Alias_Management"]).exists()
+    return True # Open access, login completely removed
 
 # =========================================================
 # NA CONFIGURATION & HELPERS
@@ -544,13 +540,9 @@ class RateForm(forms.ModelForm):
 # =========================================================
 # UNIFIED HOME DASHBOARD
 # =========================================================
-@login_required
 def home_dashboard(request):
-    is_admin_user = request.user.is_superuser or request.user.groups.filter(name="ADMIN").exists()
+    is_admin_user = True
     qs = PolicyMISRecord.objects.select_related("source_document", "source_document__uploaded_by")
-
-    if not is_admin_user:
-        qs = qs.filter(source_document__uploaded_by=request.user)
 
     total_cases = qs.count()
     total_premium = qs.aggregate(total=Sum('gross_premium'))['total'] or 0
@@ -590,8 +582,6 @@ def home_dashboard(request):
 # NEW ENTERPRISE STREAMING CSV UPLOAD & API CHUNKING LOGIC
 # ---------------------------------------------------------
 
-@login_required
-@user_passes_test(can_upload)
 def import_data_view(request):
     """
     Renders the beautiful SaaS upload interface. 
@@ -833,8 +823,6 @@ def api_upload_chunk(request):
 # -------------------------
 # Dashboard (GROUPED view)
 # -------------------------
-@login_required
-@user_passes_test(can_view_dashboard)
 def dashboard(request):
     qs = RateMaster.objects.select_related(
         "group", "product", "sub_product", "policy_type", "fuel_type",
@@ -1078,14 +1066,11 @@ def dashboard(request):
 # -------------------------
 # Export UNGROUPED to CSV
 # -------------------------
-@login_required
-@user_passes_test(can_view_dashboard)
 def export_rates_xlsx(request):
     qs = RateMaster.objects.select_related(
         "product", "sub_product", "policy_type", "fuel_type", "make_model_class", "is_ncb", "is_cpa", "is_zd"
     ).all()
 
-    # Apply identical filtering logic as the dashboard so exports match what the user sees
     q = (request.GET.get("q") or "").strip()
     status_filter = (request.GET.get("status") or "").strip()
     is_deleted_filter = (request.GET.get("is_deleted") or "").strip().upper()
@@ -1180,7 +1165,6 @@ def export_rates_xlsx(request):
 
     qs = qs.order_by("-id")
 
-    # Set up the CSV response
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="rates_export.csv"'
 
@@ -1227,8 +1211,6 @@ def export_rates_xlsx(request):
 # -------------------------
 # Alias / Field Management Configurator
 # -------------------------
-@login_required
-@user_passes_test(can_view_alias_management)
 def field_configurator(request):
     if request.method == 'POST':
         form = ExtractionFieldForm(request.POST)
@@ -1245,8 +1227,6 @@ def field_configurator(request):
         'form': form
     })
 
-@login_required
-@user_passes_test(can_view_alias_management)
 def delete_field(request, pk):
     if request.method == 'POST':
         field = get_object_or_404(ExtractionField, pk=pk)
@@ -1256,8 +1236,6 @@ def delete_field(request, pk):
 # -------------------------
 # Edit Field (Configurations & Synonyms)
 # -------------------------
-@login_required
-@user_passes_test(can_view_alias_management)
 def edit_field(request, pk):
     field_obj = get_object_or_404(ExtractionField, pk=pk)
     
@@ -1292,8 +1270,6 @@ def edit_field(request, pk):
 # -------------------------
 # Upload & Extract PDF / Image
 # -------------------------
-@login_required
-@user_passes_test(can_view_alias_management)
 def upload_extract_pdf(request):
     msg = ""
     error = ""
@@ -1310,7 +1286,7 @@ def upload_extract_pdf(request):
                 try:
                     doc_obj = upload_form.save(commit=False)
                     doc_obj.original_filename = doc_obj.uploaded_file.name
-                    doc_obj.uploaded_by = request.user
+                    doc_obj.uploaded_by = User.objects.first() # Safe default fallback
                     doc_obj.mime_type = getattr(doc_obj.uploaded_file, "content_type", "") or ""
                     doc_obj.status = PolicyDocumentUpload.STATUS_PENDING
                     doc_obj.save()
@@ -1323,7 +1299,7 @@ def upload_extract_pdf(request):
         else:
             error = "⚠️ Please correct the upload form."
 
-    documents = PolicyDocumentUpload.objects.select_related("uploaded_by").order_by("-created_at")[:20]
+    documents = PolicyDocumentUpload.objects.order_by("-created_at")[:20]
     latest_document = documents[0] if documents else None
 
     if latest_document and latest_document.status == PolicyDocumentUpload.STATUS_COMPLETED:
@@ -1340,8 +1316,6 @@ def upload_extract_pdf(request):
 # -------------------------
 # My MIS
 # -------------------------
-@login_required
-@user_passes_test(can_view_alias_management)
 def my_mis(request):
     qs = PolicyMISRecord.objects.select_related("source_document").order_by("-created_at")
 
@@ -1372,10 +1346,8 @@ def my_mis(request):
     })
 
 # -------------------------
-# User Management (ADMIN only)
+# User Management
 # -------------------------
-@login_required
-@user_passes_test(is_admin)
 def user_management(request):
     Group.objects.get_or_create(name="ADMIN")
     for group_name in PAGE_GROUPS:
@@ -1439,8 +1411,6 @@ def user_management(request):
             u = User.objects.get(id=user_id)
             if u.is_superuser:
                 error = "⚠️ You cannot delete a Super Admin account."
-            elif u == request.user:
-                error = "⚠️ You cannot delete your own account."
             else:
                 uname = u.username
                 u.delete()
@@ -1471,8 +1441,6 @@ def user_management(request):
 # -------------------------
 # RTO DASHBOARD
 # -------------------------
-@login_required
-@user_passes_test(can_view_rto)
 def rto_dashboard(request):
     qs = RTOMaster.objects.all().order_by("rto_name")
 
@@ -1494,11 +1462,9 @@ def rto_dashboard(request):
             "rto_names": rto_names,
             "cluster_q": cluster_q
         },
-        "is_admin": is_admin(request.user)
+        "is_admin": True
     })
 
-@login_required
-@user_passes_test(can_view_rto)
 def export_rto_xlsx(request):
     qs = RTOMaster.objects.all().order_by("rto_name")
 
@@ -1528,8 +1494,6 @@ def export_rto_xlsx(request):
 # -------------------------
 # MAKE MODEL DASHBOARD
 # -------------------------
-@login_required
-@user_passes_test(can_view_make_model)
 def make_model_dashboard(request):
     qs = MakeModelMaster.objects.all().order_by("make_model_name")
 
@@ -1553,11 +1517,9 @@ def make_model_dashboard(request):
             "make_model_names": make_model_names,
             "cluster_q": cluster_q
         },
-        "is_admin": is_admin(request.user)
+        "is_admin": True
     })
 
-@login_required
-@user_passes_test(can_view_make_model)
 def export_make_model_xlsx(request):
     qs = MakeModelMaster.objects.all().order_by("make_model_name")
 
@@ -1587,8 +1549,6 @@ def export_make_model_xlsx(request):
 # -------------------------
 # Edit Master Tables
 # -------------------------
-@login_required
-@user_passes_test(is_admin)
 def edit_rto(request, pk):
     obj = RTOMaster.objects.get(id=pk)
     if request.method == "POST":
@@ -1605,8 +1565,6 @@ def edit_rto(request, pk):
         "back_url": "rto_dashboard"
     })
 
-@login_required
-@user_passes_test(is_admin)
 def edit_make_model(request, pk):
     obj = MakeModelMaster.objects.get(id=pk)
     if request.method == "POST":
@@ -1626,8 +1584,6 @@ def edit_make_model(request, pk):
 # -------------------------
 # Edit Rate Form
 # -------------------------
-@login_required
-@user_passes_test(is_admin)
 def edit_rate(request, group_id):
     records = RateMaster.objects.filter(Q(group_id=group_id) | Q(id=group_id))
     if not records.exists():
@@ -1667,7 +1623,7 @@ def edit_rate(request, group_id):
             records.update(**update_data)
 
             AuditLog.objects.create(
-                user=request.user,
+                user=User.objects.first(),
                 action="MANUAL EDIT",
                 details=f"Edited Group/Record ID {group_id} via form. Updated {record_count} rows."
             )
@@ -1685,8 +1641,6 @@ def edit_rate(request, group_id):
 # -------------------------
 # BULK UPDATE RATES
 # -------------------------
-@login_required
-@user_passes_test(is_admin)
 def bulk_update_rates(request):
     if request.method == "POST":
         group_ids = request.POST.getlist("selected_groups")
@@ -1726,7 +1680,7 @@ def bulk_update_rates(request):
         records.update(**{field_name: parsed_value})
 
         AuditLog.objects.create(
-            user=request.user,
+            user=User.objects.first(),
             action="BULK UPDATE",
             details=f"Updated {record_count} rows. Changed '{field_name}' to '{new_value}'."
         )
@@ -1736,8 +1690,6 @@ def bulk_update_rates(request):
 # -------------------------
 # MOTOR PAYOUT RATES
 # -------------------------
-@login_required
-@user_passes_test(can_view_motor_payout)
 def motor_payout_rates(request):
     qs = RateMaster.objects.select_related(
         "product", "sub_product", "policy_type", "fuel_type",
@@ -1769,7 +1721,6 @@ def motor_payout_rates(request):
             (Q(to_date__gte=target_date) | Q(to_date__isnull=True))
         )
 
-    # ==== BULLETPROOF STRING OR ID QUERY FALLBACKS ====
     if product:
         if str(product).isdigit():
             qs = qs.filter(product_id=product)
@@ -1785,7 +1736,6 @@ def motor_payout_rates(request):
         else:
             is_na_equivalent = False
             for mapped_classes in NA_MAKE_MODEL_MAP.values():
-                # Case insensitive match against dict values
                 if clean_mmc.lower() in [c.lower() for c in mapped_classes]:
                     is_na_equivalent = True
                     break
@@ -1806,7 +1756,6 @@ def motor_payout_rates(request):
             qs = qs.filter(fuel_type_id=fuel)
         else:
             qs = qs.filter(fuel_type__name__iexact=str(fuel).strip())
-    # ==================================================
 
     matching_rto_names = []
     if rto_code:
@@ -1820,7 +1769,6 @@ def motor_payout_rates(request):
                 q_rto |= Q(new_rto_list__icontains=rto_name)
             qs = qs.filter(q_rto)
         else:
-            # Fallback instead of qs.none()
             qs = qs.filter(new_rto_list__icontains=rto_code.strip())
 
     matching_make_groups = []
@@ -1836,7 +1784,6 @@ def motor_payout_rates(request):
                     q_make |= Q(new_vehicle_makes__icontains=group_name.strip())
             qs = qs.filter(q_make)
         else:
-            # Fallback instead of qs.none()
             qs = qs.filter(new_vehicle_makes__icontains=make_names.strip())
 
     if cc and cc.isdigit():
@@ -1967,8 +1914,6 @@ def motor_payout_rates(request):
 # -------------------------
 # POLICY LOCK CHECKER
 # -------------------------
-@login_required
-@user_passes_test(can_view_motor_payout)
 def policy_lock_checker(request):
     has_searched = bool(request.GET)
 
@@ -1981,7 +1926,7 @@ def policy_lock_checker(request):
         
         if flat_params:
             AuditLog.objects.create(
-                user=request.user,
+                user=User.objects.first(),
                 action="MOTOR_POINTS_SEARCH",
                 details=str(flat_params)
             )
@@ -2019,7 +1964,6 @@ def policy_lock_checker(request):
             (Q(to_date__gte=target_date) | Q(to_date__isnull=True))
         )
 
-    # ==== BULLETPROOF STRING OR ID QUERY FALLBACKS ====
     if product:
         if str(product).isdigit():
             qs = qs.filter(product_id=product)
@@ -2035,7 +1979,6 @@ def policy_lock_checker(request):
         else:
             is_na_equivalent = False
             for mapped_classes in NA_MAKE_MODEL_MAP.values():
-                # Case insensitive match against dict values
                 if clean_mmc.lower() in [c.lower() for c in mapped_classes]:
                     is_na_equivalent = True
                     break
@@ -2056,7 +1999,6 @@ def policy_lock_checker(request):
             qs = qs.filter(fuel_type_id=fuel)
         else:
             qs = qs.filter(fuel_type__name__iexact=str(fuel).strip())
-    # ==================================================
 
     matching_rto_names = []
     if rto_code:
@@ -2071,7 +2013,6 @@ def policy_lock_checker(request):
                 q_rto |= Q(new_rto_list__icontains=rto_name)
             qs = qs.filter(q_rto)
         else:
-            # Fallback instead of qs.none()
             qs = qs.filter(new_rto_list__icontains=rto_code.strip())
 
     matching_make_groups = []
@@ -2088,7 +2029,6 @@ def policy_lock_checker(request):
                     q_make |= Q(new_vehicle_makes__icontains=group_name.strip())
             qs = qs.filter(q_make)
         else:
-            # Fallback instead of qs.none()
             qs = qs.filter(new_vehicle_makes__icontains=make_names.strip())
 
     if cc:
@@ -2244,8 +2184,6 @@ def policy_lock_checker(request):
 # -------------------------
 # LOCK POLICY
 # -------------------------
-@login_required
-@user_passes_test(can_view_motor_payout)
 def lock_unlock_policy(request, rate_id):
     if request.method != "POST":
         return JsonResponse({"success": False, "message": "Invalid request."})
@@ -2293,7 +2231,7 @@ def lock_unlock_policy(request, rate_id):
             "po_rate": po_rate,
             "po_flat_amount": rate_obj.po_flat_amount,
             "add_tnc": rate_obj.add_tnc,
-            "locked_by": request.user,
+            "locked_by": User.objects.first(),
             "rto_code": request.POST.get("rto_code", ""),
             "make_name": request.POST.get("make_names", ""),
             "fuel": request.POST.get("fuel", ""),
@@ -2318,7 +2256,7 @@ def lock_unlock_policy(request, rate_id):
     obj.sc = request.POST.get("sc", "")
     obj.mfg_year = request.POST.get("mfg_year", "")
     obj.status = "LOCKED"
-    obj.locked_by = request.user
+    obj.locked_by = User.objects.first()
     obj.locked_at = timezone.now()
     obj.save()
 
@@ -2327,8 +2265,6 @@ def lock_unlock_policy(request, rate_id):
 # -------------------------
 # LOCKED POLICY DASHBOARD
 # -------------------------
-@login_required
-@user_passes_test(can_view_motor_payout)
 def locked_policy_dashboard(request):
     qs = LockedPolicy.objects.select_related(
         "source_rate", 
@@ -2412,8 +2348,6 @@ def direct_password_reset(request):
 # -------------------------
 # EXECUTIVE ANALYSIS DASHBOARD
 # -------------------------
-@login_required
-@user_passes_test(can_view_analysis)
 def business_analysis(request):
     qs = RateMaster.objects.filter(
         is_deleted="NO",
@@ -2455,8 +2389,6 @@ def business_analysis(request):
 # -------------------------
 # AUDIT TRAIL LOGS
 # -------------------------
-@login_required
-@user_passes_test(can_view_audit_log)
 def audit_logs(request):
     logs = AuditLog.objects.all().order_by("-timestamp")[:200]
     return render(request, "audit_log.html", {"logs": logs})
@@ -2480,8 +2412,6 @@ def send_email_background(subject, message, recipient_list):
 # -------------------------
 # GRID MANAGEMENT
 # -------------------------
-@login_required
-@user_passes_test(can_view_grid_management)
 def grid_management(request):
     if request.method == "POST":
         action = request.POST.get("action")
@@ -2504,11 +2434,11 @@ def grid_management(request):
                 insurer_name=insurer_name,
                 remarks=remarks,
                 uploaded_file=uploaded_file,
-                uploaded_by=request.user,
+                uploaded_by=User.objects.first(),
                 status="PENDING"
             )
 
-            uploader_name = request.user.username
+            uploader_name = "System User"
             subject = f"🔔 New Grid Uploaded: {insurer_name}"
             message = (
                 f"Hello,\n\n"
@@ -2533,8 +2463,6 @@ def grid_management(request):
 # -------------------------
 # MOTOR POINTS AUDIT LOGS
 # -------------------------
-@login_required
-@user_passes_test(can_view_motor_payout)
 def motor_points_audit_logs(request):
     qs = AuditLog.objects.filter(action="MOTOR_POINTS_SEARCH").select_related("user").order_by("-timestamp")
     
@@ -2643,8 +2571,6 @@ class ExportRatesAPIView(generics.ListAPIView):
 # -------------------------
 # MIS REVIEW 
 # -------------------------
-@login_required
-@user_passes_test(can_view_alias_management)
 def mis_review(request, pk):
     record = get_object_or_404(PolicyMISRecord.objects.select_related('source_document'), pk=pk)
     
@@ -2697,20 +2623,13 @@ def mis_review(request, pk):
 # =========================================================
 # TICKETING SYSTEM VIEWS
 # =========================================================
-@login_required
 def ticket_dashboard(request):
-    # Admins see all tickets, regular users see only their own
-    if is_admin(request.user):
-        tickets = SupportTicket.objects.select_related('user').all()
-    else:
-        tickets = SupportTicket.objects.filter(user=request.user).select_related('user')
-        
+    tickets = SupportTicket.objects.select_related('user').all()
     return render(request, "ticket_dashboard.html", {
         "tickets": tickets
     })
 
-@login_required
-@csrf_exempt # Using csrf_exempt for the API endpoint to ensure the JS fetch works smoothly
+@csrf_exempt 
 def create_ticket_api(request):
     if request.method == "POST":
         try:
@@ -2721,11 +2640,6 @@ def create_ticket_api(request):
             if not remarks:
                 return JsonResponse({"success": False, "message": "Remarks are required."})
 
-            # =======================================================
-            # MAGIC BACKEND TRANSLATOR (FOOLPROOF FIX)
-            # Instantly swaps the UI Database IDs for the real Names
-            # =======================================================
-            
             # 1. Translate Product ID to Name
             if form_payload.get("Product") and str(form_payload["Product"]).isdigit():
                 obj = ProductMaster.objects.filter(id=int(form_payload["Product"])).first()
@@ -2745,11 +2659,9 @@ def create_ticket_api(request):
             if form_payload.get("Fuel") and str(form_payload["Fuel"]).isdigit():
                 obj = FuelTypeMaster.objects.filter(id=int(form_payload["Fuel"])).first()
                 if obj: form_payload["Fuel"] = obj.name
-                
-            # =======================================================
 
             ticket = SupportTicket.objects.create(
-                user=request.user,
+                user=User.objects.first(), # Safe default fallback
                 remarks=remarks,
                 form_payload=form_payload
             )
@@ -2759,7 +2671,6 @@ def create_ticket_api(request):
             
     return JsonResponse({"success": False, "message": "Invalid request method."})
 
-@login_required
 @csrf_exempt 
 def update_ticket_status(request):
     if request.method == "POST":
@@ -2771,13 +2682,8 @@ def update_ticket_status(request):
             if not ticket_id or not new_status:
                 return JsonResponse({"success": False, "message": "Ticket ID and Status are required."})
 
-            # Security: Admins can update any ticket, regular users only their own
-            if is_admin(request.user):
-                ticket = SupportTicket.objects.get(id=ticket_id)
-            else:
-                ticket = SupportTicket.objects.get(id=ticket_id, user=request.user)
+            ticket = SupportTicket.objects.get(id=ticket_id)
 
-            # Validate the incoming status
             valid_statuses = ["OPEN", "FOLLOW-UP", "CLOSED"]
             if new_status.upper() not in valid_statuses:
                 return JsonResponse({"success": False, "message": "Invalid status."})
@@ -2788,7 +2694,7 @@ def update_ticket_status(request):
             return JsonResponse({"success": True})
             
         except SupportTicket.DoesNotExist:
-             return JsonResponse({"success": False, "message": "Ticket not found or unauthorized."})
+             return JsonResponse({"success": False, "message": "Ticket not found."})
         except Exception as e:
             return JsonResponse({"success": False, "message": str(e)})
             

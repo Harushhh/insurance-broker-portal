@@ -5,15 +5,15 @@ from django.conf.urls.static import static
 from . import views
 
 urlpatterns = [
-    # Home / Login
-    path("", auth_views.LoginView.as_view(template_name="registration/login.html"), name="home"),
+    # Changed root URL to load the Home Dashboard directly without a login screen
+    path("", views.home_dashboard, name="home"),
 
-    # NEW: Unified Home Page Dashboard
+    # Unified Home Page Dashboard
     path("home/", views.home_dashboard, name="home_dashboard"),
 
     # Core portal pages
     path("upload/", views.import_data_view, name="upload"),
-    path("api/upload-chunk/", views.api_upload_chunk, name="api_upload_chunk"), # NEW: Streaming CSV Upload API
+    path("api/upload-chunk/", views.api_upload_chunk, name="api_upload_chunk"), # Streaming CSV Upload API
     path("dashboard/", views.dashboard, name="dashboard"),
     path("edit-rate/<str:group_id>/", views.edit_rate, name="edit_rate"),
     path("bulk-update/", views.bulk_update_rates, name="bulk_update_rates"),
@@ -26,7 +26,7 @@ urlpatterns = [
     # Ticketing System
     path('tickets/', views.ticket_dashboard, name='ticket_dashboard'),
     path('api/create-ticket/', views.create_ticket_api, name='create_ticket_api'),
-    path('api/update-ticket-status/', views.update_ticket_status, name='update_ticket_status'), # <-- ADDED THIS LINE
+    path('api/update-ticket-status/', views.update_ticket_status, name='update_ticket_status'),
 
     # AI OCR & PDF extraction Pipeline
     path("upload-extract-pdf/", views.upload_extract_pdf, name="upload_extract_pdf"),
@@ -54,7 +54,7 @@ urlpatterns = [
     path("rto/edit/<int:pk>/", views.edit_rto, name="edit_rto"),
     path("make-model/edit/<int:pk>/", views.edit_make_model, name="edit_make_model"),
 
-    # Password reset
+    # Password reset (kept as fallbacks if needed)
     path("password-reset/", views.direct_password_reset, name="password_reset"),
     path(
         "password-reset/done/",
@@ -80,7 +80,6 @@ urlpatterns = [
     path('api/v1/export-rates/', views.ExportRatesAPIView.as_view(), name='api-export-rates'),
 ]
 
-# --- THIS FIXES THE PDF PREVIEW ---
 # Tells Django's development server how to route and serve media files safely
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

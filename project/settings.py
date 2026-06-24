@@ -157,11 +157,11 @@ X_FRAME_OPTIONS = 'SAMEORIGIN'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # =========================================================
-# AUTH REDIRECTS
+# AUTH REDIRECTS (Pointed away from deprecated URL paths)
 # =========================================================
-LOGIN_URL = "/login/"
+LOGIN_URL = "/home/"
 LOGIN_REDIRECT_URL = "/home/"
-LOGOUT_REDIRECT_URL = "/login/"
+LOGOUT_REDIRECT_URL = "/home/"
 
 # =========================================================
 # EMAIL CONFIG
