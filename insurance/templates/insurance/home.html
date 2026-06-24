@@ -70,162 +70,242 @@
     
     /* Center chart constraint */
     .chart-wrapper { width: 100%; height: 180px; position: relative; }
+
+    /* Sidebar and Layout adjustments */
+    .sidebar { background: #1a202c; }
+    .nav-link:hover { background: #2d3748; color: #63b3ed; }
 </style>
 
-<div class="container-fluid py-5 mx-auto" style="max-width: 1400px; padding-left: 2rem; padding-right: 2rem;">
-    
-    <div class="d-flex justify-content-between align-items-center mb-5">
+<div class="flex h-screen overflow-hidden">
+    <aside class="w-64 sidebar text-white flex flex-col justify-between flex-shrink-0 z-10 shadow-lg">
         <div>
-            <h2 class="mb-1" style="font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">Welcome back, {{ request.user.first_name|default:request.user.username }}!</h2>
-            <p class="text-muted mb-0" style="font-size: 15px;">
-                {% if is_admin_user %}
-                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 me-2 rounded-pill px-3 py-1">Admin View</span> 
-                    Showing aggregate data for all business units.
-                {% else %}
-                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 me-2 rounded-pill px-3 py-1">My View</span> 
-                    Showing your personal extraction metrics.
-                {% endif %}
-            </p>
-        </div>
-        <div>
-            <a href="{% url 'upload_extract_pdf' %}" class="btn btn-primary px-4 py-2" style="border-radius: 8px; font-weight: 500; box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2);"><i class="bi bi-cloud-upload me-2"></i>Upload Document</a>
-        </div>
-    </div>
+            <div class="h-20 flex items-center px-6 border-b border-gray-700">
+                <div class="flex items-center space-x-3">
+                    <i class="fas fa-shield-alt text-2xl text-blue-400"></i>
+                    <span class="text-xl font-bold tracking-wider text-white">Arham Secure</span>
+                </div>
+            </div>
 
-    <div class="row g-4 mb-5">
+            <nav class="mt-6 px-4 space-y-1 overflow-y-auto" style="max-height: calc(100vh - 160px);">
+                <a href="{% url 'home_dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors bg-gray-800 text-blue-400">
+                    <i class="fas fa-home mr-3 text-lg"></i> Dashboard
+                </a>
+                <a href="{% url 'upload' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-upload mr-3 text-lg"></i> Import Rate Master
+                </a>
+                <a href="{% url 'dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-th-large mr-3 text-lg"></i> Rate Master Matrix
+                </a>
+                <a href="{% url 'motor_payout_rates' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-calculator mr-3 text-lg"></i> Quote Simulator
+                </a>
+                <a href="{% url 'policy_lock_checker' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-lock mr-3 text-lg"></i> Policy Lock Checker
+                </a>
+                <a href="{% url 'locked_policy_dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-history mr-3 text-lg"></i> Locked Policies Log
+                </a>
+                <a href="{% url 'business_analysis' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-chart-line mr-3 text-lg"></i> Payout Analytics
+                </a>
+                <a href="{% url 'grid_management' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-folder-open mr-3 text-lg"></i> Grid Management
+                </a>
+                <a href="{% url 'ticket_dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-ticket-alt mr-3 text-lg"></i> Ticket Support
+                </a>
+                <a href="{% url 'upload_extract_pdf' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-brain mr-3 text-lg"></i> AI OCR Pipeline
+                </a>
+                <a href="{% url 'my_mis' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-file-invoice-dollar mr-3 text-lg"></i> Policy MIS Register
+                </a>
+                <a href="{% url 'field_configurator' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-cogs mr-3 text-lg"></i> Extraction Configurator
+                </a>
+                <a href="{% url 'rto_dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-map-marked-alt mr-3 text-lg"></i> RTO Master Data
+                </a>
+                <a href="{% url 'make_model_dashboard' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-truck-pickup mr-3 text-lg"></i> Make/Model Master Data
+                </a>
+                <a href="{% url 'user_management' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-users-cog mr-3 text-lg"></i> User Access Control
+                </a>
+                <a href="{% url 'audit_logs' %}" class="nav-link flex items-center px-4 py-3 text-sm font-medium rounded-lg transition-colors text-gray-300">
+                    <i class="fas fa-clipboard-list mr-3 text-lg"></i> Audit Database Logs
+                </a>
+            </nav>
+        </div>
         
-        <div class="col-xl-4 col-md-6">
-            <div class="dash-card p-4 d-flex flex-column justify-content-between">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <p class="text-uppercase mb-2" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Total Cases Processed</p>
-                        <h2 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 36px; letter-spacing: -0.02em;">{{ total_cases }}</h2>
+        <div class="p-4 border-t border-gray-700 mx-2 mb-2">
+            <div class="flex items-center space-x-3 px-2 py-2 bg-gray-800 rounded-lg">
+                <div class="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center font-bold text-white uppercase">
+                    R
+                </div>
+                <div class="flex flex-col overflow-hidden">
+                    <span class="text-sm font-semibold text-white">System Root</span>
+                    <span class="text-xs text-gray-400 truncate">Public Access Mode</span>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <main class="flex-1 overflow-y-auto bg-gray-50 p-10 h-screen">
+        
+        <div class="d-flex justify-content-between align-items-center mb-5 border-b pb-6">
+            <div>
+                <h2 class="mb-1" style="font-weight: 700; color: #0f172a; letter-spacing: -0.02em;">Welcome back, {{ request.user.first_name|default:request.user.username }}!</h2>
+                <p class="text-muted mb-0" style="font-size: 15px;">
+                    {% if is_admin_user %}
+                        <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 me-2 rounded-pill px-3 py-1">Admin View</span> 
+                        Showing aggregate data for all business units.
+                    {% else %}
+                        <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 me-2 rounded-pill px-3 py-1">My View</span> 
+                        Showing your personal extraction metrics.
+                    {% endif %}
+                </p>
+            </div>
+            <div>
+                <a href="{% url 'upload_extract_pdf' %}" class="btn btn-primary px-4 py-2" style="border-radius: 8px; font-weight: 500; box-shadow: 0 4px 12px rgba(13, 110, 253, 0.2);"><i class="bi bi-cloud-upload me-2"></i>Upload Document</a>
+            </div>
+        </div>
+
+        <div class="row g-4 mb-5">
+            
+            <div class="col-xl-4 col-md-6">
+                <div class="dash-card p-4 d-flex flex-column justify-content-between">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <p class="text-uppercase mb-2" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Total Cases Processed</p>
+                            <h2 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 36px; letter-spacing: -0.02em;">{{ total_cases }}</h2>
+                        </div>
+                        <div class="icon-box bg-gradient-primary shadow-sm">
+                            <i class="bi bi-file-earmark-check"></i>
+                        </div>
                     </div>
-                    <div class="icon-box bg-gradient-primary shadow-sm">
-                        <i class="bi bi-file-earmark-check"></i>
+                    <div class="mt-4 pt-3" style="border-top: 1px solid #f1f5f9;">
+                        <span class="text-success" style="font-weight: 600; font-size: 13px;"><i class="bi bi-arrow-up-right me-1"></i>Active</span>
+                        <span class="text-muted ms-2" style="font-size: 13px;">Extraction pipeline operational</span>
                     </div>
                 </div>
-                <div class="mt-4 pt-3" style="border-top: 1px solid #f1f5f9;">
-                    <span class="text-success" style="font-weight: 600; font-size: 13px;"><i class="bi bi-arrow-up-right me-1"></i>Active</span>
-                    <span class="text-muted ms-2" style="font-size: 13px;">Extraction pipeline operational</span>
+            </div>
+
+            <div class="col-xl-4 col-md-6">
+                <div class="dash-card p-4 d-flex flex-column justify-content-between">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <p class="text-uppercase mb-2" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Total Gross Premium</p>
+                            <h2 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 36px; letter-spacing: -0.02em;">₹{{ total_premium|floatformat:2 }}</h2>
+                        </div>
+                        <div class="icon-box bg-gradient-success shadow-sm">
+                            <i class="bi bi-cash-stack"></i>
+                        </div>
+                    </div>
+                    <div class="mt-4 pt-3" style="border-top: 1px solid #f1f5f9;">
+                        <span class="text-success" style="font-weight: 600; font-size: 13px;"><i class="bi bi-check-circle-fill me-1"></i>Verified</span>
+                        <span class="text-muted ms-2" style="font-size: 13px;">Extracted & logged in MIS</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-xl-4 col-md-12">
+                <div class="dash-card p-4 d-flex flex-column">
+                    
+                    <div class="d-flex justify-content-between align-items-start mb-2">
+                        <div>
+                            <p class="text-uppercase mb-1" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Product Mix</p>
+                            <h3 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 24px; letter-spacing: -0.02em;">{{ total_cases }} <span style="font-size: 14px; color:#64748b; font-weight:500;">Total</span></h3>
+                        </div>
+                        <div class="icon-box bg-gradient-warning shadow-sm">
+                            <i class="bi bi-pie-chart"></i>
+                        </div>
+                    </div>
+                    
+                    <div class="chart-wrapper d-flex justify-content-center align-items-center mt-3">
+                        <canvas id="productMixChart"></canvas>
+                    </div>
+
+                    <div class="d-flex justify-content-center align-items-center mt-4 gap-4" style="font-size: 14px;">
+                        <div class="d-flex align-items-center">
+                            <span style="display: inline-block; width: 12px; height: 12px; background-color: #2563eb; border-radius: 4px; margin-right: 8px;"></span>
+                            <span class="text-muted" style="font-weight: 500;">Motor</span>
+                            <strong class="ms-2" style="color: #0f172a;">{{ motor_count|default:"0" }}</strong>
+                        </div>
+                        <div class="d-flex align-items-center">
+                            <span style="display: inline-block; width: 12px; height: 12px; background-color: #059669; border-radius: 4px; margin-right: 8px;"></span>
+                            <span class="text-muted" style="font-weight: 500;">Health</span>
+                            <strong class="ms-2" style="color: #0f172a;">{{ health_count|default:"0" }}</strong>
+                        </div>
+                    </div>
+                    
                 </div>
             </div>
         </div>
 
-        <div class="col-xl-4 col-md-6">
-            <div class="dash-card p-4 d-flex flex-column justify-content-between">
-                <div class="d-flex justify-content-between align-items-start">
-                    <div>
-                        <p class="text-uppercase mb-2" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Total Gross Premium</p>
-                        <h2 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 36px; letter-spacing: -0.02em;">₹{{ total_premium|floatformat:2 }}</h2>
-                    </div>
-                    <div class="icon-box bg-gradient-success shadow-sm">
-                        <i class="bi bi-cash-stack"></i>
-                    </div>
-                </div>
-                <div class="mt-4 pt-3" style="border-top: 1px solid #f1f5f9;">
-                    <span class="text-success" style="font-weight: 600; font-size: 13px;"><i class="bi bi-check-circle-fill me-1"></i>Verified</span>
-                    <span class="text-muted ms-2" style="font-size: 13px;">Extracted & logged in MIS</span>
-                </div>
+        <div class="table-card">
+            <div class="bg-white py-4 px-4 border-bottom d-flex justify-content-between align-items-center">
+                <h5 class="mb-0" style="font-weight: 700; color: #0f172a; font-size: 18px;">Recent Activity</h5>
+                <a href="{% url 'my_mis' %}" class="btn btn-sm btn-light border px-3 py-2" style="font-weight: 500; border-radius: 8px; color: #475569;">View All MIS</a>
             </div>
-        </div>
-
-        <div class="col-xl-4 col-md-12">
-            <div class="dash-card p-4 d-flex flex-column">
-                
-                <div class="d-flex justify-content-between align-items-start mb-2">
-                    <div>
-                        <p class="text-uppercase mb-1" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Product Mix</p>
-                        <h3 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 24px; letter-spacing: -0.02em;">{{ total_cases }} <span style="font-size: 14px; color:#64748b; font-weight:500;">Total</span></h3>
-                    </div>
-                    <div class="icon-box bg-gradient-warning shadow-sm">
-                        <i class="bi bi-pie-chart"></i>
-                    </div>
-                </div>
-                
-                <div class="chart-wrapper d-flex justify-content-center align-items-center mt-3">
-                    <canvas id="productMixChart"></canvas>
-                </div>
-
-                <div class="d-flex justify-content-center align-items-center mt-4 gap-4" style="font-size: 14px;">
-                    <div class="d-flex align-items-center">
-                        <span style="display: inline-block; width: 12px; height: 12px; background-color: #2563eb; border-radius: 4px; margin-right: 8px;"></span>
-                        <span class="text-muted" style="font-weight: 500;">Motor</span>
-                        <strong class="ms-2" style="color: #0f172a;">{{ motor_count|default:"0" }}</strong>
-                    </div>
-                    <div class="d-flex align-items-center">
-                        <span style="display: inline-block; width: 12px; height: 12px; background-color: #059669; border-radius: 4px; margin-right: 8px;"></span>
-                        <span class="text-muted" style="font-weight: 500;">Health</span>
-                        <strong class="ms-2" style="color: #0f172a;">{{ health_count|default:"0" }}</strong>
-                    </div>
-                </div>
-                
-            </div>
-        </div>
-    </div>
-
-    <div class="table-card">
-        <div class="bg-white py-4 px-4 border-bottom d-flex justify-content-between align-items-center">
-            <h5 class="mb-0" style="font-weight: 700; color: #0f172a; font-size: 18px;">Recent Activity</h5>
-            <a href="{% url 'my_mis' %}" class="btn btn-sm btn-light border px-3 py-2" style="font-weight: 500; border-radius: 8px; color: #475569;">View All MIS</a>
-        </div>
-        <div class="table-responsive">
-            <table class="table-modern">
-                <thead>
-                    <tr>
-                        <th>Date Processed</th>
-                        <th>Insured Name</th>
-                        <th>Insurer</th>
-                        <th>Premium</th>
-                        {% if is_admin_user %}
-                        <th>Uploaded By</th>
-                        {% endif %}
-                        <th class="text-end">Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for record in recent_activity %}
-                    <tr>
-                        <td>
-                            <span style="color: #475569; font-weight: 500;">{{ record.created_at|date:"M d, Y" }}</span><br>
-                            <span style="color: #94a3b8; font-size: 12px;">{{ record.created_at|time:"H:i A" }}</span>
-                        </td>
-                        <td style="color: #0f172a; font-weight: 600;">{{ record.insured_name|default:"--" }}</td>
-                        <td>
-                            <span style="background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; color: #475569;">
-                                {{ record.insurer_name|default:"--" }}
-                            </span>
-                        </td>
-                        <td class="text-success" style="font-weight: 700;">{% if record.gross_premium %}₹{{ record.gross_premium }}{% else %}--{% endif %}</td>
-                        
-                        {% if is_admin_user %}
-                        <td>
-                            <div class="d-flex align-items-center">
-                                <div style="width: 28px; height: 28px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #475569; margin-right: 8px;">
-                                    {{ record.source_document.uploaded_by.username|default:"S"|make_list|first|upper }}
+            <div class="table-responsive">
+                <table class="table-modern">
+                    <thead>
+                        <tr>
+                            <th>Date Processed</th>
+                            <th>Insured Name</th>
+                            <th>Insurer</th>
+                            <th>Premium</th>
+                            {% if is_admin_user %}
+                            <th>Uploaded By</th>
+                            {% endif %}
+                            <th class="text-end">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for record in recent_activity %}
+                        <tr>
+                            <td>
+                                <span style="color: #475569; font-weight: 500;">{{ record.created_at|date:"M d, Y" }}</span><br>
+                                <span style="color: #94a3b8; font-size: 12px;">{{ record.created_at|time:"H:i A" }}</span>
+                            </td>
+                            <td style="color: #0f172a; font-weight: 600;">{{ record.insured_name|default:"--" }}</td>
+                            <td>
+                                <span style="background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; color: #475569;">
+                                    {{ record.insurer_name|default:"--" }}
+                                </span>
+                            </td>
+                            <td class="text-success" style="font-weight: 700;">{% if record.gross_premium %}₹{{ record.gross_premium }}{% else %}--{% endif %}</td>
+                            
+                            {% if is_admin_user %}
+                            <td>
+                                <div class="d-flex align-items-center">
+                                    <div style="width: 28px; height: 28px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #475569; margin-right: 8px;">
+                                        {{ record.source_document.uploaded_by.username|default:"S"|make_list|first|upper }}
+                                    </div>
+                                    <span style="font-weight: 500; color: #334155;">{{ record.source_document.uploaded_by.username|default:"System" }}</span>
                                 </div>
-                                <span style="font-weight: 500; color: #334155;">{{ record.source_document.uploaded_by.username|default:"System" }}</span>
-                            </div>
-                        </td>
-                        {% endif %}
-                        
-                        <td class="text-end">
-                            <a href="{% url 'mis_review' record.pk %}" class="btn btn-sm btn-light border text-primary" style="font-weight: 600; border-radius: 6px; padding: 6px 14px;">Review <i class="bi bi-arrow-right ms-1"></i></a>
-                        </td>
-                    </tr>
-                    {% empty %}
-                    <tr>
-                        <td colspan="{% if is_admin_user %}6{% else %}5{% endif %}" class="text-center py-5">
-                            <div style="color: #cbd5e1; font-size: 40px; margin-bottom: 10px;"><i class="bi bi-inbox"></i></div>
-                            <h6 style="color: #475569; font-weight: 600;">No Activity Yet</h6>
-                            <p style="color: #94a3b8; font-size: 14px; margin-bottom: 0;">Documents processed by the AI will appear here.</p>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                            </td>
+                            {% endif %}
+                            
+                            <td class="text-end">
+                                <a href="{% url 'mis_review' record.pk %}" class="btn btn-sm btn-light border text-primary" style="font-weight: 600; border-radius: 6px; padding: 6px 14px;">Review <i class="bi bi-arrow-right ms-1"></i></a>
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="{% if is_admin_user %}6{% else %}5{% endif %}" class="text-center py-5">
+                                <div style="color: #cbd5e1; font-size: 40px; margin-bottom: 10px;"><i class="bi bi-inbox"></i></div>
+                                <h6 style="color: #475569; font-weight: 600;">No Activity Yet</h6>
+                                <p style="color: #94a3b8; font-size: 14px; margin-bottom: 0;">Documents processed by the AI will appear here.</p>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
-    </div>
+    </main>
 </div>
 
 <script>
