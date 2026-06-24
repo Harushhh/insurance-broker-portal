@@ -5,36 +5,20 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <style>
-    /* Premium Base Styling */
-    body { 
-        background-color: #f8fafc; 
-        font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-    }
-    
-    /* Hide ugly scrollbar for the sidebar but keep functionality */
-    .sidebar-scroll::-webkit-scrollbar {
-        display: none;
-    }
-    .sidebar-scroll {
-        -ms-overflow-style: none;  /* IE and Edge */
-        scrollbar-width: none;  /* Firefox */
-    }
-
-    /* Modern Apple/Fintech-style Cards */
+    /* Premium Dashboard Cards */
     .dash-card { 
         background: #ffffff; 
-        border-radius: 16px; 
+        border-radius: 20px; 
         border: 1px solid rgba(226, 232, 240, 0.8); 
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03); 
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03); 
         height: 100%; 
         transition: all 0.3s ease; 
     }
     .dash-card:hover { 
         transform: translateY(-4px); 
-        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.06); 
+        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.06); 
     }
     
-    /* Premium Icon Boxes with Subtle Gradients */
     .icon-box { 
         width: 56px; 
         height: 56px; 
@@ -48,12 +32,12 @@
     .bg-gradient-success { background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%); color: #059669; }
     .bg-gradient-warning { background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); color: #d97706; }
     
-    /* Crisp, airy data tables */
+    /* Table Styling */
     .table-card {
         background: #fff;
-        border-radius: 16px;
+        border-radius: 20px;
         border: 1px solid rgba(226, 232, 240, 0.8);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03);
         overflow: hidden;
     }
     .table-modern { border-collapse: separate; border-spacing: 0; width: 100%; }
@@ -79,296 +63,171 @@
     
     /* Center chart constraint */
     .chart-wrapper { width: 100%; height: 180px; position: relative; }
-
-    /* Custom Premium Sidebar Colors */
-    .sidebar-bg { background-color: #0f172a; } /* Slate 900 */
-    .sidebar-border { border-color: #1e293b; } /* Slate 800 */
-    .sidebar-hover:hover { background-color: #1e293b; color: #f8fafc; }
-    .sidebar-active { background-color: rgba(37, 99, 235, 0.15); color: #60a5fa; }
 </style>
 
-<div class="flex h-screen overflow-hidden">
-    <aside class="w-64 sidebar-bg text-slate-400 flex flex-col justify-between flex-shrink-0 z-20 shadow-2xl border-r sidebar-border transition-all duration-300">
+<div class="container-fluid py-4 mx-auto" style="max-width: 1400px;">
+    
+    <div class="d-flex justify-content-between align-items-center mb-5 border-bottom pb-4">
         <div>
-            <div class="h-20 flex items-center px-6 border-b sidebar-border">
-                <div class="flex items-center space-x-3">
-                    <div class="bg-gradient-to-br from-blue-500 to-indigo-600 p-2 rounded-lg shadow-lg">
-                        <i class="fas fa-shield-alt text-white text-lg"></i>
+            <h2 class="mb-1" style="font-weight: 800; color: #0f172a; letter-spacing: -0.02em;">Welcome back, {{ request.user.first_name|default:request.user.username|default:"Admin" }}!</h2>
+            <p class="text-muted mb-0" style="font-size: 15px;">
+                {% if is_admin_user %}
+                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 me-2 rounded-pill px-3 py-1">Admin View</span> 
+                    Showing aggregate data for all business units.
+                {% else %}
+                    <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 me-2 rounded-pill px-3 py-1">My View</span> 
+                    Showing your personal extraction metrics.
+                {% endif %}
+            </p>
+        </div>
+        <div>
+            <a href="{% url 'upload_extract_pdf' %}" class="btn btn-primary px-4 py-2" style="border-radius: 12px; font-weight: 600; box-shadow: 0 4px 12px rgba(13, 110, 253, 0.25);"><i class="bi bi-cloud-upload me-2"></i> Upload Document</a>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-5">
+        
+        <div class="col-xl-4 col-md-6">
+            <div class="dash-card p-4 d-flex flex-column justify-content-between">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <p class="text-uppercase mb-2" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Total Cases Processed</p>
+                        <h2 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 36px; letter-spacing: -0.02em;">{{ total_cases }}</h2>
                     </div>
-                    <span class="text-xl font-extrabold tracking-wide text-white">Arham Secure</span>
+                    <div class="icon-box bg-gradient-primary shadow-sm">
+                        <i class="bi bi-file-earmark-check"></i>
+                    </div>
+                </div>
+                <div class="mt-4 pt-3" style="border-top: 1px solid #f1f5f9;">
+                    <span class="text-success" style="font-weight: 600; font-size: 13px;"><i class="bi bi-arrow-up-right me-1"></i> Active</span>
+                    <span class="text-muted ms-2" style="font-size: 13px;">Extraction pipeline operational</span>
                 </div>
             </div>
+        </div>
 
-            <nav class="mt-4 px-4 pb-6 space-y-6 overflow-y-auto sidebar-scroll" style="max-height: calc(100vh - 160px);">
+        <div class="col-xl-4 col-md-6">
+            <div class="dash-card p-4 d-flex flex-column justify-content-between">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <p class="text-uppercase mb-2" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Total Gross Premium</p>
+                        <h2 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 36px; letter-spacing: -0.02em;">₹{{ total_premium|floatformat:2 }}</h2>
+                    </div>
+                    <div class="icon-box bg-gradient-success shadow-sm">
+                        <i class="bi bi-cash-stack"></i>
+                    </div>
+                </div>
+                <div class="mt-4 pt-3" style="border-top: 1px solid #f1f5f9;">
+                    <span class="text-success" style="font-weight: 600; font-size: 13px;"><i class="bi bi-check-circle-fill me-1"></i> Verified</span>
+                    <span class="text-muted ms-2" style="font-size: 13px;">Extracted & logged in MIS</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-xl-4 col-md-12">
+            <div class="dash-card p-4 d-flex flex-column">
                 
-                <div>
-                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Overview</h3>
-                    <div class="space-y-1">
-                        <a href="{% url 'home_dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-active transition-all duration-200">
-                            <i class="fas fa-home w-5 text-center mr-3 text-blue-400"></i> <span class="text-blue-100">Dashboard</span>
-                        </a>
-                        <a href="{% url 'business_analysis' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-chart-line w-5 text-center mr-3 text-slate-500 group-hover:text-indigo-400 transition-colors"></i> Payout Analytics
-                        </a>
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div>
+                        <p class="text-uppercase mb-1" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Product Mix</p>
+                        <h3 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 24px; letter-spacing: -0.02em;">{{ total_cases }} <span style="font-size: 14px; color:#64748b; font-weight:500;">Total</span></h3>
+                    </div>
+                    <div class="icon-box bg-gradient-warning shadow-sm">
+                        <i class="bi bi-pie-chart"></i>
                     </div>
                 </div>
+                
+                <div class="chart-wrapper d-flex justify-content-center align-items-center mt-3">
+                    <canvas id="productMixChart"></canvas>
+                </div>
 
-                <div>
-                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Operations</h3>
-                    <div class="space-y-1">
-                        <a href="{% url 'motor_payout_rates' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-calculator w-5 text-center mr-3 text-slate-500 group-hover:text-emerald-400 transition-colors"></i> Quote Simulator
-                        </a>
-                        <a href="{% url 'my_mis' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-file-invoice-dollar w-5 text-center mr-3 text-slate-500 group-hover:text-emerald-400 transition-colors"></i> Policy MIS Register
-                        </a>
-                        <a href="{% url 'ticket_dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-ticket-alt w-5 text-center mr-3 text-slate-500 group-hover:text-amber-400 transition-colors"></i> Ticket Support
-                        </a>
+                <div class="d-flex justify-content-center align-items-center mt-4 gap-4" style="font-size: 14px;">
+                    <div class="d-flex align-items-center">
+                        <span style="display: inline-block; width: 12px; height: 12px; background-color: #2563eb; border-radius: 4px; margin-right: 8px;"></span>
+                        <span class="text-muted" style="font-weight: 500;">Motor</span>
+                        <strong class="ms-2" style="color: #0f172a;">{{ motor_count|default:"0" }}</strong>
+                    </div>
+                    <div class="d-flex align-items-center">
+                        <span style="display: inline-block; width: 12px; height: 12px; background-color: #059669; border-radius: 4px; margin-right: 8px;"></span>
+                        <span class="text-muted" style="font-weight: 500;">Health</span>
+                        <strong class="ms-2" style="color: #0f172a;">{{ health_count|default:"0" }}</strong>
                     </div>
                 </div>
-
-                <div>
-                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Policy Control</h3>
-                    <div class="space-y-1">
-                        <a href="{% url 'policy_lock_checker' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-lock w-5 text-center mr-3 text-slate-500 group-hover:text-rose-400 transition-colors"></i> Policy Lock Checker
-                        </a>
-                        <a href="{% url 'locked_policy_dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-history w-5 text-center mr-3 text-slate-500 group-hover:text-rose-400 transition-colors"></i> Locked Policies Log
-                        </a>
-                    </div>
-                </div>
-
-                <div>
-                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Master Data</h3>
-                    <div class="space-y-1">
-                        <a href="{% url 'upload' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-upload w-5 text-center mr-3 text-slate-500 group-hover:text-cyan-400 transition-colors"></i> Import Rate Master
-                        </a>
-                        <a href="{% url 'dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-th-large w-5 text-center mr-3 text-slate-500 group-hover:text-cyan-400 transition-colors"></i> Rate Master Matrix
-                        </a>
-                        <a href="{% url 'rto_dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-map-marked-alt w-5 text-center mr-3 text-slate-500 group-hover:text-cyan-400 transition-colors"></i> RTO Master Data
-                        </a>
-                        <a href="{% url 'make_model_dashboard' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-truck-pickup w-5 text-center mr-3 text-slate-500 group-hover:text-cyan-400 transition-colors"></i> Make/Model Master
-                        </a>
-                        <a href="{% url 'grid_management' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-folder-open w-5 text-center mr-3 text-slate-500 group-hover:text-cyan-400 transition-colors"></i> Grid Management
-                        </a>
-                    </div>
-                </div>
-
-                <div>
-                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">AI Automation</h3>
-                    <div class="space-y-1">
-                        <a href="{% url 'upload_extract_pdf' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-brain w-5 text-center mr-3 text-slate-500 group-hover:text-purple-400 transition-colors"></i> AI OCR Pipeline
-                        </a>
-                        <a href="{% url 'field_configurator' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-cogs w-5 text-center mr-3 text-slate-500 group-hover:text-purple-400 transition-colors"></i> Configurator
-                        </a>
-                    </div>
-                </div>
-
-                <div>
-                    <h3 class="px-3 text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Administration</h3>
-                    <div class="space-y-1">
-                        <a href="{% url 'user_management' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-users-cog w-5 text-center mr-3 text-slate-500 group-hover:text-gray-300 transition-colors"></i> Access Control
-                        </a>
-                        <a href="{% url 'audit_logs' %}" class="group flex items-center px-3 py-2.5 text-sm font-medium rounded-lg sidebar-hover transition-all duration-200">
-                            <i class="fas fa-clipboard-list w-5 text-center mr-3 text-slate-500 group-hover:text-gray-300 transition-colors"></i> Audit Logs
-                        </a>
-                    </div>
-                </div>
-
-            </nav>
-        </div>
-        
-        <div class="p-4 border-t sidebar-border bg-slate-900 mt-auto">
-            <div class="flex items-center space-x-3 px-3 py-2.5 rounded-xl border sidebar-border hover:bg-slate-800 transition-all duration-300 cursor-pointer shadow-sm group">
-                <div class="w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center font-bold text-white shadow-md">
-                    {{ request.user.username|default:"R"|make_list|first|upper }}
-                </div>
-                <div class="flex flex-col overflow-hidden">
-                    <span class="text-sm font-bold text-slate-200 group-hover:text-white transition-colors">{{ request.user.username|default:"System Root" }}</span>
-                    <span class="text-xs text-emerald-400 flex items-center mt-0.5">
-                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1.5 animate-pulse"></span> Public Access
-                    </span>
-                </div>
+                
             </div>
         </div>
-    </aside>
+    </div>
 
-    <main class="flex-1 overflow-y-auto bg-slate-50 p-10 h-screen">
-        
-        <div class="d-flex justify-content-between align-items-center mb-5 border-b pb-6">
-            <div>
-                <h2 class="mb-1" style="font-weight: 800; color: #0f172a; letter-spacing: -0.02em;">Welcome back, {{ request.user.first_name|default:request.user.username|default:"Admin" }}!</h2>
-                <p class="text-muted mb-0" style="font-size: 15px;">
-                    {% if is_admin_user %}
-                        <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 me-2 rounded-pill px-3 py-1">Admin View</span> 
-                        Showing aggregate data for all business units.
-                    {% else %}
-                        <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 me-2 rounded-pill px-3 py-1">My View</span> 
-                        Showing your personal extraction metrics.
-                    {% endif %}
-                </p>
-            </div>
-            <div>
-                <a href="{% url 'upload_extract_pdf' %}" class="btn btn-primary px-4 py-2" style="border-radius: 8px; font-weight: 600; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);"><i class="bi bi-cloud-upload me-2"></i>Upload Document</a>
-            </div>
+    <div class="table-card mb-5">
+        <div class="bg-white py-4 px-4 border-bottom d-flex justify-content-between align-items-center">
+            <h5 class="mb-0" style="font-weight: 800; color: #0f172a; font-size: 18px;">Recent Activity</h5>
+            <a href="{% url 'my_mis' %}" class="btn btn-sm btn-light border px-3 py-2" style="font-weight: 600; border-radius: 8px; color: #475569; transition: all 0.2s;">View All MIS</a>
         </div>
-
-        <div class="row g-4 mb-5">
-            
-            <div class="col-xl-4 col-md-6">
-                <div class="dash-card p-4 d-flex flex-column justify-content-between">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <div>
-                            <p class="text-uppercase mb-2" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Total Cases Processed</p>
-                            <h2 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 36px; letter-spacing: -0.02em;">{{ total_cases }}</h2>
-                        </div>
-                        <div class="icon-box bg-gradient-primary shadow-sm">
-                            <i class="bi bi-file-earmark-check"></i>
-                        </div>
-                    </div>
-                    <div class="mt-4 pt-3" style="border-top: 1px solid #f1f5f9;">
-                        <span class="text-success" style="font-weight: 600; font-size: 13px;"><i class="bi bi-arrow-up-right me-1"></i>Active</span>
-                        <span class="text-muted ms-2" style="font-size: 13px;">Extraction pipeline operational</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-xl-4 col-md-6">
-                <div class="dash-card p-4 d-flex flex-column justify-content-between">
-                    <div class="d-flex justify-content-between align-items-start">
-                        <div>
-                            <p class="text-uppercase mb-2" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Total Gross Premium</p>
-                            <h2 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 36px; letter-spacing: -0.02em;">₹{{ total_premium|floatformat:2 }}</h2>
-                        </div>
-                        <div class="icon-box bg-gradient-success shadow-sm">
-                            <i class="bi bi-cash-stack"></i>
-                        </div>
-                    </div>
-                    <div class="mt-4 pt-3" style="border-top: 1px solid #f1f5f9;">
-                        <span class="text-success" style="font-weight: 600; font-size: 13px;"><i class="bi bi-check-circle-fill me-1"></i>Verified</span>
-                        <span class="text-muted ms-2" style="font-size: 13px;">Extracted & logged in MIS</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-xl-4 col-md-12">
-                <div class="dash-card p-4 d-flex flex-column">
-                    
-                    <div class="d-flex justify-content-between align-items-start mb-2">
-                        <div>
-                            <p class="text-uppercase mb-1" style="font-size: 12px; font-weight: 700; color: #64748b; letter-spacing: 0.08em;">Product Mix</p>
-                            <h3 class="mb-0" style="color: #0f172a; font-weight: 800; font-size: 24px; letter-spacing: -0.02em;">{{ total_cases }} <span style="font-size: 14px; color:#64748b; font-weight:500;">Total</span></h3>
-                        </div>
-                        <div class="icon-box bg-gradient-warning shadow-sm">
-                            <i class="bi bi-pie-chart"></i>
-                        </div>
-                    </div>
-                    
-                    <div class="chart-wrapper d-flex justify-content-center align-items-center mt-3">
-                        <canvas id="productMixChart"></canvas>
-                    </div>
-
-                    <div class="d-flex justify-content-center align-items-center mt-4 gap-4" style="font-size: 14px;">
-                        <div class="d-flex align-items-center">
-                            <span style="display: inline-block; width: 12px; height: 12px; background-color: #2563eb; border-radius: 4px; margin-right: 8px;"></span>
-                            <span class="text-muted" style="font-weight: 500;">Motor</span>
-                            <strong class="ms-2" style="color: #0f172a;">{{ motor_count|default:"0" }}</strong>
-                        </div>
-                        <div class="d-flex align-items-center">
-                            <span style="display: inline-block; width: 12px; height: 12px; background-color: #059669; border-radius: 4px; margin-right: 8px;"></span>
-                            <span class="text-muted" style="font-weight: 500;">Health</span>
-                            <strong class="ms-2" style="color: #0f172a;">{{ health_count|default:"0" }}</strong>
-                        </div>
-                    </div>
-                    
-                </div>
-            </div>
-        </div>
-
-        <div class="table-card mb-10">
-            <div class="bg-white py-4 px-4 border-bottom d-flex justify-content-between align-items-center">
-                <h5 class="mb-0" style="font-weight: 800; color: #0f172a; font-size: 18px;">Recent Activity</h5>
-                <a href="{% url 'my_mis' %}" class="btn btn-sm btn-light border px-3 py-2 hover:bg-gray-50" style="font-weight: 600; border-radius: 8px; color: #475569; transition: all 0.2s;">View All MIS</a>
-            </div>
-            <div class="table-responsive">
-                <table class="table-modern">
-                    <thead>
-                        <tr>
-                            <th>Date Processed</th>
-                            <th>Insured Name</th>
-                            <th>Insurer</th>
-                            <th>Premium</th>
-                            {% if is_admin_user %}
-                            <th>Uploaded By</th>
-                            {% endif %}
-                            <th class="text-end">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for record in recent_activity %}
-                        <tr>
-                            <td>
-                                <span style="color: #475569; font-weight: 600;">{{ record.created_at|date:"M d, Y" }}</span><br>
-                                <span style="color: #94a3b8; font-size: 12px; font-weight: 500;">{{ record.created_at|time:"H:i A" }}</span>
-                            </td>
-                            <td style="color: #0f172a; font-weight: 700;">{{ record.insured_name|default:"--" }}</td>
-                            <td>
-                                <span style="background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; color: #475569; border: 1px solid #e2e8f0;">
-                                    {{ record.insurer_name|default:"--" }}
-                                </span>
-                            </td>
-                            <td class="text-emerald-600" style="font-weight: 800;">{% if record.gross_premium %}₹{{ record.gross_premium }}{% else %}--{% endif %}</td>
-                            
-                            {% if is_admin_user %}
-                            <td>
-                                <div class="d-flex align-items-center">
-                                    <div style="width: 28px; height: 28px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #475569; margin-right: 8px;">
-                                        {{ record.source_document.uploaded_by.username|default:"S"|make_list|first|upper }}
-                                    </div>
-                                    <span style="font-weight: 600; color: #334155;">{{ record.source_document.uploaded_by.username|default:"System" }}</span>
+        <div class="table-responsive">
+            <table class="table-modern m-0">
+                <thead>
+                    <tr>
+                        <th>Date Processed</th>
+                        <th>Insured Name</th>
+                        <th>Insurer</th>
+                        <th>Premium</th>
+                        {% if is_admin_user %}
+                        <th>Uploaded By</th>
+                        {% endif %}
+                        <th class="text-end">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in recent_activity %}
+                    <tr>
+                        <td>
+                            <span style="color: #475569; font-weight: 600;">{{ record.created_at|date:"M d, Y" }}</span><br>
+                            <span style="color: #94a3b8; font-size: 12px; font-weight: 500;">{{ record.created_at|time:"H:i A" }}</span>
+                        </td>
+                        <td style="color: #0f172a; font-weight: 700;">{{ record.insured_name|default:"--" }}</td>
+                        <td>
+                            <span style="background: #f1f5f9; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; color: #475569; border: 1px solid #e2e8f0;">
+                                {{ record.insurer_name|default:"--" }}
+                            </span>
+                        </td>
+                        <td class="text-success" style="font-weight: 800;">{% if record.gross_premium %}₹{{ record.gross_premium }}{% else %}--{% endif %}</td>
+                        
+                        {% if is_admin_user %}
+                        <td>
+                            <div class="d-flex align-items-center">
+                                <div style="width: 28px; height: 28px; border-radius: 50%; background: #e2e8f0; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: #475569; margin-right: 8px;">
+                                    {{ record.source_document.uploaded_by.username|default:"S"|make_list|first|upper }}
                                 </div>
-                            </td>
-                            {% endif %}
-                            
-                            <td class="text-end">
-                                <a href="{% url 'mis_review' record.pk %}" class="btn btn-sm btn-light border text-primary hover:bg-blue-50" style="font-weight: 600; border-radius: 6px; padding: 6px 14px; transition: all 0.2s;">Review <i class="bi bi-arrow-right ms-1"></i></a>
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr>
-                            <td colspan="{% if is_admin_user %}6{% else %}5{% endif %}" class="text-center py-5">
-                                <div style="color: #cbd5e1; font-size: 40px; margin-bottom: 10px;"><i class="bi bi-inbox"></i></div>
-                                <h6 style="color: #475569; font-weight: 700;">No Activity Yet</h6>
-                                <p style="color: #94a3b8; font-size: 14px; margin-bottom: 0; font-weight: 500;">Documents processed by the AI will appear here.</p>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+                                <span style="font-weight: 600; color: #334155;">{{ record.source_document.uploaded_by.username|default:"System" }}</span>
+                            </div>
+                        </td>
+                        {% endif %}
+                        
+                        <td class="text-end">
+                            <a href="{% url 'mis_review' record.pk %}" class="btn btn-sm btn-light border text-primary" style="font-weight: 600; border-radius: 8px; padding: 6px 14px; transition: all 0.2s;">Review <i class="bi bi-arrow-right ms-1"></i></a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="{% if is_admin_user %}6{% else %}5{% endif %}" class="text-center py-5">
+                            <div style="color: #cbd5e1; font-size: 40px; margin-bottom: 10px;"><i class="bi bi-inbox"></i></div>
+                            <h6 style="color: #475569; font-weight: 700;">No Activity Yet</h6>
+                            <p style="color: #94a3b8; font-size: 14px; margin-bottom: 0; font-weight: 500;">Documents processed by the AI will appear here.</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
-    </main>
+    </div>
 </div>
 
 <script>
     document.addEventListener("DOMContentLoaded", function() {
         const ctx = document.getElementById('productMixChart').getContext('2d');
         
-        // Grab values from Django, fallback to 0 if empty
         const motorData = parseInt("{{ motor_count|default:'0' }}");
         const healthData = parseInt("{{ health_count|default:'0' }}");
 
-        // Only draw the chart if there is data
         if (motorData > 0 || healthData > 0) {
             new Chart(ctx, {
                 type: 'doughnut',
@@ -384,11 +243,9 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    cutout: '70%', // Make the donut ring perfectly sized
+                    cutout: '70%', 
                     plugins: {
-                        legend: {
-                            display: false // We use our custom HTML legend at the bottom
-                        },
+                        legend: { display: false },
                         tooltip: {
                             backgroundColor: 'rgba(15, 23, 42, 0.9)',
                             padding: 12,
@@ -405,7 +262,6 @@
                 }
             });
         } else {
-            // Render an empty soft-grey circle if no data exists yet
             new Chart(ctx, {
                 type: 'doughnut',
                 data: {
