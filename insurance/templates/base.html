@@ -1,5 +1,4 @@
 {% load static %}
-{% load custom_filters %}
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -158,12 +157,13 @@
         .profile-card {
             display: flex;
             align-items: center;
-            padding: 12px 16px;
+            padding: 10px;
             border-radius: 14px;
             background: #1a1e2d;
             border: 1px solid #282d40;
-            width: 100%;
+            transition: all 0.2s;
         }
+        .profile-card:hover { background: var(--sidebar-hover); cursor: pointer; }
 
         .profile-avatar {
             width: 36px;
@@ -180,7 +180,7 @@
 
         /* --- MAIN WRAPPER --- */
         .main-wrapper {
-            margin-left: 320px; /* Forces content exactly 320px from the left, ensuring sidebar space */
+            margin-left: 320px; 
             min-height: 100vh;
             display: flex;
             flex-direction: column;
@@ -272,16 +272,13 @@
 </head>
 <body>
 
-    {% with p=request.path %}
-    {% if p != "/login/" and p != "/accounts/login/" and "password-reset" not in p and "reset/" not in p %}
-    
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
 
     <aside class="sidebar" id="sidebar">
         
         <a href="{% url 'home_dashboard' %}" class="sidebar-brand">
             <div class="brand-icon"><i class="bi bi-shield-fill-check"></i></div>
-            <div class="brand-text">Arham Secure</div>
+            <div class="brand-text">Insurance Portal</div>
         </a>
 
         <div class="sidebar-nav">
@@ -300,7 +297,6 @@
                     </a>
                 </li>
 
-                {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Motor_Payout_Rates" %}
                 <li class="nav-title">Rates & Policies</li>
                 <li class="nav-item">
                     <a href="{% url 'motor_payout_rates' %}" class="nav-link {% if request.path == '/motor-payout-rates/' %}active{% endif %}">
@@ -322,18 +318,14 @@
                         <i class="bi bi-journal-text"></i> Motor Points Logs
                     </a>
                 </li>
-                {% endif %}
 
                 <li class="nav-title">Extraction & MIS</li>
-                {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Alias_Management" %}
                 <li class="nav-item">
                     <a href="{% url 'field_configurator' %}" class="nav-link {% if '/configurator/' in request.path %}active{% endif %}">
                         <i class="bi bi-sliders"></i> AI Rulebook
                     </a>
                 </li>
-                {% endif %}
                 
-                {% if request.user.is_authenticated %}
                 <li class="nav-item">
                     <a href="{% url 'upload_extract_pdf' %}" class="nav-link {% if request.path == '/upload-extract-pdf/' %}active{% endif %}">
                         <i class="bi bi-cpu-fill"></i> AI OCR Pipeline
@@ -344,64 +336,47 @@
                         <i class="bi bi-file-earmark-text-fill"></i> Policy MIS Register
                     </a>
                 </li>
-                {% endif %}
 
-                {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Dashboard" or request.user|has_group:"Can_View_RTO_Dashboard" or request.user|has_group:"Can_View_Make_Model_Dashboard" or request.user|has_group:"Can_Upload_CSV" %}
                 <li class="nav-title">Master Data</li>
                 
-                {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Dashboard" %}
                 <li class="nav-item">
                     <a href="{% url 'dashboard' %}" class="nav-link {% if request.path == '/dashboard/' %}active{% endif %}">
                         <i class="bi bi-table"></i> Rate Master Matrix
                     </a>
                 </li>
-                {% endif %}
                 
-                {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_RTO_Dashboard" %}
                 <li class="nav-item">
                     <a href="{% url 'rto_dashboard' %}" class="nav-link {% if request.path == '/rto-dashboard/' %}active{% endif %}">
                         <i class="bi bi-geo-alt-fill"></i> RTO Master Data
                     </a>
                 </li>
-                {% endif %}
 
-                {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Make_Model_Dashboard" %}
                 <li class="nav-item">
                     <a href="{% url 'make_model_dashboard' %}" class="nav-link {% if request.path == '/make-model-dashboard/' %}active{% endif %}">
                         <i class="bi bi-car-front-fill"></i> Make/Model Master
                     </a>
                 </li>
-                {% endif %}
 
-                {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_Upload_CSV" %}
                 <li class="nav-item">
                     <a href="{% url 'upload' %}" class="nav-link {% if request.path == '/upload/' %}active{% endif %}">
                         <i class="bi bi-cloud-arrow-up-fill"></i> Import Rate Master
                     </a>
                 </li>
-                {% endif %}
-                {% endif %}
 
-                {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Analysis" or request.user|has_group:"Can_View_Grid_Management" or request.user|has_group:"Can_View_Audit_Log" %}
                 <li class="nav-title">Administration</li>
                 
-                {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Analysis" %}
                 <li class="nav-item">
                     <a href="{% url 'business_analysis' %}" class="nav-link {% if request.path == '/analysis/' %}active{% endif %}">
                         <i class="bi bi-graph-up-arrow"></i> Payout Analytics
                     </a>
                 </li>
-                {% endif %}
 
-                {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Grid_Management" %}
                 <li class="nav-item">
                     <a href="{% url 'grid_management' %}" class="nav-link {% if request.path == '/grid-management/' %}active{% endif %}">
                         <i class="bi bi-folder-fill"></i> Grid Management
                     </a>
                 </li>
-                {% endif %}
 
-                {% if request.user|has_group:"ADMIN" %}
                 <li class="nav-item">
                     <a href="{% url 'user_management' %}" class="nav-link {% if request.path == '/user-management/' %}active{% endif %}">
                         <i class="bi bi-people-fill"></i> Access Control
@@ -412,26 +387,22 @@
                         <i class="bi bi-code-slash"></i> API Documentation
                     </a>
                 </li>
-                {% endif %}
 
-                {% if request.user|has_group:"ADMIN" or request.user|has_group:"Can_View_Audit_Log" %}
                 <li class="nav-item">
                     <a href="{% url 'audit_logs' %}" class="nav-link {% if request.path == '/audit-log/' %}active{% endif %}">
                         <i class="bi bi-journal-code"></i> Audit Logs
                     </a>
                 </li>
-                {% endif %}
-                {% endif %}
             </ul>
         </div>
 
         <div class="sidebar-footer">
             <div class="profile-card">
                 <div class="profile-avatar">
-                    {{ request.user.username|default:"R"|make_list|first|upper }}
+                    <i class="bi bi-person-fill"></i>
                 </div>
                 <div>
-                    <div style="color: white; font-weight: 700; font-size: 14px;">{{ request.user.username|default:"System User" }}</div>
+                    <div style="color: white; font-weight: 700; font-size: 14px;">System User</div>
                     <div style="color: #10b981; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 4px;">
                         <span style="display: block; width: 6px; height: 6px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981;"></span> Public Access Mode
                     </div>
@@ -439,21 +410,15 @@
             </div>
         </div>
     </aside>
-    {% endif %}
-    {% endwith %}
 
-    <main class="{% with p=request.path %}{% if p != '/login/' and p != '/accounts/login/' and 'password-reset' not in p and 'reset/' not in p %}main-wrapper{% endif %}{% endwith %}">
+    <main class="main-wrapper">
         
-        {% with p=request.path %}
-        {% if p != "/login/" and p != "/accounts/login/" and "password-reset" not in p and "reset/" not in p %}
         <header class="top-nav">
             <button class="mobile-toggle" id="sidebarToggle">
                 <i class="bi bi-list"></i>
             </button>
             <div class="d-none d-lg-block"></div>
         </header>
-        {% endif %}
-        {% endwith %}
 
         {% if messages %}
         <div class="global-toasts">
