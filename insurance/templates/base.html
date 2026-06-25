@@ -158,13 +158,12 @@
         .profile-card {
             display: flex;
             align-items: center;
-            padding: 10px;
+            padding: 12px 16px;
             border-radius: 14px;
             background: #1a1e2d;
             border: 1px solid #282d40;
-            transition: all 0.2s;
+            width: 100%;
         }
-        .profile-card:hover { background: var(--sidebar-hover); cursor: pointer; }
 
         .profile-avatar {
             width: 36px;
@@ -186,8 +185,8 @@
             display: flex;
             flex-direction: column;
             transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative; /* Context for z-index */
-            z-index: 1; /* Keeps main content below the floating sidebar */
+            position: relative; 
+            z-index: 1; 
         }
 
         /* --- TOP NAV (Mobile + Notifications) --- */
@@ -220,7 +219,7 @@
             flex-grow: 1; 
             display: flex; 
             flex-direction: column; 
-            width: 100%; /* Ensure content area takes full remaining width */
+            width: 100%; 
         }
 
         /* --- GLOBAL TOAST MESSAGES --- */
@@ -427,35 +426,16 @@
         </div>
 
         <div class="sidebar-footer">
-            <div class="dropdown w-100">
-                <div class="profile-card" data-bs-toggle="dropdown" aria-expanded="false">
-                    <div class="profile-avatar">
-                        {{ request.user.username|default:"R"|make_list|first|upper }}
-                    </div>
-                    <div>
-                        <div style="color: white; font-weight: 700; font-size: 14px;">{{ request.user.username|default:"System User" }}</div>
-                        <div style="color: #10b981; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 4px;">
-                            <span style="display: block; width: 6px; height: 6px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981;"></span> Online
-                        </div>
+            <div class="profile-card">
+                <div class="profile-avatar">
+                    {{ request.user.username|default:"R"|make_list|first|upper }}
+                </div>
+                <div>
+                    <div style="color: white; font-weight: 700; font-size: 14px;">{{ request.user.username|default:"System User" }}</div>
+                    <div style="color: #10b981; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 4px;">
+                        <span style="display: block; width: 6px; height: 6px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px #10b981;"></span> Public Access Mode
                     </div>
                 </div>
-                <ul class="dropdown-menu dropdown-menu-dark shadow border-0 mt-2 w-100" style="background-color: #1e293b; border-radius: 12px;">
-                    <li>
-                        <div class="px-3 py-2">
-                            <span class="d-block fw-bold text-white">{{ request.user.get_full_name|default:request.user.username }}</span>
-                            <span class="d-block text-muted small">{{ request.user.email|default:"Public Access Mode" }}</span>
-                        </div>
-                    </li>
-                    <li><hr class="dropdown-divider border-secondary"></li>
-                    <li>
-                        <form method="post" action="{% url 'logout' %}" style="margin: 0;">
-                            {% csrf_token %}
-                            <button type="submit" class="dropdown-item text-danger fw-semibold d-flex align-items-center py-2 hover:bg-slate-700">
-                                <i class="bi bi-box-arrow-right me-2"></i> Terminate Session
-                            </button>
-                        </form>
-                    </li>
-                </ul>
             </div>
         </div>
     </aside>
