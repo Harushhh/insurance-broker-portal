@@ -20,7 +20,7 @@ DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 # Railway / Local Hosts
 ALLOWED_HOSTS = os.getenv(
     "ALLOWED_HOSTS",
-    "127.0.0.1,localhost"
+    "127.0.0.1,localhost,*"
 ).split(",")
 
 # =========================================================
@@ -42,6 +42,7 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'whitenoise.runserver_nostatic', # Helps with local testing of static files
     'django.contrib.staticfiles',
 
     # API
@@ -135,12 +136,11 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-STATICFILES_DIRS = (
-    [os.path.join(BASE_DIR, 'static')]
-    if os.path.exists(os.path.join(BASE_DIR, 'static'))
-    else []
-)
+# Safely check if the 'static' directory exists before adding it to avoid collectstatic errors
+local_static_dir = os.path.join(BASE_DIR, 'static')
+STATICFILES_DIRS = [local_static_dir] if os.path.exists(local_static_dir) else []
 
+# Use WhiteNoise to serve and compress static files in production
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # =========================================================
