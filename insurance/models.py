@@ -483,6 +483,7 @@ class LockedPolicy(models.Model):
     def __str__(self):
         return f"{self.vehicle_no} - {self.policy_holder_name} - {self.status}"
 
+
 # =========================================================
 # SUPPORT TICKET SYSTEM
 # =========================================================
@@ -504,3 +505,73 @@ class SupportTicket(models.Model):
 
     def __str__(self):
         return f"Ticket #{self.id} - {self.user}"
+
+
+# =========================================================
+# AUTOMATED MIS PAYOUT CALCULATION MODELS
+# =========================================================
+class MISFile(models.Model):
+    STATUS_CHOICES = [
+        ('PENDING', 'Pending'),
+        ('PROCESSING', 'Processing'),
+        ('COMPLETED', 'Completed'),
+        ('FAILED', 'Failed'),
+    ]
+
+    uploaded_file = models.FileField(upload_to="mis_uploads/%Y/%m/")
+    # Will store the final Excel/CSV with the appended payout columns
+    processed_file = models.FileField(upload_to="mis_processed/%Y/%m/", blank=True, null=True) 
+    uploaded_by = models.ForeignKey(
+        User, 
+        on_delete=models.SET_NULL, 
+        null=True, 
+        blank=True,
+        related_name="mis_files"
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
+    error_message = models.TextField(blank=True, null=True)
+    
+    created_at = models.DateTimeField(auto_now_add=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        filename = self.uploaded_file.name.split('/')[-1] if self.uploaded_file else f"File #{self.id}"
+        return f"{filename} - {self.status}"
+
+
+class MappingConfiguration(models.Model):
+    MAPPING_TYPE_CHOICES = [
+        ('EXACT', 'Exact Match (e.g., Product, Sub Product, Insurer)'),
+        ('CONTAINS', 'Contains / CSV Match (e.g., RTO Cluster, Vehicle Make)'),
+        ('RANGE_CC', 'CC Range Bound Match'),
+        ('RANGE_SC', 'Seating Capacity Range Bound Match'),
+        ('RANGE_DATE', 'Registration/Inception Date Bound Match'),
+        ('RANGE_AGE', 'Vehicle Age Bound Match'),
+    ]
+
+    mis_column_name = models.CharField(
+        max_length=255, 
+        help_text="Exact column header from the raw MIS CSV (e.g., 'Policy: rto city', 'Policy: cc cubic capacity')"
+    )
+    grid_field_name = models.CharField(
+        max_length=255, 
+        help_text="Corresponding field in the RateMaster model (e.g., 'new_rto_list', 'cc_range')"
+    )
+    mapping_type = models.CharField(
+        max_length=20, 
+        choices=MAPPING_TYPE_CHOICES, 
+        default='EXACT'
+    )
+    is_active = models.BooleanField(default=True)
+    
+    # Allows admins to organize how rules appear on the frontend logic dashboard
+    order_index = models.PositiveIntegerField(default=0) 
+
+    class Meta:
+        ordering = ['order_index', 'mis_column_name']
+
+    def __str__(self):
+        return f"{self.mis_column_name} -> {self.grid_field_name} [{self.get_mapping_type_display()}]"

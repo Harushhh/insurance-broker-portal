@@ -336,6 +336,11 @@
                         <i class="bi bi-file-earmark-text-fill"></i> Policy MIS Register
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a href="{% url 'mis_payout_automation' %}" class="nav-link {% if '/mis-payout-automation/' in request.path or '/mis-mapping/' in request.path %}active{% endif %}">
+                        <i class="bi bi-cash-stack"></i> MIS Payout Engine
+                    </a>
+                </li>
 
                 <li class="nav-title">Master Data</li>
                 

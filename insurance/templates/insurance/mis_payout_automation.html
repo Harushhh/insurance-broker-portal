@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="mb-0">Automated MIS Payout Engine</h2>
+        <a href="{% url 'mis_mapping_dashboard' %}" class="btn btn-outline-secondary">
+            ⚙️ Manage Logic Rules
+        </a>
+    </div>
+
+    {% if msg %}
+    <div class="alert alert-success">{{ msg }}</div>
+    {% endif %}
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+
+    <div class="card shadow-sm mb-4">
+        <div class="card-header bg-primary text-white">
+            <h5 class="mb-0">Upload Raw MIS Data</h5>
+        </div>
+        <div class="card-body">
+            <form method="post" enctype="multipart/form-data" class="d-flex align-items-center gap-3">
+                {% csrf_token %}
+                <div class="flex-grow-1">
+                    {{ form.uploaded_file }}
+                </div>
+                <button type="submit" class="btn btn-success px-4 py-2">
+                    🚀 Upload & Process
+                </button>
+            </form>
+            <small class="text-muted mt-2 d-block">
+                Supports Excel (.xlsx, .xls) and CSV files. Large files will be processed in the background.
+            </small>
+        </div>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">Processing History</h5>
+            <button onclick="location.reload()" class="btn btn-sm btn-light">🔄 Refresh Status</button>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>ID</th>
+                            <th>Uploaded File</th>
+                            <th>Status</th>
+                            <th>Upload Date</th>
+                            <th>Completion Date</th>
+                            <th>Action / Output</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for file in files %}
+                        <tr>
+                            <td>#{{ file.id }}</td>
+                            <td><strong>{{ file.uploaded_file.name|slice:"12:" }}</strong></td>
+                            <td>
+                                {% if file.status == 'PENDING' %}
+                                    <span class="badge bg-secondary">Pending</span>
+                                {% elif file.status == 'PROCESSING' %}
+                                    <span class="badge bg-warning text-dark">⏳ Processing</span>
+                                {% elif file.status == 'COMPLETED' %}
+                                    <span class="badge bg-success">✅ Completed</span>
+                                {% elif file.status == 'FAILED' %}
+                                    <span class="badge bg-danger">❌ Failed</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ file.created_at|date:"d M Y, h:i A" }}</td>
+                            <td>{{ file.processed_at|date:"d M Y, h:i A"|default:"-" }}</td>
+                            <td>
+                                {% if file.status == 'COMPLETED' and file.processed_file %}
+                                    <a href="{% url 'download_processed_mis' file.id %}" class="btn btn-sm btn-primary">
+                                        ⬇️ Download Output
+                                    </a>
+                                {% elif file.status == 'FAILED' %}
+                                    <span class="text-danger small" title="{{ file.error_message }}">
+                                        Hover to see error
+                                    </span>
+                                {% else %}
+                                    <span class="text-muted small">Awaiting Output...</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% empty %}
+                        <tr>
+                            <td colspan="6" class="text-center py-4">No MIS files have been uploaded yet.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -18,6 +18,7 @@ import re
 import hashlib
 import threading
 import ast
+import mimetypes
 
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -36,12 +37,13 @@ from .models import (
     FuelTypeMaster, MakeModelClassMaster,
     RateGroup, AuditLog, GridDocument, UserProfile,
     ExtractionField, FieldSynonym, PolicyDocumentUpload, PolicyMISRecord,
-    LockedPolicy, SupportTicket
+    LockedPolicy, SupportTicket, MISFile, MappingConfiguration
 )
 
-# Import our Gemini AI utility
+# Import our Gemini AI utility and background logic engines
 from .utils import extract_data_with_gemini
-from .forms import ExtractionFieldForm
+from .forms import ExtractionFieldForm, MISUploadForm, MappingConfigurationForm
+from .mapping_engine import process_mis_mapping
 
 # =========================================================
 # PAGE-LEVEL ACCESS GROUPS (Retained for legacy UI assignments if needed)
@@ -2699,3 +2701,84 @@ def update_ticket_status(request):
             return JsonResponse({"success": False, "message": str(e)})
             
     return JsonResponse({"success": False, "message": "Invalid request method."})
+
+# =========================================================
+# AUTOMATED MIS PAYOUT CALCULATION VIEWS
+# =========================================================
+
+def mis_payout_automation(request):
+    msg = ""
+    error = ""
+    if request.method == 'POST':
+        form = MISUploadForm(request.POST, request.FILES)
+        if form.is_valid():
+            mis_obj = form.save(commit=False)
+            mis_obj.uploaded_by = User.objects.first() # Safe default
+            mis_obj.save()
+            
+            # Spin up the background thread so the UI doesn't block while Pandas does the heavy lifting
+            threading.Thread(target=process_mis_mapping, args=(mis_obj.id,)).start()
+            
+            msg = "File uploaded successfully. The mapping engine has started processing in the background."
+            return redirect('mis_payout_automation')
+        else:
+            error = "Please upload a valid CSV or Excel file."
+    else:
+        form = MISUploadForm()
+    
+    files = MISFile.objects.all().order_by('-created_at')[:50]
+    
+    return render(request, 'insurance/mis_payout_automation.html', {
+        'form': form,
+        'files': files,
+        'msg': msg,
+        'error': error
+    })
+
+def download_processed_mis(request, file_id):
+    mis_obj = get_object_or_404(MISFile, id=file_id)
+    if not mis_obj.processed_file:
+        return HttpResponse("Processed file is not available yet. Please check back when status is COMPLETED.", status=404)
+    
+    content_type, _ = mimetypes.guess_type(mis_obj.processed_file.name)
+    response = HttpResponse(mis_obj.processed_file, content_type=content_type or 'application/octet-stream')
+    response['Content-Disposition'] = f'attachment; filename="{mis_obj.processed_file.name.split("/")[-1]}"'
+    return response
+
+def mis_mapping_dashboard(request):
+    mappings = MappingConfiguration.objects.all()
+    return render(request, 'insurance/mis_mapping_dashboard.html', {'mappings': mappings})
+
+def add_mis_mapping(request):
+    if request.method == 'POST':
+        form = MappingConfigurationForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect('mis_mapping_dashboard')
+    else:
+        form = MappingConfigurationForm()
+        
+    return render(request, 'insurance/mis_mapping_form.html', {
+        'form': form, 
+        'title': 'Add Mapping Rule'
+    })
+
+def edit_mis_mapping(request, pk):
+    mapping = get_object_or_404(MappingConfiguration, pk=pk)
+    if request.method == 'POST':
+        form = MappingConfigurationForm(request.POST, instance=mapping)
+        if form.is_valid():
+            form.save()
+            return redirect('mis_mapping_dashboard')
+    else:
+        form = MappingConfigurationForm(instance=mapping)
+        
+    return render(request, 'insurance/mis_mapping_form.html', {
+        'form': form, 
+        'title': 'Edit Mapping Rule'
+    })
+
+def delete_mis_mapping(request, pk):
+    mapping = get_object_or_404(MappingConfiguration, pk=pk)
+    mapping.delete()
+    return redirect('mis_mapping_dashboard')

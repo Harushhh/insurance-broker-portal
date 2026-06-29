@@ -54,7 +54,7 @@ urlpatterns = [
     path("rto/edit/<int:pk>/", views.edit_rto, name="edit_rto"),
     path("make-model/edit/<int:pk>/", views.edit_make_model, name="edit_make_model"),
 
-    # Password reset (kept as fallbacks if needed)
+    # Password reset
     path("password-reset/", views.direct_password_reset, name="password_reset"),
     path(
         "password-reset/done/",
@@ -75,11 +75,20 @@ urlpatterns = [
     path('motor-points-logs/', views.motor_points_audit_logs, name='motor_points_audit_logs'),
 
     # ==========================================
+    # AUTOMATED MIS PAYOUT CALCULATION ROUTES
+    # ==========================================
+    path("mis-payout-automation/", views.mis_payout_automation, name="mis_payout_automation"),
+    path("mis-payout/download/<int:file_id>/", views.download_processed_mis, name="download_processed_mis"),
+    path("mis-mapping/", views.mis_mapping_dashboard, name="mis_mapping_dashboard"),
+    path("mis-mapping/add/", views.add_mis_mapping, name="add_mis_mapping"),
+    path("mis-mapping/edit/<int:pk>/", views.edit_mis_mapping, name="edit_mis_mapping"),
+    path("mis-mapping/delete/<int:pk>/", views.delete_mis_mapping, name="delete_mis_mapping"),
+
+    # ==========================================
     # REST API ENDPOINTS
     # ==========================================
     path('api/v1/export-rates/', views.ExportRatesAPIView.as_view(), name='api-export-rates'),
 ]
 
-# Tells Django's development server how to route and serve media files safely
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
