@@ -1645,16 +1645,31 @@ def edit_rate(request, group_id):
 # -------------------------
 def bulk_update_rates(request):
     if request.method == "POST":
-        group_ids = request.POST.getlist("selected_groups")
+        # 1. Safely extract group IDs regardless of how JS structured the payload
+        raw_groups = request.POST.getlist("selected_groups")
+        if not raw_groups:
+            raw_groups = request.POST.getlist("selected_groups[]")
+        if not raw_groups:
+            raw_groups = [request.POST.get("selected_groups", "")]
+
+        group_ids = []
+        for g in raw_groups:
+            for part in str(g).split(","):
+                part = part.strip()
+                if part.isdigit():
+                    group_ids.append(int(part))
+
         field_name = request.POST.get("update_field")
         new_value = request.POST.get("update_value", "").strip()
 
         if not group_ids or not field_name:
             return redirect("dashboard")
 
+        # 2. Fetch all exact records mapped to the selected rows
         records = RateMaster.objects.filter(Q(group_id__in=group_ids) | Q(id__in=group_ids))
         record_count = records.count()
 
+        # 3. Safely cast the incoming text value into the correct Python/Django Database Type
         parsed_value = new_value
         if field_name == "product":
             parsed_value, _ = ProductMaster.objects.get_or_create(name=new_value) if new_value else (None, False)
@@ -1679,8 +1694,10 @@ def bulk_update_rates(request):
         ]:
             parsed_value = float(new_value) if new_value else None
 
+        # 4. Perform ultra-fast vectorized update to the DB
         records.update(**{field_name: parsed_value})
 
+        # 5. Log the action
         AuditLog.objects.create(
             user=User.objects.first(),
             action="BULK UPDATE",
@@ -2749,6 +2766,19 @@ def mis_mapping_dashboard(request):
     mappings = MappingConfiguration.objects.all()
     return render(request, 'insurance/mis_mapping_dashboard.html', {'mappings': mappings})
 
+
+# --- JSON Schema injected dynamically into the Dropdowns for cross-table builder ---
+def get_rule_schema_context():
+    return {
+        'MIS_File': [], 
+        'RateMaster': [
+            'insurance_company', 'product', 'sub_product', 'policy_type', 
+            'fuel_type', 'make_model_class', 'new_vehicle_makes', 'new_rto_list', 
+            'cc_range', 'sc_range', 'age_range', 'date_range', 
+            'is_ncb', 'is_cpa', 'is_zd'
+        ]
+    }
+
 def add_mis_mapping(request):
     if request.method == 'POST':
         form = MappingConfigurationForm(request.POST)
@@ -2760,7 +2790,8 @@ def add_mis_mapping(request):
         
     return render(request, 'insurance/mis_mapping_form.html', {
         'form': form, 
-        'title': 'Add Mapping Rule'
+        'title': 'Add Multi-Table Mapping Rule',
+        'schema_json': json.dumps(get_rule_schema_context())
     })
 
 def edit_mis_mapping(request, pk):
@@ -2775,7 +2806,8 @@ def edit_mis_mapping(request, pk):
         
     return render(request, 'insurance/mis_mapping_form.html', {
         'form': form, 
-        'title': 'Edit Mapping Rule'
+        'title': 'Edit Multi-Table Mapping Rule',
+        'schema_json': json.dumps(get_rule_schema_context())
     })
 
 def delete_mis_mapping(request, pk):

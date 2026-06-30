@@ -285,28 +285,13 @@ class ExtractionField(models.Model):
         ('MANUAL', 'Manual'),
     ]
 
-    # Matches the top text: "Showing fields for Motor"
     category = models.CharField(max_length=50, default="Base", help_text="e.g., Base, Motor, Health")
-    
-    # Matches the "#" column (Drag to reorder)
     order_index = models.PositiveIntegerField(default=0)
-    
-    # Matches "Field Name"
     field_name = models.CharField(max_length=150, unique=True)
-    
-    # For fields that have a dropdown (like "Insurance Company [27]")
     has_dropdown = models.BooleanField(default=False)
-    
-    # Comma-separated list of options for the dropdown
     dropdown_options = models.TextField(blank=True, null=True, help_text="Comma-separated list of options (e.g., HDFC, ICICI, Tata)")
-    
-    # Matches "Mandatory" column
     is_mandatory = models.BooleanField(default=True)
-    
-    # Matches "AI Read" column
     extraction_method = models.CharField(max_length=20, choices=EXTRACTION_CHOICES, default='AI')
-    
-    # Matches "Active" column
     is_active = models.BooleanField(default=True)
 
     class Meta:
@@ -317,7 +302,6 @@ class ExtractionField(models.Model):
 
 
 class FieldSynonym(models.Model):
-    # Matches the "Synonyms / Aliases" column
     extraction_field = models.ForeignKey(ExtractionField, on_delete=models.CASCADE, related_name="synonyms")
     synonym_text = models.CharField(max_length=255)
 
@@ -401,7 +385,6 @@ class PolicyMISRecord(models.Model):
     confidence_notes = models.TextField(blank=True, null=True)
     ai_model_name = models.CharField(max_length=100, blank=True, null=True)
 
-    # --- NEW RECONCILIATION FIELDS ---
     expected_payout = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     actual_payout = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     reconciliation_status = models.CharField(
@@ -421,9 +404,6 @@ class PolicyMISRecord(models.Model):
 
 # =========================================================
 # POLICY LOCK TABLE
-# IMPORTANT:
-# This status is ONLY for Policy Lock Checker
-# It is NOT related to RateMaster.status
 # =========================================================
 class LockedPolicy(models.Model):
     LOCK_STATUS_CHOICES = [
@@ -465,8 +445,6 @@ class LockedPolicy(models.Model):
         related_name="locked_policies"
     )
 
-    # IMPORTANT:
-    # This status belongs only to policy lock system
     status = models.CharField(
         max_length=20,
         choices=LOCK_STATUS_CHOICES,
@@ -519,7 +497,6 @@ class MISFile(models.Model):
     ]
 
     uploaded_file = models.FileField(upload_to="mis_uploads/%Y/%m/")
-    # Will store the final Excel/CSV with the appended payout columns
     processed_file = models.FileField(upload_to="mis_processed/%Y/%m/", blank=True, null=True) 
     uploaded_by = models.ForeignKey(
         User, 
@@ -543,35 +520,50 @@ class MISFile(models.Model):
 
 
 class MappingConfiguration(models.Model):
-    MAPPING_TYPE_CHOICES = [
-        ('EXACT', 'Exact Match (e.g., Product, Sub Product, Insurer)'),
-        ('CONTAINS', 'Contains / CSV Match (e.g., RTO Cluster, Vehicle Make)'),
+    TABLE_CHOICES = [
+        ('MIS_File', 'MIS File (Uploaded Data)'),
+        ('RateMaster', 'Rate Master (Grid Data)'),
+    ]
+    
+    OPERATOR_CHOICES = [
+        ('EXACT', 'Equals (Exact Match)'),
+        ('WORD_MATCH', 'Word Match (Whole Word / Exact List Item)'),
+        ('CONTAINS', 'Contains (Substring Match)'),
         ('RANGE_CC', 'CC Range Bound Match'),
         ('RANGE_SC', 'Seating Capacity Range Bound Match'),
-        ('RANGE_DATE', 'Registration/Inception Date Bound Match'),
+        ('RANGE_DATE', 'Date Range Bound Match'),
         ('RANGE_AGE', 'Vehicle Age Bound Match'),
     ]
 
-    mis_column_name = models.CharField(
-        max_length=255, 
-        help_text="Exact column header from the raw MIS CSV (e.g., 'Policy: rto city', 'Policy: cc cubic capacity')"
-    )
-    grid_field_name = models.CharField(
-        max_length=255, 
-        help_text="Corresponding field in the RateMaster model (e.g., 'new_rto_list', 'cc_range')"
-    )
-    mapping_type = models.CharField(
-        max_length=20, 
-        choices=MAPPING_TYPE_CHOICES, 
-        default='EXACT'
-    )
-    is_active = models.BooleanField(default=True)
+    source_table = models.CharField(max_length=100, choices=TABLE_CHOICES, default='MIS_File', help_text="Left operand table")
+    source_column = models.CharField(max_length=255, help_text="Left operand column", default="", blank=True)
     
-    # Allows admins to organize how rules appear on the frontend logic dashboard
-    order_index = models.PositiveIntegerField(default=0) 
+    operator = models.CharField(max_length=20, choices=OPERATOR_CHOICES, default='EXACT')
+    
+    target_table = models.CharField(max_length=100, choices=TABLE_CHOICES, default='RateMaster', help_text="Right operand table")
+    target_column = models.CharField(max_length=255, help_text="Right operand column", default="", blank=True)
+    
+    is_active = models.BooleanField(default=True)
+    order_index = models.PositiveIntegerField(default=0)
 
     class Meta:
-        ordering = ['order_index', 'mis_column_name']
+        ordering = ['order_index', 'source_column']
 
     def __str__(self):
-        return f"{self.mis_column_name} -> {self.grid_field_name} [{self.get_mapping_type_display()}]"
+        return f"[{self.source_table}].[{self.source_column}] {self.operator} [{self.target_table}].[{self.target_column}]"
+
+    # Properties to maintain backwards compatibility with existing UI dashboards
+    @property
+    def mis_column_name(self):
+        return f"{self.source_table}.{self.source_column}"
+
+    @property
+    def grid_field_name(self):
+        return f"{self.target_table}.{self.target_column}"
+
+    @property
+    def mapping_type(self):
+        return self.operator
+        
+    def get_mapping_type_display(self):
+        return dict(self.OPERATOR_CHOICES).get(self.operator, self.operator)

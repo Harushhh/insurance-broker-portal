@@ -1,75 +1,170 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="container mt-5">
-    <div class="row justify-content-center">
-        <div class="col-md-8">
-            <div class="card shadow-sm">
-                <div class="card-header bg-dark text-white">
-                    <h4 class="mb-0">{{ title }}</h4>
+<div class="container-fluid py-4">
+    <h3 class="mb-4">{{ title }}</h3>
+    
+    <div class="card shadow-sm border-0" style="border-radius: 12px; overflow: hidden;">
+        <div class="card-header bg-dark text-white p-3">
+            <h5 class="mb-0"><i class="bi bi-diagram-3-fill me-2"></i> Define Cross-Table Condition</h5>
+        </div>
+        <div class="card-body p-4 bg-white">
+            <form method="post" id="ruleForm">
+                {% csrf_token %}
+                
+                <div class="row align-items-center mb-4 p-4 rounded-3" style="background-color: #f8fafc; border: 1px solid #e2e8f0;">
+                    
+                    <div class="col-md-5">
+                        <label class="form-label text-primary small fw-bold text-uppercase mb-2"><i class="bi bi-database me-1"></i> Left Operand (Source)</label>
+                        <div class="d-flex flex-column gap-2">
+                            {{ form.source_table }}
+                            {{ form.source_column }}
+                            <select id="source_column_select" class="form-select border-primary d-none"></select>
+                        </div>
+                        <div class="form-text mt-2"><i class="bi bi-info-circle"></i> Select the primary table and column.</div>
+                    </div>
+
+                    <div class="col-md-2 text-center py-3">
+                        <label class="form-label text-muted small fw-bold text-uppercase mb-2">Operator</label>
+                        {{ form.operator }}
+                    </div>
+
+                    <div class="col-md-5">
+                        <label class="form-label text-success small fw-bold text-uppercase mb-2"><i class="bi bi-database me-1"></i> Right Operand (Target)</label>
+                        <div class="d-flex flex-column gap-2">
+                            {{ form.target_table }}
+                            {{ form.target_column }}
+                            <select id="target_column_select" class="form-select border-success d-none"></select>
+                        </div>
+                        <div class="form-text mt-2"><i class="bi bi-info-circle"></i> Select the table and column to compare against.</div>
+                    </div>
                 </div>
-                <div class="card-body">
-                    <form method="post">
-                        {% csrf_token %}
-                        
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">Raw MIS Column Name</label>
-                            {{ form.mis_column_name }}
-                            <div class="form-text">{{ form.mis_column_name.help_text }}</div>
-                            {{ form.mis_column_name.errors }}
-                        </div>
 
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">Target Grid Field (RateMaster)</label>
-                            {{ form.grid_field_name }}
-                            <div class="form-text">{{ form.grid_field_name.help_text }}</div>
-                            {{ form.grid_field_name.errors }}
+                <div class="row mb-4 align-items-center">
+                    <div class="col-md-3">
+                        <label class="form-label fw-bold text-muted small text-uppercase">Execution Order</label>
+                        {{ form.order_index }}
+                    </div>
+                    <div class="col-md-3 ms-auto text-end">
+                        <div class="form-check form-switch d-inline-block fs-5">
+                            {{ form.is_active }}
+                            <label class="form-check-label ms-2" style="font-size: 16px; font-weight: 600;" for="{{ form.is_active.id_for_label }}">Rule is Active</label>
                         </div>
-
-                        <div class="mb-3">
-                            <label class="form-label fw-bold">Matching Logic Type</label>
-                            {{ form.mapping_type }}
-                            {{ form.mapping_type.errors }}
-                        </div>
-
-                        <div class="row mb-4">
-                            <div class="col-md-6">
-                                <label class="form-label fw-bold">Execution Order (Priority)</label>
-                                {{ form.order_index }}
-                                {{ form.order_index.errors }}
-                            </div>
-                            <div class="col-md-6 d-flex align-items-end">
-                                <div class="form-check mb-2">
-                                    {{ form.is_active }}
-                                    <label class="form-check-label fw-bold" for="{{ form.is_active.id_for_label }}">
-                                        Rule is Active
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="d-flex gap-2 border-top pt-3">
-                            <button type="submit" class="btn btn-primary px-4">Save Rule</button>
-                            <a href="{% url 'mis_mapping_dashboard' %}" class="btn btn-secondary px-4">Cancel</a>
-                        </div>
-                    </form>
+                    </div>
                 </div>
-            </div>
+
+                <hr class="mb-4">
+
+                <div class="d-flex gap-3 justify-content-end">
+                    <a href="{% url 'mis_mapping_dashboard' %}" class="btn btn-light border px-4 py-2 fw-bold" style="border-radius: 8px;">Cancel</a>
+                    <button type="submit" class="btn btn-primary px-5 py-2 fw-bold shadow-sm" style="border-radius: 8px;"><i class="bi bi-check2-circle me-2"></i> Save Rule</button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
 
-<style>
-    /* Styling to match your form widgets if necessary */
-    .dash-input {
-        width: 100%;
-        padding: 0.5rem 0.75rem;
-        border: 1px solid #ced4da;
-        border-radius: 0.25rem;
-    }
-    .dash-input:focus {
-        border-color: #86b7fe;
-        outline: 0;
-        box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
-    }
-</style>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        // Safely parse the JSON passed from Django views
+        let schema = {};
+        try {
+            const rawSchema = '{{ schema_json|escapejs }}';
+            if (rawSchema) {
+                schema = JSON.parse(rawSchema);
+            }
+        } catch (err) {
+            console.error("Failed to parse schema JSON:", err);
+        }
+
+        // Inject the fixed MIS File columns into the schema
+        schema['MIS_File'] = [
+            "Product", "MIS Entry No", "File", "Date", "Customer Name", "Mobile", "Policy No", 
+            "Insurer", "Sum Insured", "Premium", "Employee", "Agent", "Payout Status", 
+            "QC Status", "QC By", "PLVC Status", "Customer: aadhaar no", "Customer: address", 
+            "Customer: address email", "Customer: age", "Customer: city", "Customer: customer name", 
+            "Customer: customer occupation", "Customer: dob", "Customer: eaccount no", 
+            "Customer: email", "Customer: gender", "Customer: gstin", "Customer: mobile", 
+            "Customer: mobile no", "Customer: pan no", "Customer: pin code", "Customer: salutation", 
+            "Customer: solicitor name", "Customer: title", "Policy: addon premium", 
+            "Policy: age extract", "Policy: application no proposal no", "Policy: business booking branch", 
+            "Policy: business class", "Policy: business lock at", "Policy: buss class", 
+            "Policy: cc cubic capacity", "Policy: chassis no", "Policy: commissionable premium", 
+            "Policy: cp", "Policy: cpa", "Policy: customer name", "Policy: date of registration", 
+            "Policy: deductible amount", "Policy: engine no", "Policy: expiry date", 
+            "Policy: family members", "Policy: fuel", "Policy: gvw gross vehicle weight", 
+            "Policy: gwp", "Policy: gwp net premium", "Policy: holder city", "Policy: inception date", 
+            "Policy: ins company", "Policy: insurance company", "Policy: last year insurance company", 
+            "Policy: last yr ins company", "Policy: manufacturing year", "Policy: mfg year", 
+            "Policy: model", "Policy: nil dep", "Policy: no claim bonus", "Policy: nominee", 
+            "Policy: occupancy", "Policy: occupancy code", "Policy: od premium", "Policy: pincode", 
+            "Policy: plan name", "Policy: policy category", "Policy: policy issue date", 
+            "Policy: policy no", "Policy: policy status", "Policy: policy termpt", "Policy: premium", 
+            "Policy: premium mode", "Policy: premium paying term  ppt", "Policy: product name", 
+            "Policy: product name  plan name", "Policy: rate check cpa", "Policy: riders", 
+            "Policy: rto city", "Policy: rto no", "Policy: rto state", "Policy: seating capacity", 
+            "Policy: service tax", "Policy: sub product", "Policy: subbusiness class", 
+            "Policy: sum assured", "Policy: tariff rate", "Policy: tarrif rate", "Policy: tenure", 
+            "Policy: total act premium", "Policy: total idv", "Policy: total od", 
+            "Policy: total premium", "Policy: total tp premium", "Policy: tp premium", 
+            "Policy: tp terrorism premium", "Policy: vehage", "Policy: vehicle class", 
+            "Policy: vehicle idv", "Policy: vehicle make", "Policy: vehicle no", "Policy: vehproduct", 
+            "Team", "Hierarchy Chain", "Payout: insurance_company", "Payout: po_type", 
+            "Payout: po_od_rate", "Payout: po_tp_rate", "Payout: po_net_rate", "Payout: po_flat_amount", 
+            "Payout: tariff_min", "Payout: tariff_max", "Payout: product", "Payout: sub_product", 
+            "Payout: One Year Policy", "Payout: Multi Year Policy(2Y & 3Y)"
+        ];
+        
+        function setupDropdown(tableEl, inputEl, selectEl) {
+            if (!tableEl || !inputEl || !selectEl) return;
+            
+            function updateView() {
+                const tableVal = tableEl.value;
+                
+                if (schema[tableVal] && schema[tableVal].length > 0) {
+                    // Populate select dynamically based on the python Dictionary
+                    selectEl.innerHTML = '';
+                    schema[tableVal].forEach(col => {
+                        let opt = document.createElement('option');
+                        opt.value = col;
+                        opt.textContent = col;
+                        selectEl.appendChild(opt);
+                    });
+                    
+                    // Hide free-text input, show dropdown select
+                    inputEl.classList.add('d-none');
+                    selectEl.classList.remove('d-none');
+                    
+                    // Sync values from backend to frontend dropdown
+                    if (schema[tableVal].includes(inputEl.value)) {
+                        selectEl.value = inputEl.value;
+                    } else {
+                        inputEl.value = selectEl.value;
+                    }
+                    
+                    // Every time dropdown changes, silently update the hidden input being posted
+                    selectEl.onchange = (e) => { inputEl.value = e.target.value; };
+                } else {
+                    // No schema for this table (e.g., CSV upload fallback). Show free-text input, hide select.
+                    inputEl.classList.remove('d-none');
+                    selectEl.classList.add('d-none');
+                }
+            }
+
+            // Listen for changes and run initially
+            tableEl.addEventListener('change', updateView);
+            updateView();
+        }
+
+        // Fetch elements safely by "name" attribute since Django guarantees these
+        const sourceTable = document.querySelector('[name="source_table"]');
+        const sourceColumn = document.querySelector('[name="source_column"]');
+        const sourceColumnSelect = document.getElementById('source_column_select');
+        setupDropdown(sourceTable, sourceColumn, sourceColumnSelect);
+
+        const targetTable = document.querySelector('[name="target_table"]');
+        const targetColumn = document.querySelector('[name="target_column"]');
+        const targetColumnSelect = document.getElementById('target_column_select');
+        setupDropdown(targetTable, targetColumn, targetColumnSelect);
+    });
+</script>
 {% endblock %}

@@ -23,13 +23,8 @@ class MISUploadForm(forms.ModelForm):
             'uploaded_file': forms.FileInput(attrs={'class': 'dash-input', 'accept': '.csv, .xlsx, .xls'})
         }
 
+# Retained strictly for legacy API or Admin access. UI editing is locked.
 class MappingConfigurationForm(forms.ModelForm):
     class Meta:
         model = MappingConfiguration
-        fields = ['mis_column_name', 'grid_field_name', 'mapping_type', 'is_active', 'order_index']
-        widgets = {
-            'mis_column_name': forms.TextInput(attrs={'class': 'dash-input', 'placeholder': 'e.g., Policy: rto city'}),
-            'grid_field_name': forms.TextInput(attrs={'class': 'dash-input', 'placeholder': 'e.g., new_rto_list'}),
-            'mapping_type': forms.Select(attrs={'class': 'dash-input'}),
-            'order_index': forms.NumberInput(attrs={'class': 'dash-input'}),
-        }
+        fields = ['source_table', 'source_column', 'operator', 'target_table', 'target_column', 'is_active', 'order_index']

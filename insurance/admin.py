@@ -7,6 +7,8 @@ from .models import (
     FieldSynonym,
     PolicyDocumentUpload,
     PolicyMISRecord,
+    MappingConfiguration,
+    MISFile,
 )
 
 
@@ -174,3 +176,30 @@ class PolicyMISRecordAdmin(admin.ModelAdmin):
     list_filter = ("policy_start_date", "policy_end_date", "created_at")
     ordering = ("-created_at",)
     readonly_fields = ("created_at", "raw_ai_json")
+
+
+# =========================================================
+# AUTOMATED MIS PAYOUT CALCULATION ADMIN
+# =========================================================
+
+@admin.register(MISFile)
+class MISFileAdmin(admin.ModelAdmin):
+    list_display = ("id", "uploaded_file", "status", "created_at", "processed_at")
+    list_filter = ("status", "created_at")
+    ordering = ("-created_at",)
+
+
+@admin.register(MappingConfiguration)
+class MappingConfigurationAdmin(admin.ModelAdmin):
+    list_display = (
+        "order_index",
+        "source_table",
+        "source_column",
+        "operator",
+        "target_table",
+        "target_column",
+        "is_active",
+    )
+    list_filter = ("is_active", "operator", "source_table", "target_table")
+    search_fields = ("source_column", "target_column")
+    ordering = ("order_index",)
