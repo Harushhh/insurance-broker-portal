@@ -2204,8 +2204,8 @@ def lock_unlock_policy(request, rate_id):
     policy_holder_name = (request.POST.get("policy_holder_name") or "").strip()
     target_date = (request.POST.get("target_date") or "").strip()
 
-    if not vehicle_no or not policy_holder_name:
-        return JsonResponse({"success": False, "message": "Vehicle No. and Policy Holder Name are required."})
+    if not vehicle_no:
+        return JsonResponse({"success": False, "message": "Vehicle No. is required."})
 
     if action_type != "LOCK":
         return JsonResponse({"success": False, "message": "Invalid action."})
