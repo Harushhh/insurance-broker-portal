@@ -113,28 +113,34 @@ def get_translated_make_model(product_name):
         return ", ".join(normalized_map[clean_product])
     return None
 
-# Dynamic filter translator for frontend dropdowns
 def get_dynamic_make_model_class_list(product_id):
     """
-    Translates 'NA' in the filter dropdown to 'Scooter, Bike' (etc) 
-    based on the currently selected product.
+    Returns the appropriate make/model classes for the selected product.
+    Instead of just renaming 'NA', it explicitly filters the list to show valid individual classes.
     """
-    mmc_list = list(MakeModelClassMaster.objects.all().order_by("name"))
-    translated_name = None
+    all_classes = list(MakeModelClassMaster.objects.all().order_by("name"))
     
-    if product_id and str(product_id).isdigit():
-        prod_obj = ProductMaster.objects.filter(id=int(product_id)).first()
-        if prod_obj and prod_obj.name in NA_MAKE_MODEL_MAP:
-            translated_name = ", ".join(NA_MAKE_MODEL_MAP[prod_obj.name])
-            
-    for m in mmc_list:
-        if m.name.strip().upper() == "NA":
-            if translated_name:
-                m.name = translated_name
-            else:
-                m.name = "NA (Select Product First)"
-                
-    return mmc_list
+    if not product_id or not str(product_id).isdigit():
+        return all_classes
+
+    prod_obj = ProductMaster.objects.filter(id=int(product_id)).first()
+    if not prod_obj:
+        return all_classes
+
+    product_name = prod_obj.name.strip()
+
+    # If the product exists in our map, filter the dropdown to only show those classes + NA
+    if product_name in NA_MAKE_MODEL_MAP:
+        valid_names = [c.lower() for c in NA_MAKE_MODEL_MAP[product_name]]
+        valid_names.append("na")  # Always include NA as a fallback
+
+        filtered_classes = []
+        for m in all_classes:
+            if m.name.strip().lower() in valid_names:
+                filtered_classes.append(m)
+        return filtered_classes
+
+    return all_classes
 
 # =========================================================
 # UTILITY FUNCTIONS
@@ -257,17 +263,34 @@ def get_na_class_list_for_product(product_id: str):
     return combined
 
 def apply_make_model_filter(qs, product_id: str, make_model_class: str):
+    """
+    Unified filter for Make Model Classes applied across all rate views.
+    Handles fallbacks correctly so that 'NA' databases hits are included when a specific sub-class is searched.
+    """
     if not make_model_class:
         return qs
 
     clean_mmc = str(make_model_class).strip()
     
     if clean_mmc.isdigit():
-        qs = qs.filter(make_model_class_id=clean_mmc)
+        # If passed an ID (e.g. for "Scooter"), fetch exact ID OR fallback to 'NA' if mapped
+        mmc_obj = MakeModelClassMaster.objects.filter(id=int(clean_mmc)).first()
+        if mmc_obj:
+            mmc_name = mmc_obj.name.strip().upper()
+            if mmc_name == "NA":
+                qs = qs.filter(make_model_class__name__iexact="NA")
+            else:
+                is_na_equivalent = any(mmc_name.lower() in [c.lower() for c in mapped_classes] for mapped_classes in NA_MAKE_MODEL_MAP.values())
+                if is_na_equivalent:
+                    qs = qs.filter(Q(make_model_class_id=clean_mmc) | Q(make_model_class__name__iexact="NA"))
+                else:
+                    qs = qs.filter(make_model_class_id=clean_mmc)
+        else:
+            qs = qs.filter(make_model_class_id=clean_mmc)
+
     elif clean_mmc.upper() == "NA":
         qs = qs.filter(make_model_class__name__iexact="NA")
     else:
-        # Check against Dictionary values if it's a string like "Truck"
         is_na_equivalent = False
         for mapped_classes in NA_MAKE_MODEL_MAP.values():
             if clean_mmc.lower() in [c.lower() for c in mapped_classes]:
@@ -275,11 +298,12 @@ def apply_make_model_filter(qs, product_id: str, make_model_class: str):
                 break
         
         if is_na_equivalent:
-            qs = qs.filter(make_model_class__name__iexact="NA")
+            qs = qs.filter(Q(make_model_class__name__iexact=clean_mmc) | Q(make_model_class__name__iexact="NA"))
         else:
             qs = qs.filter(make_model_class__name__iexact=clean_mmc)
             
     return qs
+
 
 def get_make_mapping_context():
     all_makes_objs = MakeModelMaster.objects.all()
@@ -1746,23 +1770,7 @@ def motor_payout_rates(request):
         else:
             qs = qs.filter(product__name__iexact=str(product).strip())
 
-    if make_model_class:
-        clean_mmc = str(make_model_class).strip()
-        if clean_mmc.isdigit():
-            qs = qs.filter(make_model_class_id=clean_mmc)
-        elif clean_mmc.upper() == "NA":
-            qs = qs.filter(make_model_class__name__iexact="NA")
-        else:
-            is_na_equivalent = False
-            for mapped_classes in NA_MAKE_MODEL_MAP.values():
-                if clean_mmc.lower() in [c.lower() for c in mapped_classes]:
-                    is_na_equivalent = True
-                    break
-            
-            if is_na_equivalent:
-                qs = qs.filter(make_model_class__name__iexact="NA")
-            else:
-                qs = qs.filter(make_model_class__name__iexact=clean_mmc)
+    qs = apply_make_model_filter(qs, product, make_model_class)
 
     if sub_product:
         if str(sub_product).isdigit():
@@ -1973,9 +1981,9 @@ def policy_lock_checker(request):
     sc = (request.GET.get("sc") or "").strip()
     mfg_year = (request.GET.get("mfg_year") or "").strip()
 
-    is_zd = (request.GET.get("is_zd") or "NO").strip().upper()
-    is_cpa = (request.GET.get("is_cpa") or "NO").strip().upper()
-    is_ncb = (request.GET.get("is_ncb") or "NO").strip().upper()
+    is_zd = (request.GET.get("is_zd") or "").strip().upper()
+    is_cpa = (request.GET.get("is_cpa") or "").strip().upper()
+    is_ncb = (request.GET.get("is_ncb") or "").strip().upper()
 
     if target_date:
         qs = qs.filter(
@@ -1989,23 +1997,7 @@ def policy_lock_checker(request):
         else:
             qs = qs.filter(product__name__iexact=str(product).strip())
 
-    if make_model_class:
-        clean_mmc = str(make_model_class).strip()
-        if clean_mmc.isdigit():
-            qs = qs.filter(make_model_class_id=clean_mmc)
-        elif clean_mmc.upper() == "NA":
-            qs = qs.filter(make_model_class__name__iexact="NA")
-        else:
-            is_na_equivalent = False
-            for mapped_classes in NA_MAKE_MODEL_MAP.values():
-                if clean_mmc.lower() in [c.lower() for c in mapped_classes]:
-                    is_na_equivalent = True
-                    break
-            
-            if is_na_equivalent:
-                qs = qs.filter(make_model_class__name__iexact="NA")
-            else:
-                qs = qs.filter(make_model_class__name__iexact=clean_mmc)
+    qs = apply_make_model_filter(qs, product, make_model_class)
 
     if sub_product:
         if str(sub_product).isdigit():
