@@ -1,110 +1,236 @@
 import pandas as pd
 import io
 import re
-import difflib
+from rapidfuzz import fuzz, process as rf_process
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from django.db import connection
 from .models import MISFile, RateMaster, RTOMaster, MakeModelMaster
 
-def get_fuzzy_dict(source_list, target_list, threshold=0.6):
-    """Rule 4: Fuzzy Insurer Mapping with >60% similarity threshold."""
+
+# ── Tunable thresholds ───────────────────────────────────────────────────────
+INSURANCE_FUZZY_THRESHOLD = 55   # lowered from 60: handles typos in company names
+                                  # (e.g. "Limted" instead of "Limited" in Liberty)
+CATEGORICAL_FUZZY_THRESHOLD = 75
+
+# Words that appear in almost every insurer name and carry zero discriminative value.
+# Stripping these before matching lets the unique identifying tokens (Magma, Liberty,
+# SBI, National, etc.) dominate the score, so WRatio can't accidentally map
+# "Magma-HDI General Insurance Company Limited" → "SBI General Insurance Company Limited"
+# just because both share "General Insurance Company Limited".
+_INS_STOP_WORDS = frozenset({
+    'general', 'insurance', 'company', 'limited', 'ltd', 'co',
+    'the', 'of', 'and', 'an', 'a', 'in'
+})
+
+
+def _key_tokens(name: str) -> set:
+    """Return the discriminative tokens from an insurer name (stop-words removed)."""
+    tokens = set(re.sub(r'[^a-z0-9\s]', ' ', name.lower()).split())
+    return tokens - _INS_STOP_WORDS
+
+
+def _insurer_score(mis_name: str, rate_name: str) -> float:
+    """
+    Combined scorer for insurer names.
+
+    Step 1 — token Jaccard on discriminative tokens (unique company identifiers):
+      Handles abbreviation vs full-form differences:
+        "magma hdi" ↔ "magma-hdi general insurance co ltd"  → Jaccard = 1.0
+        "liberty"   ↔ "sbi general insurance company ltd"   → Jaccard = 0.0
+
+    Step 2 — WRatio as a tie-breaker when Jaccard is ambiguous (e.g. scores are equal).
+
+    Returns a combined float 0–100 where Jaccard dominates (weight 80) and
+    WRatio is the fine-grained tie-breaker (weight 20).
+    """
+    mis_keys  = _key_tokens(mis_name)
+    rate_keys = _key_tokens(rate_name)
+    if not mis_keys or not rate_keys:
+        return fuzz.WRatio(mis_name, rate_name)
+
+    intersection = mis_keys & rate_keys
+    union        = mis_keys | rate_keys
+    jaccard      = len(intersection) / len(union)   # 0.0 – 1.0
+
+    wratio = fuzz.WRatio(mis_name, rate_name)        # 0 – 100
+
+    # Weight: Jaccard × 80 + WRatio × 0.20
+    return jaccard * 80 + wratio * 0.20
+
+
+def get_fuzzy_dict(source_list, target_list, threshold=INSURANCE_FUZZY_THRESHOLD):
+    """
+    Fuzzy matching dictionary creator for Insurance Companies.
+
+    Uses a two-stage scorer:
+      1. Token Jaccard on discriminative words (strips generic stop-words like
+         'general', 'insurance', 'company', 'limited') — prevents cross-mapping
+         e.g. Magma-HDI → SBI simply because they share common suffix words.
+      2. WRatio as a tie-breaker for edge cases where Jaccard alone is equal.
+
+    Threshold is applied to the combined 0-100 score.
+    """
+    clean_targets = [str(t).strip().lower() for t in target_list if pd.notna(t) and str(t).strip()]
+
     mapping = {}
     for src in source_list:
         if pd.isna(src) or not str(src).strip():
             mapping[src] = None
             continue
         src_str = str(src).strip().lower()
+
+        if not clean_targets:
+            mapping[src] = None
+            continue
+
         best_match = None
-        best_ratio = 0
-        for tgt in target_list:
-            if pd.isna(tgt) or not str(tgt).strip(): continue
-            tgt_str = str(tgt).strip().lower()
-            ratio = difflib.SequenceMatcher(None, src_str, tgt_str).ratio()
-            if ratio > best_ratio:
-                best_ratio = ratio
-                best_match = tgt_str
-        mapping[src] = best_match if best_ratio > threshold else None
+        best_score = -1
+        for tgt in clean_targets:
+            score = _insurer_score(src_str, tgt)
+            if score > best_score:
+                best_score = score
+                best_match = tgt
+
+        mapping[src] = best_match if best_score >= threshold else None
+
     return mapping
 
-def check_rto_fast(m_clean, g_str, rto_mapping):
-    """Fast row-by-row RTO cluster containment check."""
-    if pd.isna(g_str) or str(g_str).strip().lower() in ('', 'nan', 'none', 'na'): return True
-    if not m_clean: return False
-    
-    for g_rto_name in str(g_str).lower().split(','):
-        g_rto_name = g_rto_name.strip()
-        if not g_rto_name: continue
-        
-        g_name_clean = re.sub(r'[^a-z0-9]', '', g_rto_name)
-        if g_name_clean and (m_clean in g_name_clean or g_name_clean in m_clean):
-            return True
-            
-        if g_rto_name in rto_mapping:
-            cluster_str = rto_mapping[g_rto_name]
-            if cluster_str and cluster_str != 'nan':
-                for cluster_item in cluster_str.split(','):
-                    c_clean = re.sub(r'[^a-z0-9]', '', cluster_item.strip())
-                    if c_clean and (m_clean in c_clean or c_clean in m_clean):
-                        return True
+
+def safe_get_col(df, target_col):
+    """Safely extracts a column, ignoring leading/trailing spaces in the header."""
+    cols_clean = {str(c).strip(): c for c in df.columns}
+    if target_col in cols_clean:
+        return df[cols_clean[target_col]]
+    return pd.Series([None] * len(df), index=df.index)
+
+
+def check_categorical_match(val, grid_val):
+    """
+    Smart matching for categorical fields (Fuel, Class, Product) to handle typos safely.
+    Uses RapidFuzz instead of difflib for the fuzzy fallback — same logic, faster scorer.
+    """
+    # If DB is empty, it acts as a wildcard (matches anything)
+    if pd.isna(grid_val) or not grid_val or str(grid_val).strip().lower() == 'nan':
+        return True
+
+    # If MIS value is missing, it fails the match
+    if pd.isna(val) or not val or str(val).strip().lower() == 'nan':
+        return False
+
+    v_str = str(val).strip().lower()
+    g_str = str(grid_val).strip().lower()
+
+    # 1. Exact Match
+    if v_str == g_str:
+        return True
+    # 2. Substring Match (e.g., "pvt car" inside "private car")
+    if v_str in g_str or g_str in v_str:
+        return True
+    # 3. High-Threshold Fuzzy Match (handles slight typos) — RapidFuzz, 0-100 scale
+    if fuzz.ratio(v_str, g_str) > (CATEGORICAL_FUZZY_THRESHOLD):
+        return True
+
     return False
 
-def check_make_fast(m_tokens, m_make_tokens, m_make_clean, m_raw_clean, g_str, make_mapping):
-    """Fast row-by-row Make/Model >50% overlap and cluster check."""
-    if pd.isna(g_str) or str(g_str).strip().lower() in ('', 'nan', 'none', 'na'): return True
-    if not m_raw_clean: return False
-    
-    for g_make_name in str(g_str).lower().split(','):
-        g_make_name = g_make_name.strip()
-        if not g_make_name: continue
-        
-        if g_make_name in make_mapping:
-            cluster_str = make_mapping[g_make_name]
-            if cluster_str and cluster_str != 'nan':
-                for cluster_item in cluster_str.split(','):
-                    cluster_item = cluster_item.strip()
-                    if not cluster_item: continue
-                    
-                    if cluster_item in m_raw_clean or m_raw_clean in cluster_item:
-                        return True
-                        
-                    c_tokens = set(re.findall(r'[a-z0-9]+', cluster_item))
-                    if c_tokens and m_tokens:
-                        overlap = m_tokens.intersection(c_tokens)
-                        if len(overlap) / len(c_tokens) > 0.5:
-                            return True
-        
-        g_tokens = set(re.findall(r'[a-z0-9]+', g_make_name))
-        if g_tokens and m_make_tokens:
-            overlap = m_make_tokens.intersection(g_tokens)
-            if len(overlap) / len(g_tokens) > 0.5:
-                return True
-                
-        if m_make_clean and (m_make_clean in g_make_name or g_make_name in m_make_clean):
+
+def strict_match_in_cluster(search_term, cluster_string):
+    """
+    Identical to the function of the same name in views.py — kept in sync
+    deliberately so RTO/Make matching behaves the same way here as it does
+    in the dashboard, motor payout rates, and policy lock checker views.
+    Word-boundary regex match against comma-separated cluster items, so
+    'MH09' won't accidentally match inside 'MH090' or similar.
+    """
+    if not cluster_string:
+        return False
+    term = str(search_term).strip().upper()
+    items = [x.strip().upper() for x in str(cluster_string).split(",")]
+    if term in items:
+        return True
+    pattern = rf"(?<![A-Z0-9]){re.escape(term)}(?![A-Z0-9])"
+    for item in items:
+        if re.search(pattern, item):
             return True
-            
     return False
 
-def find_col(df_columns, *targets):
-    """Safely extracts mis columns whether 'Policy: ' prefix is used or not."""
-    cols_clean = {c.lower().replace('policy: ', '').strip(): c for c in df_columns}
-    for t in targets:
-        t_clean = t.lower().replace('policy: ', '').strip()
-        if t_clean in cols_clean:
-            return cols_clean[t_clean]
-        for c_clean, original in cols_clean.items():
-            if t_clean in c_clean:
-                return original
-    return None
 
-def safe_col(df, col_name, fill_val=None):
-    if col_name and col_name in df.columns: return df[col_name]
-    return pd.Series([fill_val] * len(df), index=df.index)
+def build_master_lookup(master_qs, name_field, cluster_field):
+    """
+    Preloads a master table (RTOMaster or MakeModelMaster) once per mapping
+    job and builds a reverse lookup: literal MIS value (upper-cased) -> set
+    of master 'name' values whose cluster contains it. This mirrors the
+    two-step chain used in views.py:
+
+        MIS 'MH09' -> search master.cluster for 'MH09' -> master.name 'ZYX'
+        -> then search RateMaster's cluster column for 'ZYX'
+
+    One MIS value can resolve to multiple master names if more than one
+    master row's cluster contains it; all of them are tried downstream.
+    No fallback is applied if a value isn't found in any cluster — that
+    MIS value simply resolves to an empty set, which fails the rule.
+    """
+    master_rows = list(master_qs.values_list(name_field, cluster_field))
+
+    # Build the master_name -> cluster_items lookup once
+    parsed = []
+    all_individual_terms = set()
+    for name, cluster in master_rows:
+        if not cluster:
+            continue
+        items = [x.strip().upper() for x in str(cluster).split(",") if x.strip()]
+        parsed.append((name, cluster, items))
+        all_individual_terms.update(items)
+
+    # Cache resolved lookups per MIS value so repeated values (common in
+    # bulk MIS files) don't re-scan the whole master table each time.
+    resolution_cache = {}
+
+    def resolve(mis_value):
+        """Returns a set of master 'name' values whose cluster contains mis_value."""
+        if not mis_value:
+            return set()
+        key = str(mis_value).strip().upper()
+        if key in resolution_cache:
+            return resolution_cache[key]
+
+        matched_names = set()
+        for name, cluster, items in parsed:
+            if strict_match_in_cluster(key, cluster):
+                matched_names.add(str(name).strip().lower())
+
+        resolution_cache[key] = matched_names
+        return matched_names
+
+    return resolve
+
+
+def check_resolved_cluster_match(resolved_names, grid_val):
+    """
+    Step 2 of the two-step chain: given the set of master 'name' values
+    resolved from the MIS value (e.g. {'zyx'} or {'private_car_all'}),
+    check whether RateMaster's cluster column (new_rto_list /
+    new_vehicle_makes) contains ANY of them.
+    """
+    if not resolved_names:
+        return False  # No fallback — unresolved MIS value fails the rule
+    if not grid_val:
+        return False
+
+    g_str = str(grid_val).strip().lower()
+    g_items = [x.strip() for x in g_str.split(',') if x.strip()]
+
+    for resolved_name in resolved_names:
+        if resolved_name in g_items:
+            return True
+
+    return False
+
 
 def process_mis_mapping(mis_file_id):
     # Always forcefully wipe the thread's DB connection state to prevent inheritance locks
     connection.close()
-    
+
     try:
         mis_obj = MISFile.objects.get(id=mis_file_id)
         mis_obj.status = 'PROCESSING'
@@ -115,235 +241,377 @@ def process_mis_mapping(mis_file_id):
         return
 
     try:
-        # 1. READ FILE
+        # 1. READ MIS FILE
         file_ext = mis_obj.uploaded_file.name.split('.')[-1].lower()
         if file_ext == 'csv':
             df_mis = pd.read_csv(mis_obj.uploaded_file.path)
         else:
             df_mis = pd.read_excel(mis_obj.uploaded_file.path)
-        
-        # Safely convert column names, handling multi-index edge cases
-        df_mis.columns = [str(col[0]).strip() if isinstance(col, tuple) else str(col).strip() for col in df_mis.columns]
+
+        # Clean up column names internally
+        df_mis.columns = [str(col).strip() for col in df_mis.columns]
         df_mis['Original_Row_ID'] = range(len(df_mis))
         mis_cols = df_mis.columns.tolist()
 
-        # 2. FETCH CLUSTERS
-        rto_qs = RTOMaster.objects.all().values('rto_name', 'rto_cluster')
-        rto_mapping = {str(r['rto_name']).strip().lower(): str(r['rto_cluster']).strip().lower() for r in rto_qs if r['rto_name']}
-        
-        make_qs = MakeModelMaster.objects.all().values('make_model_name', 'make_model_cluster')
-        make_mapping = {str(m['make_model_name']).strip().lower(): str(m['make_model_cluster']).strip().lower() for m in make_qs if m['make_model_name']}
+        # 2. FETCH RATE MASTER DATA
+        qs = RateMaster.objects.filter(status="ACTIVE", is_deleted="NO").select_related(
+            'product', 'sub_product', 'fuel_type', 'make_model_class', 'is_ncb', 'is_cpa', 'is_zd'
+        )
 
-        # 3. LOCATE UPLOADED COLUMNS
-        c_cc = find_col(mis_cols, 'cc cubic capacity', 'cc')
-        c_sc = find_col(mis_cols, 'seating capacity', 'sc')
-        c_age = find_col(mis_cols, 'vehage', 'vehicle age')
-        c_date = find_col(mis_cols, 'inception date', 'issue date')
-        
-        c_prod = find_col(mis_cols, 'vehproduct', 'product name')
-        c_sub_prod = find_col(mis_cols, 'sub product')
-        c_fuel = find_col(mis_cols, 'fuel')
-        c_class = find_col(mis_cols, 'vehicle class', 'buss class')
-        
-        c_ins = find_col(mis_cols, 'insurance company', 'insurer')
-        c_make = find_col(mis_cols, 'vehicle make', 'make')
-        c_model = find_col(mis_cols, 'model')
-        
-        c_rto = find_col(mis_cols, 'rto no', 'rto city', 'rto')
-        c_ncb = find_col(mis_cols, 'no claim bonus', 'ncb')
-        c_cpa = find_col(mis_cols, 'cpa')
-        c_zd = find_col(mis_cols, 'nil dep', 'zero dep')
+        grid_data = []
+        for r in qs:
+            grid_data.append({
+                'id': r.id,
+                'group_id': r.group_id,
+                'po_type': r.po_type,
+                'po_od_rate': r.po_od_rate,
+                'po_tp_rate': r.po_tp_rate,
+                'po_net_rate': r.po_net_rate,
+                'po_flat_amount': r.po_flat_amount,
+                'add_tnc': r.add_tnc,
 
-        # 4. FETCH RATE MASTER
-        fetch_fields = [
-            'id', 'group_id', 'insurance_company', 'po_type', 'po_od_rate', 'po_tp_rate', 
-            'po_net_rate', 'po_flat_amount', 'tariff_min', 'tariff_max', 
-            'product__name', 'sub_product__name', 'fuel_type__name', 'make_model_class__name',
-            'cc_min', 'cc_max', 'sc_min', 'sc_max', 'from_date', 'to_date', 
-            'vehicle_age_min', 'vehicle_age_max', 'new_vehicle_makes', 'new_rto_list',
-            'is_cpa__code', 'is_ncb__code', 'is_zd__code', 'add_tnc'
-        ]
-        qs = RateMaster.objects.filter(status="ACTIVE", is_deleted="NO").values(*fetch_fields)
-        df_grid = pd.DataFrame(list(qs))
-        if df_grid.empty: raise ValueError("RateMaster has no active records configured.")
+                # Relational strings
+                'insurance_company': str(r.insurance_company).strip().lower() if r.insurance_company else '',
+                'product': str(r.product.name).strip().lower() if r.product else '',
+                'sub_product': str(r.sub_product.name).strip().lower() if r.sub_product else '',
+                'fuel_type': str(r.fuel_type.name).strip().lower() if r.fuel_type else '',
+                'make_model_class': str(r.make_model_class.name).strip().lower() if r.make_model_class else '',
 
-        df_grid['_grid_ins'] = safe_col(df_grid, 'insurance_company', '').astype(str).str.strip().str.lower()
-        df_grid['_grid_prod'] = safe_col(df_grid, 'product__name', '').astype(str).str.strip().str.lower()
-        df_grid['_grid_sub'] = safe_col(df_grid, 'sub_product__name', '').astype(str).str.replace(r'\.0$', '', regex=True).str.strip().str.lower()
-        df_grid['_grid_fuel'] = safe_col(df_grid, 'fuel_type__name', '').astype(str).str.strip().str.lower()
-        df_grid['_grid_class'] = safe_col(df_grid, 'make_model_class__name', '').astype(str).str.strip().str.lower()
-        
-        df_grid['cc_min'] = pd.to_numeric(safe_col(df_grid, 'cc_min'), errors='coerce').fillna(0)
-        df_grid['cc_max'] = pd.to_numeric(safe_col(df_grid, 'cc_max'), errors='coerce').fillna(999999)
-        df_grid['sc_min'] = pd.to_numeric(safe_col(df_grid, 'sc_min'), errors='coerce').fillna(0)
-        df_grid['sc_max'] = pd.to_numeric(safe_col(df_grid, 'sc_max'), errors='coerce').fillna(999999)
-        df_grid['vehicle_age_min'] = pd.to_numeric(safe_col(df_grid, 'vehicle_age_min'), errors='coerce').fillna(0)
-        df_grid['vehicle_age_max'] = pd.to_numeric(safe_col(df_grid, 'vehicle_age_max'), errors='coerce').fillna(99)
-        df_grid['from_date'] = pd.to_datetime(safe_col(df_grid, 'from_date'), errors='coerce')
-        df_grid['to_date'] = pd.to_datetime(safe_col(df_grid, 'to_date'), errors='coerce')
+                # Bools/Codes
+                'is_ncb': str(r.is_ncb.code).strip().upper() if r.is_ncb else 'NA',
+                'is_cpa': str(r.is_cpa.code).strip().upper() if r.is_cpa else 'NA',
+                'is_zd': str(r.is_zd.code).strip().upper() if r.is_zd else 'NA',
 
-        # 5. PRE-COMPUTE MIS DATA
-        if c_ins:
-            fuzzy_ins_map = get_fuzzy_dict(safe_col(df_mis, c_ins, '').unique(), df_grid['_grid_ins'].unique(), threshold=0.6)
-            df_mis['_mis_ins'] = safe_col(df_mis, c_ins).map(fuzzy_ins_map)
-        else:
-            df_mis['_mis_ins'] = None
+                # Clusters
+                'new_vehicle_makes': str(r.new_vehicle_makes).strip().lower() if r.new_vehicle_makes else '',
+                'new_rto_list': str(r.new_rto_list).strip().lower() if r.new_rto_list else '',
 
-        df_mis['_s_rto_clean'] = safe_col(df_mis, c_rto, '').apply(lambda x: re.sub(r'[^a-z0-9]', '', str(x).lower()) if pd.notna(x) else '')
-        
-        make_s = safe_col(df_mis, c_make, '').fillna('').astype(str)
-        model_s = safe_col(df_mis, c_model, '').fillna('').astype(str)
-        df_mis['_mis_make_model_raw'] = (make_s + " " + model_s).str.strip().str.lower()
-        df_mis['_mis_mm_tokens'] = df_mis['_mis_make_model_raw'].apply(lambda x: set(re.findall(r'[a-z0-9]+', str(x))) if pd.notna(x) else set())
-        df_mis['_mis_make_tokens'] = make_s.apply(lambda x: set(re.findall(r'[a-z0-9]+', str(x).lower())) if pd.notna(x) else set())
-        df_mis['_s_make'] = make_s.str.lower()
-
-        df_mis['_n_cc'] = pd.to_numeric(safe_col(df_mis, c_cc), errors='coerce').fillna(0)
-        df_mis['_n_sc'] = pd.to_numeric(safe_col(df_mis, c_sc), errors='coerce').fillna(0)
-        df_mis['_n_age'] = pd.to_numeric(safe_col(df_mis, c_age), errors='coerce').fillna(0)
-        df_mis['_d_date'] = pd.to_datetime(safe_col(df_mis, c_date), errors='coerce', dayfirst=True)
-        
-        df_mis['_s_prod'] = safe_col(df_mis, c_prod, '').astype(str).str.strip().str.lower()
-        df_mis['_s_sub'] = safe_col(df_mis, c_sub_prod, '').astype(str).str.replace(r'\.0$', '', regex=True).str.strip().str.lower()
-        df_mis['_s_fuel'] = safe_col(df_mis, c_fuel, '').astype(str).str.strip().str.lower()
-        df_mis['_s_class'] = safe_col(df_mis, c_class, '').astype(str).str.strip().str.lower()
-        
-        df_mis['_n_cpa'] = pd.to_numeric(safe_col(df_mis, c_cpa, '0'), errors='coerce').fillna(-1)
-        df_mis['_n_ncb'] = pd.to_numeric(safe_col(df_mis, c_ncb, '0'), errors='coerce').fillna(-1)
-        df_mis['_s_cpa'] = safe_col(df_mis, c_cpa, '').astype(str).str.strip().str.upper()
-        df_mis['_s_ncb'] = safe_col(df_mis, c_ncb, '').astype(str).str.strip().str.upper()
-        df_mis['_s_zd'] = safe_col(df_mis, c_zd, '').astype(str).str.strip().str.upper()
-
-        # 6. ROW-BY-ROW MATRIX
-        best_rows = []
-
-        for idx, mis_row in df_mis.iterrows():
-            orig_id = mis_row['Original_Row_ID']
-            ins_match = mis_row['_mis_ins']
-            
-            if not ins_match:
-                best_rows.append({
-                    'Original_Row_ID': orig_id,
-                    'Mapping Status': "❌ NO MATCH",
-                    'Failure Reason': "Failed on: Insurance Company (Not found in grid >60%)" if c_ins else "Failed on: Insurance Company (Column Missing)",
-                    'is_valid': False
-                })
-                continue
-                
-            grid_sub = df_grid[df_grid['_grid_ins'] == ins_match].copy()
-            if grid_sub.empty:
-                best_rows.append({
-                    'Original_Row_ID': orig_id,
-                    'Mapping Status': "❌ NO MATCH",
-                    'Failure Reason': "Failed on: Insurance Company (No active rates for this insurer)",
-                    'is_valid': False
-                })
-                continue
-
-            g_prod = grid_sub['_grid_prod']
-            m_prod = (g_prod == '') | (g_prod == 'nan') | (g_prod == 'na') | (g_prod == 'none') | (g_prod == mis_row['_s_prod'])
-            
-            g_sub = grid_sub['_grid_sub']
-            m_sub = (g_sub == '') | (g_sub == 'nan') | (g_sub == 'na') | (g_sub == 'none') | (g_sub == mis_row['_s_sub'])
-            
-            g_fuel = grid_sub['_grid_fuel']
-            m_fuel = (g_fuel == '') | (g_fuel == 'nan') | (g_fuel == 'na') | (g_fuel == 'none') | (g_fuel == mis_row['_s_fuel'])
-            
-            g_class = grid_sub['_grid_class']
-            m_class = (g_class == '') | (g_class == 'nan') | (g_class == 'na') | (g_class == 'none') | (g_class == mis_row['_s_class'])
-
-            m_cc = (grid_sub['cc_min'] == 0) | ((mis_row['_n_cc'] >= grid_sub['cc_min']) & (mis_row['_n_cc'] <= grid_sub['cc_max']))
-            m_sc = (grid_sub['sc_min'] == 0) | ((mis_row['_n_sc'] >= grid_sub['sc_min']) & (mis_row['_n_sc'] <= grid_sub['sc_max']))
-            m_age = (grid_sub['vehicle_age_min'] == 0) | ((mis_row['_n_age'] >= grid_sub['vehicle_age_min']) & (mis_row['_n_age'] <= grid_sub['vehicle_age_max']))
-            m_date = grid_sub['from_date'].isna() | ((mis_row['_d_date'] >= grid_sub['from_date']) & (mis_row['_d_date'] <= grid_sub['to_date']))
-
-            m_rto = grid_sub['new_rto_list'].apply(lambda g: check_rto_fast(mis_row['_s_rto_clean'], g, rto_mapping))
-            m_make = grid_sub['new_vehicle_makes'].apply(lambda g: check_make_fast(mis_row['_mis_mm_tokens'], mis_row['_mis_make_tokens'], mis_row['_s_make'], mis_row['_mis_make_model_raw'], g, make_mapping))
-
-            g_cpa = grid_sub['is_cpa__code'].fillna('NA')
-            m_cpa = (g_cpa == 'NA') | ((g_cpa == 'YES') & (mis_row['_n_cpa'] >= 1) & (mis_row['_n_cpa'] <= 1000)) | ((g_cpa == 'NO') & (mis_row['_n_cpa'] == 0)) | (g_cpa == mis_row['_s_cpa'])
-
-            g_ncb = grid_sub['is_ncb__code'].fillna('NA')
-            m_ncb = (g_ncb == 'NA') | ((g_ncb == 'YES') & (mis_row['_n_ncb'] >= 1) & (mis_row['_n_ncb'] <= 99)) | ((g_ncb == 'NO') & (mis_row['_n_ncb'] == 0)) | (g_ncb == mis_row['_s_ncb'])
-
-            g_zd = grid_sub['is_zd__code'].fillna('NA')
-            m_zd = (g_zd == 'NA') | ((g_zd == 'YES') & (mis_row['_s_zd'] in ['1', 'YES', 'Y', 'TRUE'])) | ((g_zd == 'NO') & (mis_row['_s_zd'] in ['0', 'NO', 'N', 'FALSE'])) | (g_zd == mis_row['_s_zd'])
-
-            is_valid = m_prod & m_sub & m_fuel & m_class & m_cc & m_sc & m_age & m_date & m_rto & m_make & m_cpa & m_ncb & m_zd
-            match_score = m_prod.astype(int) + m_sub.astype(int) + m_fuel.astype(int) + m_class.astype(int) + \
-                          m_cc.astype(int) + m_sc.astype(int) + m_age.astype(int) + m_date.astype(int) + \
-                          m_rto.astype(int) + m_make.astype(int) + m_cpa.astype(int) + m_ncb.astype(int) + m_zd.astype(int)
-            
-            calc_rank = grid_sub['po_net_rate'].fillna(grid_sub['po_od_rate']).fillna(grid_sub['po_flat_amount']).fillna(0)
-
-            grid_sub['is_valid'] = is_valid
-            grid_sub['match_score'] = match_score
-            grid_sub['Calculated Rank'] = calc_rank
-            
-            grid_sub['m_prod'] = m_prod; grid_sub['m_sub'] = m_sub; grid_sub['m_fuel'] = m_fuel; grid_sub['m_class'] = m_class
-            grid_sub['m_cc'] = m_cc; grid_sub['m_sc'] = m_sc; grid_sub['m_age'] = m_age; grid_sub['m_date'] = m_date
-            grid_sub['m_rto'] = m_rto; grid_sub['m_make'] = m_make
-            grid_sub['m_cpa'] = m_cpa; grid_sub['m_ncb'] = m_ncb; grid_sub['m_zd'] = m_zd
-
-            grid_sub = grid_sub.sort_values(by=['is_valid', 'match_score', 'Calculated Rank'], ascending=[False, False, False])
-            best_row = grid_sub.iloc[0]
-
-            if best_row['is_valid']:
-                mapping_status = "✅ MATCH"
-                failure_reason = "Matched Successfully"
-            else:
-                mapping_status = "❌ NO MATCH"
-                fails = []
-                if not best_row['m_prod']: fails.append("Vehicle Product")
-                if not best_row['m_sub']: fails.append("Sub Product")
-                if not best_row['m_fuel']: fails.append("Fuel Type")
-                if not best_row['m_class']: fails.append("Vehicle Class")
-                if not best_row['m_cc']: fails.append("CC Limit")
-                if not best_row['m_sc']: fails.append("Seating Limit")
-                if not best_row['m_age']: fails.append("Vehicle Age")
-                if not best_row['m_date']: fails.append("Inception Date")
-                if not best_row['m_rto']: fails.append("RTO Code")
-                if not best_row['m_make']: fails.append("Make/Model")
-                if not best_row['m_cpa']: fails.append("CPA")
-                if not best_row['m_ncb']: fails.append("NCB")
-                if not best_row['m_zd']: fails.append("Nil Dep")
-                failure_reason = f"Failed on: {', '.join(fails)}"
-                
-            best_rows.append({
-                'Original_Row_ID': orig_id,
-                'Mapping Status': mapping_status,
-                'Failure Reason': failure_reason,
-                'Displaygroupid': best_row['group_id'] if pd.notna(best_row['group_id']) else best_row['id'],
-                'Potype': best_row['po_type'],
-                'Poodrate': best_row['po_od_rate'],
-                'Potprate': best_row['po_tp_rate'],
-                'Ponetrate': best_row['po_net_rate'],
-                'Poflatamount': best_row['po_flat_amount'],
-                'Addtnc': best_row['add_tnc']
+                # Numerics & Dates
+                'cc_min': r.cc_min, 'cc_max': r.cc_max,
+                'sc_min': r.sc_min, 'sc_max': r.sc_max,
+                'vehicle_age_min': r.vehicle_age_min, 'vehicle_age_max': r.vehicle_age_max,
+                'from_date': r.from_date, 'to_date': r.to_date,
             })
 
-        # 7. ASSEMBLE EXPORT
-        df_extracted = pd.DataFrame(best_rows)
+        df_grid = pd.DataFrame(grid_data)
+        if df_grid.empty:
+            raise ValueError("RateMaster has no active records configured.")
+
+        # Preload RTOMaster and MakeModelMaster once per job — these power
+        # the two-step lookup chain for Rules 5a/5b below (MIS value ->
+        # master cluster -> master name -> RateMaster cluster).
+        resolve_rto = build_master_lookup(
+            RTOMaster.objects.all(), 'rto_name', 'rto_cluster'
+        )
+        resolve_make = build_master_lookup(
+            MakeModelMaster.objects.all(), 'make_model_name', 'make_model_cluster'
+        )
+
+        # Cast Grid numeric & date columns safely
+        for col in ['cc_min', 'cc_max', 'sc_min', 'sc_max', 'vehicle_age_min', 'vehicle_age_max']:
+            df_grid[col] = pd.to_numeric(df_grid[col], errors='coerce')
+        df_grid['from_date'] = pd.to_datetime(df_grid['from_date'], errors='coerce')
+        df_grid['to_date'] = pd.to_datetime(df_grid['to_date'], errors='coerce')
+
+        # 3. PRE-COMPUTE MIS DATA
+        df_mis['_mis_ins'] = safe_get_col(df_mis, 'Policy: insurance company')
+        df_mis['_mis_prod'] = safe_get_col(df_mis, 'Policy: vehproduct').astype(str).str.strip().str.lower()
+        df_mis['_mis_sub_prod'] = safe_get_col(df_mis, 'Policy: sub product').astype(str).str.strip().str.lower()
+        df_mis['_mis_fuel'] = safe_get_col(df_mis, 'Policy: fuel').astype(str).str.strip().str.lower()
+        df_mis['_mis_class'] = safe_get_col(df_mis, 'Policy: vehicle class').astype(str).str.strip().str.lower()
+
+        _make = safe_get_col(df_mis, 'Policy: vehicle make').fillna('').astype(str)
+        _model = safe_get_col(df_mis, 'Policy: model').fillna('').astype(str)
+        df_mis['_mis_make_model'] = (_make + " " + _model).str.strip().str.lower()
+        # Make-only column: used for the Rule 5a match, since RateMaster's
+        # Vehicle Makes clusters store make-level codes (e.g. 'tata',
+        # 'mahindra', 'bikeall'), not model-level detail.
+        df_mis['_mis_make'] = _make.str.strip().str.lower()
+        df_mis['_mis_rto'] = safe_get_col(df_mis, 'Policy: rto no').astype(str).str.strip().str.lower()
+
+        # Regex strips letters ("1500 CC" -> 1500)
+        cc_raw = safe_get_col(df_mis, 'Policy: cc cubic capacity').astype(str).str.replace(r'[^0-9.]', '', regex=True)
+        df_mis['_mis_cc'] = pd.to_numeric(cc_raw, errors='coerce')
+
+        sc_raw = safe_get_col(df_mis, 'Policy: seating capacity').astype(str).str.replace(r'[^0-9.]', '', regex=True)
+        df_mis['_mis_sc'] = pd.to_numeric(sc_raw, errors='coerce')
+
+        age_raw = safe_get_col(df_mis, 'Policy: vehage').astype(str).str.replace(r'[^0-9.]', '', regex=True)
+        df_mis['_mis_age'] = pd.to_numeric(age_raw, errors='coerce')
+
+        df_mis['_mis_date'] = pd.to_datetime(safe_get_col(df_mis, 'Policy: inception date'), errors='coerce', dayfirst=True)
+
+        df_mis['_mis_ncb'] = pd.to_numeric(safe_get_col(df_mis, 'Policy: no claim bonus'), errors='coerce')
+        df_mis['_mis_cpa'] = pd.to_numeric(safe_get_col(df_mis, 'Policy: cpa'), errors='coerce')
+        df_mis['_mis_zd'] = safe_get_col(df_mis, 'Policy: nil dep').astype(str).str.strip().str.upper()
+
+        # Insurance company fuzzy mapping — now powered by RapidFuzz (5-100x faster)
+        fuzzy_ins_map = get_fuzzy_dict(
+            df_mis['_mis_ins'].unique(),
+            df_grid['insurance_company'].unique(),
+            threshold=INSURANCE_FUZZY_THRESHOLD
+        )
+        df_mis['_mis_ins_mapped'] = df_mis['_mis_ins'].map(fuzzy_ins_map)
+
+        results = []
+
+        # 4. ROW-BY-ROW PROCESSING
+        for idx, mis_row in df_mis.iterrows():
+            valid_mask = pd.Series([True] * len(df_grid), index=df_grid.index)
+            failed_on = []
+
+            # --- RULE 1: Insurance Company ---
+            val_ins = mis_row['_mis_ins_mapped']
+            if not val_ins:
+                failed_on.append('Policy: insurance company')
+                valid_mask = valid_mask & False
+            else:
+                rule_mask = (df_grid['insurance_company'] == val_ins)
+                valid_mask = valid_mask & rule_mask
+                if not valid_mask.any():
+                    failed_on.append('Policy: insurance company')
+
+            # --- RULE 2: Categorical Matches (RapidFuzz-backed) ---
+            # Vehicle class is handled separately below (Rule 2b) with its own
+            # direct-match + NA-wildcard logic, so it is excluded here.
+            cat_rules = [
+                ('_mis_prod', 'product', 'Policy: vehproduct'),
+                ('_mis_sub_prod', 'sub_product', 'Policy: sub product'),
+                ('_mis_fuel', 'fuel_type', 'Policy: fuel'),
+            ]
+            for mis_col, grid_col, label in cat_rules:
+                if valid_mask.any():
+                    val = mis_row[mis_col]
+                    rule_mask = df_grid[grid_col].apply(lambda g: check_categorical_match(val, g))
+                    valid_mask = valid_mask & rule_mask
+                    if not valid_mask.any():
+                        failed_on.append(label)
+
+            # --- RULE 2b: Vehicle Class — direct match + NA wildcard ---
+            # Uses case-insensitive exact match only (no fuzzy/substring).
+            # RateMaster rows where make_model_class == 'na' are treated as a
+            # wildcard — they pass regardless of what vehicle class the MIS row
+            # carries. All other RateMaster values must match exactly
+            # (e.g. 'bike' == 'bike', 'car' == 'car').
+            # If the MIS value itself is blank or 'na', only NA wildcard rows pass.
+            if valid_mask.any():
+                val_class = mis_row['_mis_class']  # already .strip().lower()
+                mis_class_is_blank = (not val_class or val_class == 'nan')
+
+                def match_vehicle_class(grid_val):
+                    g = str(grid_val).strip().lower() if grid_val else ''
+                    # NA in RateMaster → always passes (wildcard)
+                    if g == 'na' or not g:
+                        return True
+                    # blank MIS value → only NA wildcard rows pass
+                    if mis_class_is_blank:
+                        return False
+                    # direct case-insensitive exact match
+                    return val_class == g
+
+                rule_mask = df_grid['make_model_class'].apply(match_vehicle_class)
+                valid_mask = valid_mask & rule_mask
+                if not valid_mask.any():
+                    failed_on.append('Policy: vehicle class')
+
+            # --- RULE 3: Numeric Ranges ---
+            range_rules = [
+                ('_mis_cc', 'cc_min', 'cc_max', 'Policy: cc cubic capacity'),
+                ('_mis_sc', 'sc_min', 'sc_max', 'Policy: seating capacity'),
+                ('_mis_age', 'vehicle_age_min', 'vehicle_age_max', 'Policy: vehage')
+            ]
+            for mis_col, min_col, max_col, label in range_rules:
+                if valid_mask.any():
+                    val = mis_row[mis_col]
+                    if pd.isna(val):
+                        rule_mask = df_grid[min_col].isna() & df_grid[max_col].isna()
+                    else:
+                        min_cond = df_grid[min_col].isna() | (df_grid[min_col] <= val)
+                        max_cond = df_grid[max_col].isna() | (df_grid[max_col] >= val)
+                        rule_mask = min_cond & max_cond
+                    valid_mask = valid_mask & rule_mask
+                    if not valid_mask.any():
+                        failed_on.append(label)
+
+            # --- RULE 4: Dates ---
+            if valid_mask.any():
+                val = mis_row['_mis_date']
+                if pd.isna(val):
+                    rule_mask = df_grid['from_date'].isna() & df_grid['to_date'].isna()
+                else:
+                    min_cond = df_grid['from_date'].isna() | (df_grid['from_date'] <= val)
+                    max_cond = df_grid['to_date'].isna() | (df_grid['to_date'] >= val)
+                    rule_mask = min_cond & max_cond
+                valid_mask = valid_mask & rule_mask
+                if not valid_mask.any():
+                    failed_on.append('Policy: inception date')
+
+            # --- RULE 5a: Vehicle Make — two-step master lookup ---
+            # Step 1: resolve MIS 'MARUTI' against MakeModelMaster.make_model_cluster
+            #         -> e.g. {'private_car_all'}
+            # Step 2: check RateMaster.new_vehicle_makes for 'private_car_all'
+            # No fallback: if MIS value isn't found in MakeModelMaster at all,
+            # the row fails this rule.
+            if valid_mask.any():
+                val_make = mis_row['_mis_make']
+                if val_make == 'nan' or not val_make:
+                    rule_mask = df_grid['new_vehicle_makes'] == ''
+                else:
+                    resolved_make_names = resolve_make(val_make)
+                    rule_mask = df_grid['new_vehicle_makes'].apply(
+                        lambda g: check_resolved_cluster_match(resolved_make_names, g)
+                    )
+
+                valid_mask = valid_mask & rule_mask
+                if not valid_mask.any():
+                    failed_on.append('Policy: vehicle make / model')
+
+            # --- RULE 5b: RTO — two-step master lookup ---
+            # Step 1: resolve MIS 'MH09' against RTOMaster.rto_cluster -> e.g. {'zyx'}
+            # Step 2: check RateMaster.new_rto_list for 'zyx'
+            # No fallback: if MIS value isn't found in RTOMaster at all,
+            # the row fails this rule.
+            if valid_mask.any():
+                val_rto = mis_row['_mis_rto']
+                if val_rto == 'nan' or not val_rto:
+                    rule_mask = df_grid['new_rto_list'] == ''
+                else:
+                    resolved_rto_names = resolve_rto(val_rto)
+                    rule_mask = df_grid['new_rto_list'].apply(
+                        lambda g: check_resolved_cluster_match(resolved_rto_names, g)
+                    )
+                valid_mask = valid_mask & rule_mask
+                if not valid_mask.any():
+                    failed_on.append('Policy: rto no')
+
+            # --- RULE 6: Complex Codes (NCB, CPA, ZD) ---
+            if valid_mask.any():
+                val_ncb = mis_row['_mis_ncb']
+                m_ncb_yes = (df_grid['is_ncb'] == 'YES') & (val_ncb >= 1) & (val_ncb <= 99)
+                m_ncb_no = (df_grid['is_ncb'] == 'NO') & (val_ncb == 0)
+                m_ncb_na = (df_grid['is_ncb'] == 'NA') | df_grid['is_ncb'].isna()
+                rule_mask = m_ncb_yes | m_ncb_no | m_ncb_na
+                valid_mask = valid_mask & rule_mask
+                if not valid_mask.any():
+                    failed_on.append('Policy: no claim bonus')
+
+            if valid_mask.any():
+                val_cpa = mis_row['_mis_cpa']
+                m_cpa_yes = (df_grid['is_cpa'] == 'YES') & (val_cpa >= 1) & (val_cpa <= 1000)
+                m_cpa_no = (df_grid['is_cpa'] == 'NO') & (val_cpa == 0)
+                m_cpa_na = (df_grid['is_cpa'] == 'NA') | df_grid['is_cpa'].isna()
+                rule_mask = m_cpa_yes | m_cpa_no | m_cpa_na
+                valid_mask = valid_mask & rule_mask
+                if not valid_mask.any():
+                    failed_on.append('Policy: cpa')
+
+            if valid_mask.any():
+                # FIX: original code computed `val_zd in [...]` once as a Python bool
+                # OUTSIDE the per-row grid comparison, so it never varied per grid row
+                # correctly when combined with df_grid['is_zd'] comparisons. Made this
+                # an explicit boolean column-level mask instead.
+                val_zd = mis_row['_mis_zd']
+                zd_is_yes_value = val_zd in ['1', 'YES', 'Y', 'TRUE']
+                zd_is_no_value = val_zd in ['0', 'NO', 'N', 'FALSE']
+
+                m_zd_yes = (df_grid['is_zd'] == 'YES') & zd_is_yes_value
+                m_zd_no = (df_grid['is_zd'] == 'NO') & zd_is_no_value
+                m_zd_na = (df_grid['is_zd'] == 'NA') | df_grid['is_zd'].isna()
+                rule_mask = m_zd_yes | m_zd_no | m_zd_na
+                valid_mask = valid_mask & rule_mask
+                if not valid_mask.any():
+                    failed_on.append('Policy: nil dep')
+
+            # --- FINAL RESOLUTION ---
+            matched_grid = df_grid[valid_mask]
+            matched_count = len(matched_grid)
+
+            if matched_count == 1:
+                # EXACT SINGLE MATCH — safe to apply rate
+                best_match = matched_grid.iloc[0]
+                results.append({
+                    'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
+                    'Mapping Status': '✅ MATCH',
+                    'Failure Reason': 'Matched Successfully',
+                    'Displaygroupid': best_match.get('group_id') if pd.notna(best_match.get('group_id')) else best_match.get('id'),
+                    'Potype': best_match.get('po_type'),
+                    'Poodrate': best_match.get('po_od_rate'),
+                    'Potprate': best_match.get('po_tp_rate'),
+                    'Ponetrate': best_match.get('po_net_rate'),
+                    'Poflatamount': best_match.get('po_flat_amount'),
+                    'Addtnc': best_match.get('add_tnc')
+                })
+
+            elif matched_count > 1:
+                # MULTIPLE MATCHES — do not apply any rate.
+                # The team must narrow the Rate Master so only one group
+                # matches this combination of fields.
+                matched_group_ids = sorted(
+                    matched_grid['group_id'].dropna().astype(int).unique().tolist()
+                )
+                group_id_str = ', '.join(str(g) for g in matched_group_ids[:10])
+                if len(matched_group_ids) > 10:
+                    group_id_str += f' … (+{len(matched_group_ids)-10} more)'
+
+                results.append({
+                    'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
+                    'Mapping Status': '⚠️ MULTIPLE MATCHES',
+                    'Failure Reason': (
+                        f"Multiple Rate Master groups matched ({matched_count} rows). "
+                        f"Please refine Rate Master so only one group applies. "
+                        f"Matching Group IDs: {group_id_str}"
+                    ),
+                    'Displaygroupid': None,
+                    'Potype': None, 'Poodrate': None, 'Potprate': None,
+                    'Ponetrate': None, 'Poflatamount': None, 'Addtnc': None
+                })
+
+            else:
+                # ZERO MATCHES — record the first rule that eliminated candidates
+                reason = f"Failed on: {failed_on[0]}" if failed_on else "No rates found for criteria"
+                results.append({
+                    'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
+                    'Mapping Status': '❌ NO MATCH',
+                    'Failure Reason': reason,
+                    'Displaygroupid': None,
+                    'Potype': None, 'Poodrate': None, 'Potprate': None,
+                    'Ponetrate': None, 'Poflatamount': None, 'Addtnc': None
+                })
+
+        # 5. ASSEMBLE FINAL EXPORT
+        df_extracted = pd.DataFrame(results)
+
+        # Calculate process counts
+        total_processed = len(df_mis)
+        total_matched   = len(df_extracted[df_extracted['Mapping Status'] == '✅ MATCH'])
+        total_multiple  = len(df_extracted[df_extracted['Mapping Status'] == '⚠️ MULTIPLE MATCHES'])
+
+        # Clean up temporary columns from df_mis before merging
+        cols_to_drop = [c for c in df_mis.columns if c.startswith('_mis_')]
+        df_mis = df_mis.drop(columns=cols_to_drop)
+
         if not df_extracted.empty:
             df_final = df_mis.merge(df_extracted, on='Original_Row_ID', how='left')
         else:
             df_final = df_mis.copy()
             df_final['Mapping Status'] = "❌ NO MATCH"
-            df_final['Failure Reason'] = "Failed on: System Error (No blocks evaluated)"
+            df_final['Failure Reason'] = "Failed on: System Error"
 
         df_final['Mapping Status'] = df_final['Mapping Status'].fillna("❌ NO MATCH")
 
+        # Ensure output columns exist
         payout_cols = ['Displaygroupid', 'Potype', 'Poodrate', 'Potprate', 'Ponetrate', 'Poflatamount', 'Addtnc']
         for p_col in payout_cols:
-            if p_col not in df_final.columns: df_final[p_col] = None
-            
+            if p_col not in df_final.columns:
+                df_final[p_col] = None
+
         df_final.loc[df_final['Mapping Status'] != "✅ MATCH", payout_cols] = None
 
         generated_cols = ['Mapping Status', 'Failure Reason'] + payout_cols
         original_cols = [c for c in mis_cols]
         df_final = df_final[generated_cols + original_cols]
 
-        # 8. SAVE
+        # 6. SAVE
         output = io.BytesIO()
         if file_ext == 'csv':
             df_final.to_csv(output, index=False)
@@ -355,26 +623,32 @@ def process_mis_mapping(mis_file_id):
         mis_obj.processed_file.save(new_filename, ContentFile(output.getvalue()))
         mis_obj.status = 'COMPLETED'
         mis_obj.processed_at = timezone.now()
-        mis_obj.error_message = ""
+
+        mis_obj.error_message = (
+            f"Processed {total_processed} rows successfully. "
+            f"Mapped {total_matched} rates. "
+            f"{total_multiple} rows skipped — multiple Rate Master groups matched "
+            f"(refine Rate Master to get a single match)."
+        )
         mis_obj.save()
 
-    except BaseException as e: # Catch Memory Errors and Thread Deaths!
+    except Exception as e:
+        # FIX: was `except BaseException`, which also catches KeyboardInterrupt /
+        # SystemExit and can block graceful container shutdown. Narrowed to Exception.
         import traceback
         error_trace = traceback.format_exc()
         print(f"\n❌ MIS Mapping Error: {str(e)}")
         print(error_trace)
-        
+
         try:
-            # Force connection clear before updating error to prevent transaction locks
             connection.close()
             mis_obj = MISFile.objects.get(id=mis_file_id)
             mis_obj.status = 'FAILED'
-            mis_obj.error_message = str(e)[:1000] # Limit size for database safety
+            mis_obj.error_message = str(e)[:1000]
             mis_obj.processed_at = timezone.now()
             mis_obj.save()
-        except BaseException as recovery_err:
+        except Exception as recovery_err:
             print(f"CRITICAL FAULT: Could not write Failure state to DB: {recovery_err}")
-            
+
     finally:
-        # Guarantee DB Thread Pool release
         connection.close()

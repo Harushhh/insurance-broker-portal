@@ -1,99 +1,635 @@
 {% extends "base.html" %}
 {% block content %}
+
+<style>
+  /* ── Match existing app design language ─────────────────────────── */
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1.5rem;
+    gap: 1rem;
+  }
+  .page-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #1a1a2e;
+    margin: 0 0 4px 0;
+    letter-spacing: -0.01em;
+  }
+  .page-subtitle {
+    font-size: 0.83rem;
+    color: #6b7280;
+    margin: 0;
+  }
+
+  /* ── Stat pills (top right, matching Rate Master Groups/Unlocked/Locked) */
+  .stat-pills {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .stat-pill {
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    padding: 8px 18px;
+    text-align: center;
+    background: #fff;
+    min-width: 80px;
+  }
+  .stat-pill .pill-label {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: #9ca3af;
+    font-weight: 600;
+    display: block;
+    margin-bottom: 3px;
+  }
+  .stat-pill .pill-value {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #111827;
+    display: block;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-pill .pill-value.green  { color: #16a34a; }
+  .stat-pill .pill-value.amber  { color: #d97706; }
+  .stat-pill .pill-value.red    { color: #dc2626; }
+  .stat-pill .pill-value.blue   { color: #2563eb; }
+
+  /* ── Section card — same as Rate Master filter card ─────────────── */
+  .section-card {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    margin-bottom: 1.25rem;
+    overflow: hidden;
+  }
+  .section-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .section-card-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #374151;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0;
+  }
+  .section-card-body { padding: 20px; }
+
+  /* ── Upload form ─────────────────────────────────────────────────── */
+  .upload-row {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .upload-file-input {
+    flex: 1;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    color: #374151;
+    background: #f9fafb;
+    width: 100%;
+  }
+  .upload-file-input:focus { outline: none; border-color: #2563eb; }
+  .btn-upload-primary {
+    background: #2563eb;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 22px;
+    font-size: 0.83rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    transition: background .15s, transform .1s;
+    text-decoration: none;
+  }
+  .btn-upload-primary:hover  { background: #1d4ed8; color: #fff; }
+  .btn-upload-primary:active { transform: scale(.98); }
+  .upload-hint {
+    font-size: 0.75rem;
+    color: #9ca3af;
+    margin-top: 8px;
+    margin-bottom: 0;
+  }
+
+  /* ── Refresh stats bar ───────────────────────────────────────────── */
+  .refresh-stats-bar {
+    display: none;
+    padding: 9px 20px;
+    background: #eff6ff;
+    border-bottom: 1px solid #dbeafe;
+    gap: 1.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+    font-size: 0.78rem;
+    color: #6b7280;
+  }
+  .refresh-stats-bar.visible { display: flex; }
+  .rstat { display: flex; align-items: center; gap: 5px; }
+  .rstat-val            { font-weight: 700; color: #111827; }
+  .rstat-val.green      { color: #16a34a; }
+  .rstat-val.amber      { color: #d97706; }
+  .rstat-val.red        { color: #dc2626; }
+  .rstat-val.blue       { color: #2563eb; }
+  .refresh-ts { margin-left: auto; font-size: 0.7rem; color: #9ca3af; }
+
+  /* ── Table — identical to Rate Master table style ────────────────── */
+  .engine-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+  }
+  .engine-table thead tr {
+    border-bottom: 2px solid #f3f4f6;
+  }
+  .engine-table th {
+    padding: 10px 16px;
+    text-align: left;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    color: #9ca3af;
+    font-weight: 600;
+    background: #fff;
+    white-space: nowrap;
+  }
+  .engine-table td {
+    padding: 12px 16px;
+    border-bottom: 1px solid #f3f4f6;
+    color: #374151;
+    vertical-align: middle;
+  }
+  .engine-table tr:last-child td { border-bottom: none; }
+  .engine-table tbody tr:hover td { background: #f9fafb; }
+
+  .row-id { color: #9ca3af; font-size: 0.75rem; font-weight: 500; }
+  .file-name {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: #111827;
+    font-family: 'SFMono-Regular', 'Consolas', monospace;
+  }
+
+  /* ── Record count pill ───────────────────────────────────────────── */
+  .record-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    color: #16a34a;
+    border-radius: 20px;
+    padding: 3px 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .record-pill-dot {
+    width: 5px; height: 5px;
+    border-radius: 50%;
+    background: #16a34a;
+    flex-shrink: 0;
+  }
+
+  /* ── Status badges — matching app's existing badge style ─────────── */
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge-pending    { background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; }
+  .badge-processing { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+  .badge-completed  { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+  .badge-failed     { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+
+  /* ── Processing shimmer ──────────────────────────────────────────── */
+  .processing-wrap { display: flex; flex-direction: column; gap: 5px; }
+  .progress-track {
+    height: 3px;
+    background: #fde68a;
+    border-radius: 2px;
+    width: 100px;
+    overflow: hidden;
+  }
+  .progress-slide {
+    height: 100%;
+    width: 35%;
+    background: #d97706;
+    border-radius: 2px;
+    animation: slide 1.5s ease-in-out infinite;
+  }
+  @keyframes slide {
+    0%   { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
+  }
+  .pulse-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #d97706;
+    display: inline-block;
+    animation: pulse 1.2s ease-in-out infinite;
+    margin-right: 3px;
+  }
+  @keyframes pulse {
+    0%,100% { opacity:1; transform:scale(1); }
+    50%      { opacity:.4; transform:scale(.65); }
+  }
+
+  /* ── Action buttons ──────────────────────────────────────────────── */
+  .btn-download {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #2563eb;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition: background .12s, border-color .12s;
+    white-space: nowrap;
+  }
+  .btn-download:hover { background: #dbeafe; border-color: #93c5fd; color: #1d4ed8; }
+  .btn-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #fff;
+    border: 1px solid #d1d5db;
+    color: #374151;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color .12s, background .12s;
+  }
+  .btn-refresh:hover { border-color: #2563eb; background: #eff6ff; color: #2563eb; }
+  .btn-refresh:disabled { opacity: .6; cursor: not-allowed; }
+  .refresh-icon { display: inline-block; transition: transform .5s; }
+  .spinning .refresh-icon { animation: spin .6s cubic-bezier(.4,0,.2,1); }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+  .btn-manage {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #fff;
+    border: 1px solid #d1d5db;
+    color: #374151;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-decoration: none;
+    transition: border-color .12s, background .12s;
+  }
+  .btn-manage:hover { border-color: #6b7280; background: #f9fafb; color: #111827; }
+
+  .error-tip {
+    color: #dc2626;
+    font-size: 0.75rem;
+    cursor: help;
+    border-bottom: 1px dashed #fca5a5;
+  }
+  .text-muted-sm { color: #9ca3af; font-size: 0.75rem; }
+
+  /* ── Alert banners ───────────────────────────────────────────────── */
+  .alert-success {
+    background: #f0fdf4; border: 1px solid #bbf7d0;
+    color: #166534; border-radius: 8px;
+    padding: 11px 16px; font-size: 0.83rem;
+    margin-bottom: 1.25rem;
+  }
+  .alert-danger {
+    background: #fef2f2; border: 1px solid #fecaca;
+    color: #991b1b; border-radius: 8px;
+    padding: 11px 16px; font-size: 0.83rem;
+    margin-bottom: 1.25rem;
+  }
+
+  /* ── Empty state ─────────────────────────────────────────────────── */
+  .empty-state {
+    padding: 3rem 0;
+    text-align: center;
+    color: #9ca3af;
+  }
+  .empty-state svg { display: block; margin: 0 auto 12px; opacity: .3; }
+  .empty-state p { font-size: 0.83rem; margin: 0; }
+
+  /* ── Count badge beside title ────────────────────────────────────── */
+  .count-badge {
+    background: #f3f4f6;
+    color: #6b7280;
+    border-radius: 20px;
+    padding: 2px 9px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    border: 1px solid #e5e7eb;
+  }
+</style>
+
 <div class="container-fluid py-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-        <h2 class="mb-0">Automated MIS Payout Engine</h2>
-        <a href="{% url 'mis_mapping_dashboard' %}" class="btn btn-outline-secondary">
-            ⚙️ Manage Logic Rules
-        </a>
+
+  <!-- ── Page header ── -->
+  <div class="page-header">
+    <div>
+      <h2 class="page-title">MIS Payout Engine</h2>
+      <p class="page-subtitle">Upload raw MIS data and automatically map payout rates.</p>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+      <!-- Stat pills — matches Rate Master Groups / Unlocked / Locked -->
+      <div class="stat-pills">
+        <div class="stat-pill">
+          <span class="pill-label">Total</span>
+          <span class="pill-value blue" id="sp-total">{{ files|length }}</span>
+        </div>
+        <div class="stat-pill">
+          <span class="pill-label">Completed</span>
+          <span class="pill-value green" id="sp-completed">0</span>
+        </div>
+        <div class="stat-pill">
+          <span class="pill-label">Processing</span>
+          <span class="pill-value amber" id="sp-processing">0</span>
+        </div>
+        <div class="stat-pill">
+          <span class="pill-label">Failed</span>
+          <span class="pill-value red" id="sp-failed">0</span>
+        </div>
+      </div>
+      <a href="{% url 'mis_mapping_dashboard' %}" class="btn-manage">
+        ⚙️ Manage Logic Rules
+      </a>
+    </div>
+  </div>
+
+  <!-- Alerts -->
+  {% if msg %}<div class="alert-success">✅ {{ msg }}</div>{% endif %}
+  {% if error %}<div class="alert-danger">⚠️ {{ error }}</div>{% endif %}
+
+  <!-- ── Upload card ── -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <h5 class="section-card-title">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Upload Raw MIS Data
+      </h5>
+    </div>
+    <div class="section-card-body">
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        <div class="upload-row">
+          <div style="flex:1">
+            {{ form.uploaded_file }}
+          </div>
+          <button type="submit" class="btn-upload-primary">
+            🚀 Upload &amp; Process
+          </button>
+        </div>
+        <p class="upload-hint">Supports Excel (.xlsx, .xls) and CSV files. Large files are processed in the background.</p>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Processing history card ── -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <h5 class="section-card-title">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="9" x2="9" y2="21"/></svg>
+        Processing History
+        <span class="count-badge" id="history-count-badge">{{ files|length }} files</span>
+      </h5>
+      <button class="btn-refresh" id="refreshBtn" onclick="doRefresh()">
+        <span class="refresh-icon">↻</span>
+        Refresh Status
+      </button>
     </div>
 
-    {% if msg %}
-    <div class="alert alert-success">{{ msg }}</div>
-    {% endif %}
-    {% if error %}
-    <div class="alert alert-danger">{{ error }}</div>
-    {% endif %}
+    <!-- Stats bar — appears after each refresh -->
+    <div class="refresh-stats-bar" id="refreshStatsBar">
+      <div class="rstat">Records mapped:&nbsp;<span class="rstat-val green" id="rs-records">—</span></div>
+      <div class="rstat">Rows processed:&nbsp;<span class="rstat-val blue" id="rs-rows">—</span></div>
+      <div class="rstat">Completed:&nbsp;<span class="rstat-val green" id="rs-completed">—</span></div>
+      <div class="rstat">Processing:&nbsp;<span class="rstat-val amber" id="rs-processing">—</span></div>
+      <div class="rstat">Failed:&nbsp;<span class="rstat-val red" id="rs-failed">—</span></div>
+      <div class="refresh-ts" id="rs-ts"></div>
+    </div>
 
-    <div class="card shadow-sm mb-4">
-        <div class="card-header bg-primary text-white">
-            <h5 class="mb-0">Upload Raw MIS Data</h5>
-        </div>
-        <div class="card-body">
-            <form method="post" enctype="multipart/form-data" class="d-flex align-items-center gap-3">
-                {% csrf_token %}
-                <div class="flex-grow-1">
-                    {{ form.uploaded_file }}
+    <div class="table-responsive">
+      <table class="engine-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Uploaded File</th>
+            <th>Status</th>
+            <th>Records Processed</th>
+            <th>Upload Date</th>
+            <th>Completion Date</th>
+            <th>Output</th>
+          </tr>
+        </thead>
+        <tbody id="historyBody">
+          {% for file in files %}
+          <tr data-id="{{ file.id }}"
+              data-status="{{ file.status }}"
+              data-msg="{{ file.error_message|default:'' }}">
+            <td><span class="row-id">#{{ file.id }}</span></td>
+            <td><span class="file-name">{{ file.uploaded_file.name|slice:"12:" }}</span></td>
+            <td>
+              {% if file.status == 'PENDING' %}
+                <span class="status-badge badge-pending">Pending</span>
+              {% elif file.status == 'PROCESSING' %}
+                <div class="processing-wrap">
+                  <span class="status-badge badge-processing">
+                    <span class="pulse-dot"></span>Processing
+                  </span>
+                  <div class="progress-track"><div class="progress-slide"></div></div>
                 </div>
-                <button type="submit" class="btn btn-success px-4 py-2">
-                    🚀 Upload & Process
-                </button>
-            </form>
-            <small class="text-muted mt-2 d-block">
-                Supports Excel (.xlsx, .xls) and CSV files. Large files will be processed in the background.
-            </small>
-        </div>
+              {% elif file.status == 'COMPLETED' %}
+                <span class="status-badge badge-completed">✓ Completed</span>
+              {% elif file.status == 'FAILED' %}
+                <span class="status-badge badge-failed">✕ Failed</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if file.status == 'COMPLETED' and file.error_message %}
+                {% if 'Processed' in file.error_message %}
+                  <span class="record-pill">
+                    <span class="record-pill-dot"></span>
+                    {{ file.error_message }}
+                  </span>
+                {% else %}
+                  <span class="text-muted-sm">—</span>
+                {% endif %}
+              {% elif file.status == 'PROCESSING' %}
+                <span class="text-muted-sm">Counting…</span>
+              {% else %}
+                <span class="text-muted-sm">—</span>
+              {% endif %}
+            </td>
+            <td style="font-size:.78rem; white-space:nowrap;">
+              {{ file.created_at|date:"d M Y, h:i A" }}
+            </td>
+            <td style="font-size:.78rem; white-space:nowrap;">
+              {{ file.processed_at|date:"d M Y, h:i A"|default:"—" }}
+            </td>
+            <td>
+              {% if file.status == 'COMPLETED' and file.processed_file %}
+                <a href="{% url 'download_processed_mis' file.id %}" class="btn-download">
+                  ⬇ Download Output
+                </a>
+              {% elif file.status == 'FAILED' %}
+                <span class="error-tip" title="{{ file.error_message }}">Hover to see error</span>
+              {% else %}
+                <span class="text-muted-sm">Awaiting output…</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="7">
+              <div class="empty-state">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <p>No MIS files uploaded yet.<br>Upload a file above to start processing.</p>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
+  </div>
 
-    <div class="card shadow-sm">
-        <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-            <h5 class="mb-0">Processing History</h5>
-            <button onclick="location.reload()" class="btn btn-sm btn-light">🔄 Refresh Status</button>
-        </div>
-        <div class="card-body p-0">
-            <div class="table-responsive">
-                <table class="table table-hover table-striped mb-0">
-                    <thead class="table-light">
-                        <tr>
-                            <th>ID</th>
-                            <th>Uploaded File</th>
-                            <th>Status</th>
-                            <th>Upload Date</th>
-                            <th>Completion Date</th>
-                            <th>Action / Output</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for file in files %}
-                        <tr>
-                            <td>#{{ file.id }}</td>
-                            <td><strong>{{ file.uploaded_file.name|slice:"12:" }}</strong></td>
-                            <td>
-                                {% if file.status == 'PENDING' %}
-                                    <span class="badge bg-secondary">Pending</span>
-                                {% elif file.status == 'PROCESSING' %}
-                                    <span class="badge bg-warning text-dark">⏳ Processing</span>
-                                {% elif file.status == 'COMPLETED' %}
-                                    <span class="badge bg-success">✅ Completed</span>
-                                {% elif file.status == 'FAILED' %}
-                                    <span class="badge bg-danger">❌ Failed</span>
-                                {% endif %}
-                            </td>
-                            <td>{{ file.created_at|date:"d M Y, h:i A" }}</td>
-                            <td>{{ file.processed_at|date:"d M Y, h:i A"|default:"-" }}</td>
-                            <td>
-                                {% if file.status == 'COMPLETED' and file.processed_file %}
-                                    <a href="{% url 'download_processed_mis' file.id %}" class="btn btn-sm btn-primary">
-                                        ⬇️ Download Output
-                                    </a>
-                                {% elif file.status == 'FAILED' %}
-                                    <span class="text-danger small" title="{{ file.error_message }}">
-                                        Hover to see error
-                                    </span>
-                                {% else %}
-                                    <span class="text-muted small">Awaiting Output...</span>
-                                {% endif %}
-                            </td>
-                        </tr>
-                        {% empty %}
-                        <tr>
-                            <td colspan="6" class="text-center py-4">No MIS files have been uploaded yet.</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
 </div>
+
+<script>
+// ── Compute stats from rendered table rows ───────────────────────
+function computeStats() {
+  const rows = document.querySelectorAll('#historyBody tr[data-id]');
+  let total = rows.length, completed = 0, processing = 0, failed = 0;
+  let totalRows = 0, totalMapped = 0, hasRecords = false;
+
+  rows.forEach(row => {
+    const st  = row.dataset.status;
+    const msg = row.dataset.msg || '';
+    if (st === 'COMPLETED')  completed++;
+    else if (st === 'PROCESSING') processing++;
+    else if (st === 'FAILED')     failed++;
+
+    const rowMatch  = msg.match(/Processed\s+(\d+)\s+rows/i);
+    const mapMatch  = msg.match(/Mapped\s+(\d+)\s+rates?/i);
+    if (rowMatch) { totalRows  += parseInt(rowMatch[1]); hasRecords = true; }
+    if (mapMatch) { totalMapped += parseInt(mapMatch[1]); hasRecords = true; }
+  });
+
+  return { total, completed, processing, failed, totalRows, totalMapped, hasRecords };
+}
+
+function animateNum(el, target) {
+  if (!el) return;
+  const start = parseInt(el.textContent.replace(/\D/g,'')) || 0;
+  if (start === target) { el.textContent = target.toLocaleString(); return; }
+  let step = 0, steps = 18;
+  const iv = setInterval(() => {
+    step++;
+    el.textContent = Math.round(start + (target - start) * step / steps).toLocaleString();
+    if (step >= steps) clearInterval(iv);
+  }, 16);
+}
+
+function updateUI(stats) {
+  // Top stat pills
+  animateNum(document.getElementById('sp-total'),      stats.total);
+  animateNum(document.getElementById('sp-completed'),  stats.completed);
+  animateNum(document.getElementById('sp-processing'), stats.processing);
+  animateNum(document.getElementById('sp-failed'),     stats.failed);
+
+  // Refresh stats bar
+  document.getElementById('rs-records').textContent =
+    stats.hasRecords ? stats.totalMapped.toLocaleString() + ' rates' : '—';
+  document.getElementById('rs-rows').textContent =
+    stats.hasRecords ? stats.totalRows.toLocaleString() + ' rows' : '—';
+  animateNum(document.getElementById('rs-completed'),  stats.completed);
+  animateNum(document.getElementById('rs-processing'), stats.processing);
+  animateNum(document.getElementById('rs-failed'),     stats.failed);
+
+  const now = new Date();
+  document.getElementById('rs-ts').textContent =
+    'Refreshed at ' + now.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  document.getElementById('refreshStatsBar').classList.add('visible');
+
+  // Badge
+  document.getElementById('history-count-badge').textContent = stats.total + ' file' + (stats.total !== 1 ? 's' : '');
+}
+
+// ── Refresh: fetch page silently, swap table body, recompute ────
+async function doRefresh() {
+  const btn = document.getElementById('refreshBtn');
+  btn.classList.add('spinning');
+  btn.disabled = true;
+
+  try {
+    const res = await fetch(window.location.href, { cache: 'no-store' });
+    if (res.ok) {
+      const html = await res.text();
+      const doc  = new DOMParser().parseFromString(html, 'text/html');
+      const newBody = doc.getElementById('historyBody');
+      if (newBody) {
+        document.getElementById('historyBody').innerHTML = newBody.innerHTML;
+      }
+    }
+  } catch(e) {
+    console.warn('Refresh fetch failed:', e);
+  }
+
+  updateUI(computeStats());
+
+  setTimeout(() => {
+    btn.classList.remove('spinning');
+    btn.disabled = false;
+    scheduleAutoRefresh();
+  }, 600);
+}
+
+// ── Auto-refresh every 10s while any row is PROCESSING ──────────
+function scheduleAutoRefresh() {
+  const hasProcessing = document.querySelector('#historyBody tr[data-status="PROCESSING"]');
+  if (hasProcessing) {
+    setTimeout(() => doRefresh(), 10000);
+  }
+}
+
+// ── Init ─────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  updateUI(computeStats());
+  scheduleAutoRefresh();
+});
+</script>
+
 {% endblock %}
