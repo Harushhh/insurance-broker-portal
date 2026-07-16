@@ -616,7 +616,13 @@
             <td><strong>{{ row.display_group_id }}</strong></td>
             <td>{{ row.insurance_company }}</td>
             <td>{{ row.po_type|default:"-" }}</td>
-            <td style="color:#059669; font-weight:800;">{{ row.po_rate|default:"0" }}%</td>
+            <td style="color:#059669; font-weight:800;">
+              {% if row.po_type == 'On OD and TP' %}
+                {{ row.po_od_rate|default:"0" }}+{{ row.po_tp_rate|default:"0" }}%
+              {% else %}
+                {{ row.po_rate|default:"0" }}%
+              {% endif %}
+            </td>
             <td>₹{{ row.po_flat_amount|default:"0" }}</td>
             <td>{{ row.add_tnc|default:"-" }}</td>
             <td>
