@@ -1090,7 +1090,7 @@ def dashboard(request):
     })
 
 # -------------------------
-# Export UNGROUPED to CSV
+# Export UNGROUPED to CSV (Perfect Match 1:1 Schema Update)
 # -------------------------
 def export_rates_xlsx(request):
     qs = RateMaster.objects.select_related(
@@ -1195,14 +1195,17 @@ def export_rates_xlsx(request):
     response['Content-Disposition'] = 'attachment; filename="rates_export.csv"'
 
     writer = csv.writer(response)
+    
+    # Header aligned perfectly with the keys processed during `api_upload_chunk`
     writer.writerow([
-        "ID", "Group ID", "Status", "Insurance Company", "Insurer Vertical", 
-        "Product", "Sub Product", "Policy Type", "Fuel Type", "Make Model Class",
-        "Vehicle Makes", "RTO List",
-        "Age Min", "Age Max", "CC Min", "CC Max", "SC Min", "SC Max",
-        "OD Rate", "TP Rate", "Net Rate", "Flat Amount",
-        "PO Type", "PO OD Rate", "PO TP Rate", "PO Net Rate", "PO Flat Amount",
-        "Is NCB", "Is CPA", "Is ZD", "From Date", "To Date", "Remarks"
+        "id", "group_id", "status", "is_deleted", "insurance_company", "insurer_vertical", 
+        "product", "sub_product", "policy_type", "fuel_type", "make_model_class",
+        "new_vehicle_makes", "new_rto_list", "vehicle_age_min", "vehicle_age_max", 
+        "cc_min", "cc_max", "sc_min", "sc_max", "pi_od_rate", "pi_tp_rate", 
+        "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5", "pi_net_rate", "pi_flat_amount", 
+        "pi_vli", "pi_type", "tariff_min", "tariff_max", "is_ncb", "is_cpa", "is_zd", 
+        "from_date", "to_date", "user_id", "veh_use", "add_tnc", "remarks", 
+        "po_type", "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount"
     ])
 
     for r in qs.iterator(chunk_size=2000):
@@ -1210,6 +1213,7 @@ def export_rates_xlsx(request):
             r.id,
             r.group_id,
             r.status,
+            r.is_deleted,
             r.insurance_company,
             r.insurer_vertical,
             r.product.name if r.product else "",
@@ -1219,17 +1223,38 @@ def export_rates_xlsx(request):
             r.make_model_class.name if r.make_model_class else "",
             r.new_vehicle_makes,
             r.new_rto_list,
-            r.vehicle_age_min, r.vehicle_age_max,
-            r.cc_min, r.cc_max,
-            r.sc_min, r.sc_max,
-            r.pi_od_rate, r.pi_tp_rate, r.pi_net_rate, r.pi_flat_amount,
-            r.po_type, r.po_od_rate, r.po_tp_rate, r.po_net_rate, r.po_flat_amount,
+            r.vehicle_age_min,
+            r.vehicle_age_max,
+            r.cc_min,
+            r.cc_max,
+            r.sc_min,
+            r.sc_max,
+            r.pi_od_rate,
+            r.pi_tp_rate,
+            r.pi_tp_2,
+            r.pi_tp_3,
+            r.pi_tp_4,
+            r.pi_tp_5,
+            r.pi_net_rate,
+            r.pi_flat_amount,
+            r.pi_vli,
+            r.pi_type,
+            r.tariff_min,
+            r.tariff_max,
             r.is_ncb.code if r.is_ncb else "",
             r.is_cpa.code if r.is_cpa else "",
             r.is_zd.code if r.is_zd else "",
             r.from_date,
             r.to_date,
-            r.remarks
+            r.user_id,
+            r.veh_use,
+            r.add_tnc,
+            r.remarks,
+            r.po_type,
+            r.po_od_rate,
+            r.po_tp_rate,
+            r.po_net_rate,
+            r.po_flat_amount
         ])
 
     return response
