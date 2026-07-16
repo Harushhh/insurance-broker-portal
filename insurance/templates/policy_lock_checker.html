@@ -603,6 +603,7 @@
           <tr>
             <th>Group ID</th>
             <th>Insurance Company</th>
+            <th>Tariff Range</th>
             <th>PO Type</th>
             <th>PO Rate</th>
             <th>PO Flat Amount</th>
@@ -615,6 +616,7 @@
           <tr>
             <td><strong>{{ row.display_group_id }}</strong></td>
             <td>{{ row.insurance_company }}</td>
+            <td>{{ row.tariff_min|default:"0" }}-{{ row.tariff_max|default:"0" }}</td>
             <td>{{ row.po_type|default:"-" }}</td>
             <td style="color:#059669; font-weight:800;">
               {% if row.po_type == 'On OD and TP' %}
@@ -644,7 +646,7 @@
           </tr>
           {% empty %}
           <tr>
-            <td colspan="7" class="empty-row">
+            <td colspan="8" class="empty-row">
               <span style="font-size: 18px; display:block; margin-bottom: 8px;">📋</span>
               No matching records found for this combination.
             </td>
