@@ -71,6 +71,12 @@ class SignupForm(forms.Form):
             raise forms.ValidationError("That username is already taken.")
         return username
 
+    def clean_email(self):
+        email = self.cleaned_data['email'].strip()
+        if User.objects.filter(email__iexact=email).exists():
+            raise forms.ValidationError("An account with that email already exists.")
+        return email
+
     def clean(self):
         cleaned_data = super().clean()
         password1 = cleaned_data.get('password1')

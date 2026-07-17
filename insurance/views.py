@@ -1448,7 +1448,11 @@ def user_management(request):
             upass = "Changeme@123"
 
             if uname:
-                if not User.objects.filter(username=uname).exists():
+                if User.objects.filter(username=uname).exists():
+                    error = f"⚠️ User '{uname}' already exists."
+                elif uemail and User.objects.filter(email__iexact=uemail).exists():
+                    error = f"⚠️ An account with email '{uemail}' already exists."
+                else:
                     new_user = User.objects.create_user(username=uname, email=uemail, password=upass)
                     if fname:
                         parts = fname.split(" ", 1)
@@ -1459,8 +1463,6 @@ def user_management(request):
 
                     UserProfile.objects.get_or_create(user=new_user, defaults={"contact_number": ucontact})
                     msg = f"✅ User '{uname}' created successfully."
-                else:
-                    error = f"⚠️ User '{uname}' already exists."
 
         elif action == "update_user_access":
             u = User.objects.get(id=user_id)
@@ -1484,14 +1486,18 @@ def user_management(request):
             reports_to_id = request.POST.get("reports_to") or None
             profile.reports_to_id = reports_to_id if reports_to_id else None
 
-            try:
-                profile.full_clean(exclude=["user"])
-                profile.save()
-                u.email = request.POST.get("email", "")
-                u.save()
-                msg = f"✅ Profile and access for '{u.username}' updated."
-            except forms.ValidationError as e:
-                error = "⚠️ " + " ".join(m for msgs in e.message_dict.values() for m in msgs)
+            new_email = request.POST.get("email", "").strip()
+            if new_email and User.objects.filter(email__iexact=new_email).exclude(id=u.id).exists():
+                error = f"⚠️ An account with email '{new_email}' already exists."
+            else:
+                try:
+                    profile.full_clean(exclude=["user"])
+                    profile.save()
+                    u.email = new_email
+                    u.save()
+                    msg = f"✅ Profile and access for '{u.username}' updated."
+                except forms.ValidationError as e:
+                    error = "⚠️ " + " ".join(m for msgs in e.message_dict.values() for m in msgs)
 
         elif action == "approve_user" and user_id:
             u = User.objects.get(id=user_id)
@@ -2457,9 +2463,20 @@ def locked_policy_dashboard(request):
 def direct_password_reset(request):
     if request.method == "POST":
         email = request.POST.get("email", "").strip()
-        user = User.objects.filter(email=email).first()
+        matches = User.objects.filter(email__iexact=email)
+        user = matches.first()
 
         if user:
+            if matches.count() > 1:
+                # Email uniqueness is enforced at creation time (signup, admin
+                # create/edit), so this shouldn't happen — but if stale/imported
+                # data ever violates that, silently resetting the wrong account
+                # is worse than a loud log. `.first()` still picks the
+                # lowest-id account, same as before.
+                logger.warning(
+                    "Multiple accounts share email %r during password reset — resetting '%s' (id=%s)",
+                    email, user.username, user.pk,
+                )
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
             logger.info("Direct password reset link issued for user '%s'", user.username)
