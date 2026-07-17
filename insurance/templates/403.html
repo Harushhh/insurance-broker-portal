@@ -1,0 +1,40 @@
+{% extends "base_auth.html" %}
+{% block title %}Access Denied - Insurance Portal{% endblock %}
+
+{% block extra_style %}
+.denied-card {
+    background: var(--autumn-glass-bg);
+    border: 1px solid var(--autumn-glass-border);
+    border-radius: 24px;
+    box-shadow: 0 25px 60px -15px rgba(124, 45, 18, 0.25);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: 48px;
+    max-width: 480px;
+    text-align: center;
+}
+.denied-card h2 { font-family: 'Playfair Display', serif; font-size: 26px; color: var(--autumn-ink); margin: 16px 0 10px; }
+.denied-card p { color: var(--autumn-ink-muted); font-size: 14px; line-height: 1.6; margin-bottom: 26px; }
+.denied-icon { width: 44px; height: 44px; color: var(--autumn-rust); }
+.denied-back {
+    display: inline-block;
+    padding: 12px 24px;
+    background: linear-gradient(135deg, var(--autumn-amber), var(--autumn-rust));
+    color: #fff;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 14px;
+    text-decoration: none;
+}
+{% endblock %}
+
+{% block content %}
+<div class="denied-card">
+    <svg class="denied-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <h2>Access Denied</h2>
+    <p>You're signed in, but this page is restricted to staff accounts. If you think this is a mistake, ask an admin to grant you access from User Management.</p>
+    <a href="{% url 'home_dashboard' %}" class="denied-back">Back to Dashboard</a>
+</div>
+{% endblock %}

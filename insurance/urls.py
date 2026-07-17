@@ -1,15 +1,30 @@
+from functools import wraps
+
 from django.urls import path
 from django.contrib.auth import views as auth_views
-from django.contrib.auth.decorators import login_required, user_passes_test
+from django.contrib.auth.decorators import login_required
 from django.conf import settings
 from django.conf.urls.static import static
+from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect
 from . import views
 
 
 def staff_required(view_func):
-    """Requires login AND is_staff=True."""
-    return login_required(user_passes_test(lambda u: u.is_staff)(view_func))
+    """
+    Requires login AND (is_staff or is_superuser).
+    A logged-in user who fails the check gets a 403, not a redirect back to
+    the login page — user_passes_test's default redirect-on-failure would
+    otherwise loop forever, since the login view sends already-authenticated
+    users straight back to `next`.
+    """
+    @login_required
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        if not (request.user.is_staff or request.user.is_superuser):
+            raise PermissionDenied("Staff access required.")
+        return view_func(request, *args, **kwargs)
+    return _wrapped
 
 
 urlpatterns = [
