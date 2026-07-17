@@ -1,5 +1,15 @@
 from django.contrib.auth.models import User
+from django.core.validators import RegexValidator
 from django.db import models
+
+PAN_VALIDATOR = RegexValidator(
+    regex=r'^[A-Z]{5}[0-9]{4}[A-Z]$',
+    message="Enter a valid PAN (format: AAAAA9999A).",
+)
+IFSC_VALIDATOR = RegexValidator(
+    regex=r'^[A-Z]{4}0[A-Z0-9]{6}$',
+    message="Enter a valid IFSC code (format: AAAA0999999).",
+)
 
 
 # ---------- MASTER TABLE ----------
@@ -220,8 +230,54 @@ class UserProfile(models.Model):
         on_delete=models.CASCADE,
         related_name="profile"
     )
-    contact_number = models.CharField(max_length=20, blank=True, null=True)
+    contact_number = models.CharField(max_length=20, blank=True, null=True)  # "Mobile"
     designation = models.CharField(max_length=100, blank=True, null=True)
+
+    # ---------- Teams hierarchy ----------
+    vertical_path = models.CharField(max_length=255, blank=True, null=True)
+    team = models.CharField(max_length=100, blank=True, null=True)
+    team_id = models.CharField(max_length=50, blank=True, null=True)
+    user_type = models.CharField(max_length=50, blank=True, null=True)
+    emp_id = models.CharField(max_length=50, blank=True, null=True)
+    code = models.CharField(max_length=50, blank=True, null=True)
+    role = models.CharField(max_length=100, blank=True, null=True)
+
+    branch_code = models.CharField(max_length=50, blank=True, null=True)
+    branch_name = models.CharField(max_length=150, blank=True, null=True)
+
+    rm_code = models.CharField(max_length=50, blank=True, null=True)
+    rm_name = models.CharField(max_length=150, blank=True, null=True)
+    tc_code = models.CharField(max_length=50, blank=True, null=True)
+    tc_name = models.CharField(max_length=150, blank=True, null=True)
+    csc_code = models.CharField(max_length=50, blank=True, null=True)
+    csc_name = models.CharField(max_length=150, blank=True, null=True)
+    posp_code = models.CharField(max_length=50, blank=True, null=True)  # "Ref/POSP code"
+    posp_name = models.CharField(max_length=150, blank=True, null=True)  # "Ref/POSP name"
+
+    reports_to = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="team_members",
+    )
+    agent_type = models.CharField(max_length=50, blank=True, null=True)
+
+    # ---------- Compliance / bank details ----------
+    pan = models.CharField(max_length=10, blank=True, null=True, validators=[PAN_VALIDATOR])
+    bank_account = models.CharField(max_length=34, blank=True, null=True)
+    bank_name = models.CharField(max_length=150, blank=True, null=True)
+    ifsc = models.CharField(max_length=11, blank=True, null=True, validators=[IFSC_VALIDATOR])
+
+    # ---------- Flags ----------
+    is_admin = models.BooleanField(default=False)
+    is_qc = models.BooleanField(default=False)
+    is_plvc = models.BooleanField(default=False)
+    personal_qc = models.BooleanField(default=False)
+    qc_verticals = models.CharField(max_length=255, blank=True, null=True)  # comma-separated
+
+    membership_id = models.CharField(max_length=50, blank=True, null=True)
+    user_id_code = models.CharField(max_length=50, blank=True, null=True)  # business "User ID" code
 
     def __str__(self):
         return self.user.username

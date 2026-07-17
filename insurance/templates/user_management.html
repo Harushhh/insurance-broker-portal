@@ -22,6 +22,47 @@
         <div style="background:#fee2e2; color:#e11d48; padding:12px; border-radius:8px; margin-bottom:16px;">{{ error }}</div>
     {% endif %}
 
+    {% if pending_users %}
+    <div style="margin-bottom:24px; border:1px solid #fde68a; background:#fffbeb; border-radius:12px; padding:16px;">
+        <h3 style="margin:0 0 12px; font-size:15px; color:#92400e;">⏳ Pending Signup Approvals ({{ pending_users|length }})</h3>
+        <table style="width:100%; border-collapse:collapse; text-align:left;">
+            <thead>
+                <tr style="font-size:11px; text-transform:uppercase; color:#92400e;">
+                    <th style="padding:8px;">Name / Username</th>
+                    <th style="padding:8px;">Email</th>
+                    <th style="padding:8px;">Contact</th>
+                    <th style="padding:8px;">Requested</th>
+                    <th style="padding:8px; text-align:right;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in pending_users %}
+                <tr style="background:#fff; border-bottom:1px solid #fde68a;">
+                    <td style="padding:8px;"><strong>{{ p.username }}</strong><br><small>{{ p.full_name }}</small></td>
+                    <td style="padding:8px;">{{ p.email }}</td>
+                    <td style="padding:8px;">{{ p.contact_number|default:"-" }}</td>
+                    <td style="padding:8px;">{{ p.date_joined|date:"d M Y, H:i" }}</td>
+                    <td style="padding:8px; text-align:right; white-space:nowrap;">
+                        <form method="POST" style="display:inline;">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="approve_user">
+                            <input type="hidden" name="user_id" value="{{ p.id }}">
+                            <button type="submit" class="btn" style="background:#10b981; color:#fff; border:none; padding:6px 12px; font-size:12px;">✅ Approve</button>
+                        </form>
+                        <form method="POST" style="display:inline;" onsubmit="return confirm('Reject and permanently remove this signup request?');">
+                            {% csrf_token %}
+                            <input type="hidden" name="action" value="reject_user">
+                            <input type="hidden" name="user_id" value="{{ p.id }}">
+                            <button type="submit" class="btn" style="background:#ef4444; color:#fff; border:none; padding:6px 12px; font-size:12px;">✖ Reject</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
     <div style="margin-bottom:24px; position:relative;">
         <input type="text" id="userSearchInput" placeholder="🔍 Search employees or users..." 
             style="width:100%; padding:14px 14px 14px 45px; border-radius:12px; border:1px solid var(--border); font-size:15px; box-shadow: 0 2px 4px rgba(0,0,0,0.02);">
@@ -72,8 +113,8 @@
                         {% endif %}
                     </td>
                     <td style="padding:16px; text-align:right; vertical-align:middle;">
-                        <button class="btn" style="padding:6px 12px; font-size:12px; border:1px solid var(--border);" 
-                                onclick="openEditModal('{{ u.id }}', '{{ u.username|escapejs }}', '{{ u.email|escapejs }}', '{{ u.contact_number|escapejs }}', '{{ u.designation|default:""|escapejs }}', '{{ u.pages|join:"," }}')">
+                        <button class="btn" style="padding:6px 12px; font-size:12px; border:1px solid var(--border);"
+                                onclick="openEditModal('{{ u.id }}')">
                             ⚙️ Edit Details
                         </button>
                     </td>
@@ -119,7 +160,7 @@
 </div>
 
 <div id="editUserModal" class="modal-overlay">
-    <div class="modal-content" style="max-width: 600px;">
+    <div class="modal-content" style="max-width: 600px; max-height: 85vh; overflow-y: auto;">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
             <h3 id="editModalTitle" style="margin:0;">⚙️ Edit User Details</h3>
             <button onclick="closeModal('editUserModal')" style="background:none; border:none; font-size:20px; cursor:pointer; color:var(--muted);">&times;</button>
@@ -143,6 +184,37 @@
                     <input type="text" name="designation" id="edit_designation" class="modal-input">
                 </div>
             </div>
+
+            <details style="margin-bottom:20px; border:1px solid var(--border); border-radius:8px; padding:12px;">
+                <summary style="cursor:pointer; font-weight:700; font-size:13px; color:#334155;">🧭 Teams Hierarchy</summary>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-top:12px; max-height:340px; overflow-y:auto; padding-right:8px;">
+                    {% for field, label in hierarchy_field_labels %}
+                    <div>
+                        <label class="modal-label">{{ label }}</label>
+                        <input type="text" name="{{ field }}" id="edit_{{ field }}" class="modal-input">
+                    </div>
+                    {% endfor %}
+                    <div>
+                        <label class="modal-label">Reports To</label>
+                        <select name="reports_to" id="edit_reports_to" class="modal-input">
+                            <option value="">— None —</option>
+                            {% for m in manager_choices %}
+                            <option value="{{ m.id }}">{{ m.username }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn primary" style="width:100%; margin-top:14px;">💾 Save Details</button>
+            </details>
+
+            <details style="margin-bottom:20px; border:1px solid var(--border); border-radius:8px; padding:12px;">
+                <summary style="cursor:pointer; font-weight:700; font-size:13px; color:#334155;">🔒 Compliance Flags</summary>
+                <div style="display:flex; gap:20px; margin-top:12px; flex-wrap:wrap;">
+                    <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" name="is_qc" id="edit_is_qc"> Is QC</label>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" name="is_plvc" id="edit_is_plvc"> Is PLVC</label>
+                    <label style="display:flex; align-items:center; gap:6px; font-size:13px;"><input type="checkbox" name="personal_qc" id="edit_personal_qc"> Personal QC</label>
+                </div>
+            </details>
 
             <label class="modal-label">Page Permissions</label>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid var(--border); margin-bottom:20px;">
@@ -182,30 +254,42 @@
     </div>
 </div>
 
+{{ users|json_script:"users-data" }}
+{{ hierarchy_field_labels|json_script:"hierarchy-field-names" }}
 <script>
+    const USERS_DATA = JSON.parse(document.getElementById('users-data').textContent);
+
     function openModal(id) { document.getElementById(id).style.display = 'flex'; }
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }
 
-    function openEditModal(id, name, email, contact, desig, pagesStr) {
+    function openEditModal(id) {
+        const u = USERS_DATA.find(row => String(row.id) === String(id));
+        if (!u) return;
+
         document.getElementById('edit_action_input').value = 'update_user_access';
-        document.getElementById('editModalTitle').innerText = "⚙️ Edit: " + name;
-        document.getElementById('edit_user_id').value = id;
-        document.getElementById('edit_email').value = email;
-        document.getElementById('edit_contact').value = contact;
-        document.getElementById('edit_designation').value = desig;
-        
-        let checks = document.querySelectorAll('.perm-check');
-        let activePages = pagesStr.split(','); 
-        
-        checks.forEach(c => {
-            c.setAttribute('name', 'pages_' + id); 
-            if (activePages.includes(c.value)) {
-                c.checked = true;
-            } else {
-                c.checked = false;
-            }
+        document.getElementById('editModalTitle').innerText = "⚙️ Edit: " + u.username;
+        document.getElementById('edit_user_id').value = u.id;
+        document.getElementById('edit_email').value = u.email;
+        document.getElementById('edit_contact').value = u.contact_number;
+        document.getElementById('edit_designation').value = u.designation;
+        document.getElementById('edit_reports_to').value = u.reports_to || '';
+        document.getElementById('edit_is_qc').checked = !!u.is_qc;
+        document.getElementById('edit_is_plvc').checked = !!u.is_plvc;
+        document.getElementById('edit_personal_qc').checked = !!u.personal_qc;
+
+        JSON.parse(document.getElementById('hierarchy-field-names').textContent).forEach(([field]) => {
+            const el = document.getElementById('edit_' + field);
+            if (el) el.value = u[field] || '';
         });
-        
+
+        let checks = document.querySelectorAll('.perm-check');
+        let activePages = u.pages || [];
+
+        checks.forEach(c => {
+            c.setAttribute('name', 'pages_' + id);
+            c.checked = activePages.includes(c.value);
+        });
+
         openModal('editUserModal');
     }
 

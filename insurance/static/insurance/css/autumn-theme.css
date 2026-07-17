@@ -1,0 +1,72 @@
+/* ==========================================================
+   Autumn theme — shared palette + falling-leaves layer.
+   Used by base.html (full portal chrome) and base_auth.html
+   (login/signup). Customize the look by editing the variables
+   below; nothing else needs to change.
+   ========================================================== */
+
+:root {
+    --autumn-cream: #fdf6ec;
+    --autumn-cream-deep: #f6e9d8;
+    --autumn-amber: #d97706;
+    --autumn-amber-light: #f59e0b;
+    --autumn-rust: #b45309;
+    --autumn-burgundy: #7c2d12;
+    --autumn-ink: #3f2a1a;
+    --autumn-ink-muted: #8a7461;
+    --autumn-border: #e8dcc8;
+    --autumn-glass-bg: rgba(255, 252, 246, 0.6);
+    --autumn-glass-border: rgba(255, 255, 255, 0.5);
+    --leaf-color-1: #d97706;
+    --leaf-color-2: #b45309;
+    --leaf-color-3: #7c2d12;
+    --leaf-color-4: #a16207;
+}
+
+.autumn-leaves-layer {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 0;
+}
+
+.autumn-leaf {
+    position: absolute;
+    top: -10%;
+    left: var(--leaf-x, 50%);
+    width: var(--leaf-size, 18px);
+    height: var(--leaf-size, 18px);
+    background: var(--leaf-color, var(--autumn-amber));
+    border-radius: 0% 100% 0% 100%;
+    opacity: 0.75;
+    animation:
+        leaf-fall var(--fall-duration, 14s) linear infinite,
+        leaf-sway var(--sway-duration, 4s) ease-in-out infinite alternate;
+    animation-delay: var(--fall-delay, 0s), var(--sway-delay, 0s);
+}
+
+.autumn-leaf::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 2px;
+    height: 60%;
+    background: rgba(63, 42, 26, 0.35);
+    transform: translate(-50%, -50%) rotate(45deg);
+}
+
+@keyframes leaf-fall {
+    from { transform: translateY(0) rotate(0deg); }
+    to { transform: translateY(120vh) rotate(360deg); }
+}
+
+@keyframes leaf-sway {
+    from { margin-left: calc(var(--sway-x, 20px) * -1); }
+    to { margin-left: var(--sway-x, 20px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .autumn-leaf { animation: none; }
+}

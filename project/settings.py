@@ -13,25 +13,41 @@ load_dotenv(BASE_DIR / ".env")
 # =========================================================
 # SECURITY & CORE SETTINGS
 # =========================================================
-SECRET_KEY = os.getenv("SECRET_KEY", "fallback-secret-key-for-dev")
-
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
-# Railway / Local Hosts
-ALLOWED_HOSTS = os.getenv(
-    "ALLOWED_HOSTS",
-    "127.0.0.1,localhost,*"
-).split(",")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    if DEBUG:
+        # Fine for local dev only — never reaches production because of the check below.
+        SECRET_KEY = "django-insecure-dev-only-key-do-not-use-in-prod"
+    else:
+        raise RuntimeError(
+            "SECRET_KEY environment variable is not set. "
+            "Refusing to start in production without it."
+        )
+
+# ALLOWED_HOSTS: no wildcard by default. You must set this explicitly in
+# your Railway env vars, e.g. ALLOWED_HOSTS=web-production-23c64.up.railway.app
+_allowed_hosts_env = os.getenv("ALLOWED_HOSTS", "")
+if _allowed_hosts_env:
+    ALLOWED_HOSTS = [h.strip() for h in _allowed_hosts_env.split(",") if h.strip()]
+elif DEBUG:
+    ALLOWED_HOSTS = ["127.0.0.1", "localhost"]
+else:
+    raise RuntimeError(
+        "ALLOWED_HOSTS environment variable is not set. "
+        "Refusing to start in production with an open host list."
+    )
 
 # =========================================================
-# CSRF (IMPORTANT FIX FOR 403 ERROR)
+# CSRF
 # =========================================================
 CSRF_TRUSTED_ORIGINS = [
     "https://web-production-23c64.up.railway.app",
     "https://*.up.railway.app",
-    "https://127.0.0.1",
-    "https://localhost",
 ]
+if DEBUG:
+    CSRF_TRUSTED_ORIGINS += ["http://127.0.0.1:8000", "http://localhost:8000"]
 
 # =========================================================
 # INSTALLED APPS
@@ -42,7 +58,7 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-    'whitenoise.runserver_nostatic', # Helps with local testing of static files
+    'whitenoise.runserver_nostatic',
     'django.contrib.staticfiles',
 
     # API
@@ -53,6 +69,7 @@ INSTALLED_APPS = [
     # LOCAL APPS
     'insurance',
     'config',
+    'dashboard',
 ]
 
 # =========================================================
@@ -61,7 +78,6 @@ INSTALLED_APPS = [
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
-
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -93,7 +109,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'project.wsgi.application'
 
 # =========================================================
-# DATABASE (RAILWAY + LOCAL FALLBACK)
+# DATABASE
 # =========================================================
 local_db_url = (
     f"postgres://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}"
@@ -117,7 +133,10 @@ DATABASES = {
 # =========================================================
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
-    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {
+        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {'min_length': 10},
+    },
     {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
     {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
@@ -131,16 +150,14 @@ USE_I18N = True
 USE_TZ = True
 
 # =========================================================
-# STATIC FILES (IMPORTANT FOR RAILWAY)
+# STATIC FILES
 # =========================================================
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
-# Safely check if the 'static' directory exists before adding it to avoid collectstatic errors
 local_static_dir = os.path.join(BASE_DIR, 'static')
 STATICFILES_DIRS = [local_static_dir] if os.path.exists(local_static_dir) else []
 
-# Use WhiteNoise to serve and compress static files in production
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # =========================================================
@@ -150,18 +167,57 @@ MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # =========================================================
-# SECURITY
+# CACHE (used for login-attempt throttling)
 # =========================================================
-X_FRAME_OPTIONS = 'SAMEORIGIN'
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+    }
+}
+# NOTE: LocMemCache is per-process. If you ever run multiple Railway
+# workers/replicas, switch this to Redis (django-redis) so throttling
+# state is shared across all of them.
+
+# =========================================================
+# SECURITY HEADERS & COOKIES
+# =========================================================
+X_FRAME_OPTIONS = 'DENY'
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+
+# Session expires after 30 min of inactivity; also expires on browser close.
+SESSION_COOKIE_AGE = 1800
+SESSION_SAVE_EVERY_REQUEST = True
+SESSION_EXPIRE_AT_BROWSER_CLOSE = True
+
+if not DEBUG:
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+    # Railway terminates TLS at its edge proxy and forwards plain HTTP,
+    # so Django needs this header to know the original request was HTTPS.
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+else:
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+    SECURE_SSL_REDIRECT = False
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 # =========================================================
-# AUTH REDIRECTS (Pointed away from deprecated URL paths)
+# AUTH REDIRECTS
 # =========================================================
-LOGIN_URL = "/home/"
+LOGIN_URL = "/login/"
 LOGIN_REDIRECT_URL = "/home/"
-LOGOUT_REDIRECT_URL = "/home/"
+LOGOUT_REDIRECT_URL = "/login/"
 
 # =========================================================
 # EMAIL CONFIG
@@ -178,6 +234,12 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 # =========================================================
 REST_FRAMEWORK = {
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
 }
 
 SPECTACULAR_SETTINGS = {
@@ -202,3 +264,26 @@ SPECTACULAR_SETTINGS = {
 # FILE UPLOAD LIMIT
 # =========================================================
 DATA_UPLOAD_MAX_MEMORY_SIZE = 20971520  # 20 MB
+
+# =========================================================
+# LOGGING (auth events land in stdout -> visible in Railway logs)
+# =========================================================
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {"class": "logging.StreamHandler"},
+    },
+    "loggers": {
+        "security": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": True,
+        },
+        "django.security": {
+            "handlers": ["console"],
+            "level": "WARNING",
+            "propagate": True,
+        },
+    },
+}

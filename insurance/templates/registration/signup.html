@@ -1,5 +1,5 @@
 {% extends "base_auth.html" %}
-{% block title %}Broker Login - Insurance Portal{% endblock %}
+{% block title %}Request an Account - Insurance Portal{% endblock %}
 
 {% block extra_style %}
 .glass-card {
@@ -31,25 +31,26 @@
 .feature-item { display: flex; align-items: center; gap: 10px; font-size: 14px; color: #f3e6d6; font-weight: 500; }
 .feature-item span { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; background: rgba(245, 158, 11, 0.2); color: var(--autumn-amber-light); border-radius: 50%; font-size: 11px; }
 .auth-footer { color: #c9a98a; font-size: 12px; }
-.auth-form-wrapper { flex: 1; padding: 48px 52px; display: flex; flex-direction: column; justify-content: center; }
+.auth-form-wrapper { flex: 1; padding: 40px 52px; display: flex; flex-direction: column; justify-content: center; max-height: 90vh; overflow-y: auto; }
 .auth-header h3 { font-family: 'Playfair Display', serif; font-size: 26px; color: var(--autumn-ink); margin-bottom: 6px; }
-.auth-header p { color: var(--autumn-ink-muted); font-size: 14px; margin-top: 0; margin-bottom: 28px; }
-.auth-form { display: flex; flex-direction: column; gap: 18px; }
+.auth-header p { color: var(--autumn-ink-muted); font-size: 14px; margin-top: 0; margin-bottom: 24px; }
+.auth-form { display: flex; flex-direction: column; gap: 16px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .input-group label { display: block; font-size: 13px; font-weight: 600; color: var(--autumn-rust); margin-bottom: 6px; }
-.input-icon-wrap { position: relative; display: flex; align-items: center; }
-.input-icon { position: absolute; left: 14px; width: 18px; height: 18px; color: var(--autumn-ink-muted); }
-.auth-input { width: 100%; padding: 12px 14px 12px 42px; border: 1px solid var(--autumn-border); border-radius: 12px; font-size: 14px; color: var(--autumn-ink); transition: all 0.2s ease; background: rgba(255,255,255,0.7); box-sizing: border-box; font-family: inherit; }
+.auth-input { width: 100%; padding: 12px 14px; border: 1px solid var(--autumn-border); border-radius: 12px; font-size: 14px; color: var(--autumn-ink); transition: all 0.2s ease; background: rgba(255,255,255,0.7); box-sizing: border-box; font-family: inherit; }
 .auth-input:focus { outline: none; border-color: var(--autumn-amber); background: #fff; box-shadow: 0 0 0 4px rgba(217, 119, 6, 0.12); }
 .btn-submit { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 14px; background: linear-gradient(135deg, var(--autumn-amber), var(--autumn-rust)); color: #fff; border: none; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 6px; transition: all 0.2s ease; box-shadow: 0 4px 14px rgba(180, 83, 9, 0.3); }
 .btn-submit:hover { box-shadow: 0 6px 18px rgba(180, 83, 9, 0.4); transform: translateY(-1px); }
 .error-box { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; padding: 12px 14px; border-radius: 10px; font-size: 13px; font-weight: 500; }
-.auth-switch { text-align: center; margin-top: 22px; font-size: 13.5px; color: var(--autumn-ink-muted); }
+.field-error { color: #b91c1c; font-size: 12px; margin-top: 4px; }
+.auth-switch { text-align: center; margin-top: 20px; font-size: 13.5px; color: var(--autumn-ink-muted); }
 .auth-switch a { color: var(--autumn-rust); font-weight: 700; }
 @media (max-width: 768px) {
     .glass-card { flex-direction: column; }
     .auth-info { padding: 30px; }
     .feature-list { display: none; }
-    .auth-form-wrapper { padding: 30px; }
+    .auth-form-wrapper { padding: 30px; max-height: none; }
+    .form-row { grid-template-columns: 1fr; }
 }
 {% endblock %}
 
@@ -60,15 +61,14 @@
         <div>
             <svg class="leaf-icon" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2c4 3 8 7 8 12a8 8 0 0 1-16 0c0-5 4-9 8-12zm0 3.2C9.3 7.6 6.5 10.6 6.5 14a5.5 5.5 0 0 0 11 0c0-3.4-2.8-6.4-5.5-8.8z"/>
-                <path d="M12 8v11" stroke="currentColor" stroke-width="1" fill="none"/>
             </svg>
-            <h2>Broker Portal</h2>
-            <p>Welcome back! Securely manage your Rate Masters, process Motor Payouts, and calculate eligibilities in real-time.</p>
+            <h2>Join the Team</h2>
+            <p>Request access to the Broker Portal. An administrator will review your request before you can sign in.</p>
 
             <div class="feature-list">
-                <div class="feature-item"><span>✓</span> Bulk Rate Management</div>
-                <div class="feature-item"><span>✓</span> Smart Payout Calculators</div>
-                <div class="feature-item"><span>✓</span> Secure Access</div>
+                <div class="feature-item"><span>✓</span> Quick request form</div>
+                <div class="feature-item"><span>✓</span> Reviewed by an admin</div>
+                <div class="feature-item"><span>✓</span> Full profile set up after approval</div>
             </div>
         </div>
 
@@ -77,51 +77,75 @@
 
     <div class="auth-form-wrapper">
         <div class="auth-header">
-            <h3>Employee Login</h3>
-            <p>Please enter your credentials to continue.</p>
+            <h3>Request an Account</h3>
+            <p>Fill in your details — an admin will approve your request.</p>
         </div>
 
         {% if locked_out %}
             <div class="error-box">
-                🔒 Too many failed login attempts. Please try again in 15 minutes.
+                🔒 Too many signup attempts from this network. Please try again later.
             </div>
         {% else %}
             <form method="POST" class="auth-form">
                 {% csrf_token %}
 
-                {% if form.errors %}
+                {% if form.non_field_errors %}
                     <div class="error-box">
-                        ⚠️ Invalid username or password. Please try again.
+                        {% for e in form.non_field_errors %}{{ e }}<br>{% endfor %}
                     </div>
                 {% endif %}
 
                 <div class="input-group">
-                    <label for="id_username">Username</label>
-                    <div class="input-icon-wrap">
-                        <svg class="input-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
-                        <input type="text" name="username" id="id_username" class="auth-input" placeholder="Enter your username" required autofocus autocomplete="username">
+                    <label for="{{ form.full_name.id_for_label }}">Full Name</label>
+                    {{ form.full_name }}
+                    {% for e in form.full_name.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+                </div>
+
+                <div class="form-row">
+                    <div class="input-group">
+                        <label for="{{ form.email.id_for_label }}">Email</label>
+                        {{ form.email }}
+                        {% for e in form.email.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+                    </div>
+                    <div class="input-group">
+                        <label for="{{ form.mobile.id_for_label }}">Mobile</label>
+                        {{ form.mobile }}
+                        {% for e in form.mobile.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
                     </div>
                 </div>
 
                 <div class="input-group">
-                    <label for="id_password">Password</label>
-                    <div class="input-icon-wrap">
-                        <svg class="input-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
-                        <input type="password" name="password" id="id_password" class="auth-input" placeholder="••••••••" required autocomplete="current-password">
+                    <label for="{{ form.designation.id_for_label }}">Designation <span style="font-weight:400; color:var(--autumn-ink-muted);">(optional)</span></label>
+                    {{ form.designation }}
+                </div>
+
+                <div class="input-group">
+                    <label for="{{ form.username.id_for_label }}">Username</label>
+                    {{ form.username }}
+                    {% for e in form.username.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
+                </div>
+
+                <div class="form-row">
+                    <div class="input-group">
+                        <label for="{{ form.password1.id_for_label }}">Password</label>
+                        {{ form.password1 }}
+                        {% for e in form.password1.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
                     </div>
-                    <div style="text-align: right; margin-top: 8px;">
-                        <a href="{% url 'password_reset' %}" style="font-size: 13px; color: var(--autumn-rust); text-decoration: none; font-weight: 600;">Forgot Password?</a>
+                    <div class="input-group">
+                        <label for="{{ form.password2.id_for_label }}">Confirm Password</label>
+                        {{ form.password2 }}
+                        {% for e in form.password2.errors %}<div class="field-error">{{ e }}</div>{% endfor %}
                     </div>
                 </div>
 
                 <button type="submit" class="btn-submit">
-                    Secure Login
+                    Submit Request
                     <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="width:16px; height:16px;"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"></path></svg>
                 </button>
             </form>
 
             <div class="auth-switch">
-                New here? <a href="{% url 'signup' %}">Request an account</a>
+                Already have an account? <a href="{% url 'login' %}">Log in</a>
             </div>
         {% endif %}
     </div>

@@ -1399,6 +1399,32 @@ def my_mis(request):
 # -------------------------
 # User Management
 # -------------------------
+# Editable Teams-hierarchy fields on UserProfile (excludes user/contact_number/designation,
+# which already have dedicated inputs in the edit modal).
+HIERARCHY_FIELDS = [
+    "vertical_path", "team", "team_id", "user_type", "emp_id", "code", "role",
+    "branch_code", "branch_name",
+    "rm_code", "rm_name", "tc_code", "tc_name", "csc_code", "csc_name",
+    "posp_code", "posp_name",
+    "agent_type",
+    "pan", "bank_account", "bank_name", "ifsc",
+    "membership_id", "user_id_code", "qc_verticals",
+]
+HIERARCHY_FLAGS = ["is_qc", "is_plvc", "personal_qc"]
+HIERARCHY_FIELD_LABELS = [
+    ("vertical_path", "Vertical Path"), ("team", "Team"), ("team_id", "Team ID"),
+    ("user_type", "User Type"), ("emp_id", "Emp ID"), ("code", "Code"), ("role", "Role"),
+    ("branch_code", "Branch Code"), ("branch_name", "Branch Name"),
+    ("rm_code", "RM Code"), ("rm_name", "RM Name"),
+    ("tc_code", "TC Code"), ("tc_name", "TC Name"),
+    ("csc_code", "CSC Code"), ("csc_name", "CSC Name"),
+    ("posp_code", "Ref/POSP Code"), ("posp_name", "Ref/POSP Name"),
+    ("agent_type", "Agent Type"),
+    ("pan", "PAN"), ("bank_account", "Bank Account"), ("bank_name", "Bank Name"), ("ifsc", "IFSC"),
+    ("membership_id", "Membership ID"), ("user_id_code", "User ID"), ("qc_verticals", "QC Verticals"),
+]
+
+
 def user_management(request):
     Group.objects.get_or_create(name="ADMIN")
     for group_name in PAGE_GROUPS:
@@ -1446,11 +1472,35 @@ def user_management(request):
             profile, _ = UserProfile.objects.get_or_create(user=u)
             profile.contact_number = request.POST.get("contact_number", "")
             profile.designation = request.POST.get("designation", "")
-            profile.save()
 
-            u.email = request.POST.get("email", "")
+            for field in HIERARCHY_FIELDS:
+                profile.__dict__[field] = request.POST.get(field, "").strip() or None
+            for flag in HIERARCHY_FLAGS:
+                setattr(profile, flag, request.POST.get(flag) == "on")
+
+            reports_to_id = request.POST.get("reports_to") or None
+            profile.reports_to_id = reports_to_id if reports_to_id else None
+
+            try:
+                profile.full_clean(exclude=["user"])
+                profile.save()
+                u.email = request.POST.get("email", "")
+                u.save()
+                msg = f"✅ Profile and access for '{u.username}' updated."
+            except forms.ValidationError as e:
+                error = "⚠️ " + " ".join(m for msgs in e.message_dict.values() for m in msgs)
+
+        elif action == "approve_user" and user_id:
+            u = User.objects.get(id=user_id)
+            u.is_active = True
             u.save()
-            msg = f"✅ Profile and access for '{u.username}' updated."
+            msg = f"✅ '{u.username}' approved — they can now log in."
+
+        elif action == "reject_user" and user_id:
+            u = User.objects.get(id=user_id)
+            uname = u.username
+            u.delete()
+            msg = f"🗑️ Signup request from '{uname}' rejected and removed."
 
         elif action == "make_admin" and user_id:
             u = User.objects.get(id=user_id)
@@ -1467,24 +1517,52 @@ def user_management(request):
                 u.delete()
                 msg = f"🗑️ User '{uname}' has been completely removed from the system."
 
-    users = User.objects.select_related("profile").all().order_by("-is_superuser", "username")
-    user_rows = []
-    for u in users:
-        user_rows.append({
+    all_users = User.objects.select_related("profile").all().order_by("-is_superuser", "username")
+    users = [u for u in all_users if u.is_active]
+    pending_users = [u for u in all_users if not u.is_active]
+
+    def profile_dict(u):
+        profile = getattr(u, "profile", None)
+        d = {
+            "id": u.id,
+            "username": u.username,
+            "full_name": u.get_full_name(),
+            "email": u.email,
+            "contact_number": profile.contact_number if profile else "",
+            "designation": profile.designation if profile else "",
+            "is_superuser": u.is_superuser,
+            "is_admin": u.groups.filter(name="ADMIN").exists(),
+            "pages": list(u.groups.values_list("name", flat=True)),
+        }
+        for field in HIERARCHY_FIELDS:
+            d[field] = getattr(profile, field, "") or ""
+        for flag in HIERARCHY_FLAGS:
+            d[flag] = bool(getattr(profile, flag, False))
+        d["reports_to"] = profile.reports_to_id if profile else None
+        return d
+
+    user_rows = [profile_dict(u) for u in users]
+    pending_rows = [
+        {
             "id": u.id,
             "username": u.username,
             "full_name": u.get_full_name(),
             "email": u.email,
             "contact_number": u.profile.contact_number if hasattr(u, "profile") else "",
             "designation": u.profile.designation if hasattr(u, "profile") else "",
-            "is_superuser": u.is_superuser,
-            "is_admin": u.groups.filter(name="ADMIN").exists(),
-            "pages": list(u.groups.values_list("name", flat=True)),
-        })
+            "date_joined": u.date_joined,
+        }
+        for u in pending_users
+    ]
+
+    manager_choices = [{"id": u.id, "username": u.username} for u in users]
 
     return render(request, "user_management.html", {
         "users": user_rows,
+        "pending_users": pending_rows,
+        "manager_choices": manager_choices,
         "page_groups": PAGE_GROUPS,
+        "hierarchy_field_labels": HIERARCHY_FIELD_LABELS,
         "msg": msg,
         "error": error
     })
