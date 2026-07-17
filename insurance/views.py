@@ -12,6 +12,7 @@ from django.db import transaction
 from django import forms
 import csv
 import json
+import logging
 import re
 import hashlib
 import threading
@@ -42,6 +43,8 @@ from .models import (
 from .utils import extract_data_with_gemini
 from .forms import ExtractionFieldForm, MISUploadForm, MappingConfigurationForm
 from .mapping_engine import process_mis_mapping
+
+logger = logging.getLogger("security")
 
 # =========================================================
 # PAGE-LEVEL ACCESS GROUPS (Retained for legacy UI assignments if needed)
@@ -1500,6 +1503,14 @@ def user_management(request):
             u.delete()
             msg = f"🗑️ Signup request from '{uname}' rejected and removed."
 
+        elif action == "reset_password" and user_id:
+            u = User.objects.get(id=user_id)
+            default_password = "Changeme@123"
+            u.set_password(default_password)
+            u.save()
+            logger.info("Password reset by admin for user '%s'", u.username)
+            msg = f"✅ Password for '{u.username}' reset to '{default_password}'. Share it with them directly."
+
         elif action == "make_admin" and user_id:
             u = User.objects.get(id=user_id)
             u.groups.clear()
@@ -2446,12 +2457,18 @@ def direct_password_reset(request):
         email = request.POST.get("email", "").strip()
         form = PasswordResetForm(data={"email": email})
         if form.is_valid():
-            form.save(
-                request=request,
-                use_https=request.is_secure(),
-                email_template_name="registration/password_reset_email.html",
-                subject_template_name="registration/password_reset_subject.txt",
-            )
+            try:
+                form.save(
+                    request=request,
+                    use_https=request.is_secure(),
+                    email_template_name="registration/password_reset_email.html",
+                    subject_template_name="registration/password_reset_subject.txt",
+                )
+            except Exception:
+                # Don't let an SMTP failure crash the request or reveal
+                # whether the email matched an account — but do log it loudly,
+                # since a silent send failure is otherwise invisible.
+                logger.exception("Password reset email failed to send (target=%r)", email)
         # Always redirect to the same "check your inbox" page whether or not
         # the email matched an account — this is the standard way to avoid
         # leaking which addresses have registered accounts. The actual

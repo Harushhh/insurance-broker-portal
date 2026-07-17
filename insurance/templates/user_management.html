@@ -244,10 +244,14 @@
                     🚫 Remove All Access
                 </button>
 
+                <button type="button" class="btn" onclick="resetPasswordAndSubmit()" style="background:#7c3aed; color:white; border:none; width:100%;">
+                    🔑 Reset Password
+                </button>
+
                 <button type="button" class="btn" onclick="deleteUserAndSubmit()" style="background:#ef4444; color:white; border:none; width:100%;">
                     🗑️ Delete User
                 </button>
-                
+
                 <button type="button" class="btn" onclick="closeModal('editUserModal')" style="grid-column: span 2; width:100%;">Cancel</button>
             </div>
         </form>
@@ -291,6 +295,13 @@
         });
 
         openModal('editUserModal');
+    }
+
+    function resetPasswordAndSubmit() {
+        if (confirm("Reset this user's password to the default 'Changeme@123'? You'll need to share it with them directly.")) {
+            document.getElementById('edit_action_input').value = 'reset_password';
+            document.getElementById('editUserForm').submit();
+        }
     }
 
     function makeAdminAndSubmit() {
