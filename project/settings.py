@@ -169,14 +169,17 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # =========================================================
 # CACHE (used for login-attempt throttling)
 # =========================================================
+# DB-backed rather than LocMemCache: LocMemCache is per-process, so with
+# multiple Railway workers each one tracked its own separate attempt count,
+# making the lockout inconsistent. The cache table is created by
+# `manage.py createcachetable` (run automatically via the Procfile release
+# step on deploy).
 CACHES = {
     "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "django_cache_table",
     }
 }
-# NOTE: LocMemCache is per-process. If you ever run multiple Railway
-# workers/replicas, switch this to Redis (django-redis) so throttling
-# state is shared across all of them.
 
 # =========================================================
 # SECURITY HEADERS & COOKIES
