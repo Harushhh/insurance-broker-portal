@@ -26,6 +26,31 @@ def _client_ip(request):
     return request.META.get("REMOTE_ADDR", "unknown")
 
 
+# The throttle is a defense-in-depth nicety, not core functionality — a
+# broken cache backend (missing table, connection blip, etc.) must never be
+# able to take down login/signup entirely. Fail open and log loudly instead.
+def _safe_cache_get(key, default=None):
+    try:
+        return cache.get(key, default)
+    except Exception:
+        logger.exception("Cache read failed for key %r — failing open", key)
+        return default
+
+
+def _safe_cache_set(key, value, timeout):
+    try:
+        cache.set(key, value, timeout)
+    except Exception:
+        logger.exception("Cache write failed for key %r", key)
+
+
+def _safe_cache_delete(key):
+    try:
+        cache.delete(key)
+    except Exception:
+        logger.exception("Cache delete failed for key %r", key)
+
+
 class ThrottledLoginView(LoginView):
     """
     Drop-in replacement for django.contrib.auth.views.LoginView that adds
@@ -37,7 +62,7 @@ class ThrottledLoginView(LoginView):
     def dispatch(self, request, *args, **kwargs):
         ip = _client_ip(request)
         self._throttle_key = f"login_attempts:{ip}"
-        attempts = cache.get(self._throttle_key, 0)
+        attempts = _safe_cache_get(self._throttle_key, 0)
 
         if attempts >= MAX_ATTEMPTS:
             logger.warning("Login blocked (rate limit) for IP %s", ip)
@@ -51,8 +76,8 @@ class ThrottledLoginView(LoginView):
 
     def form_invalid(self, form):
         ip = _client_ip(self.request)
-        attempts = cache.get(self._throttle_key, 0) + 1
-        cache.set(self._throttle_key, attempts, LOCKOUT_SECONDS)
+        attempts = _safe_cache_get(self._throttle_key, 0) + 1
+        _safe_cache_set(self._throttle_key, attempts, LOCKOUT_SECONDS)
         attempted_username = self.request.POST.get("username", "")
         logger.warning(
             "Failed login attempt %s/%s from %s (username=%r)",
@@ -62,7 +87,7 @@ class ThrottledLoginView(LoginView):
 
     def form_valid(self, form):
         ip = _client_ip(self.request)
-        cache.delete(self._throttle_key)
+        _safe_cache_delete(self._throttle_key)
         # Rotate the session key on login to prevent session fixation.
         self.request.session.cycle_key()
         logger.info("Successful login from %s (user=%s)", ip, form.get_user().username)
@@ -82,7 +107,7 @@ class SignupView(View):
     def dispatch(self, request, *args, **kwargs):
         ip = _client_ip(request)
         self._throttle_key = f"signup_attempts:{ip}"
-        attempts = cache.get(self._throttle_key, 0)
+        attempts = _safe_cache_get(self._throttle_key, 0)
         if attempts >= SIGNUP_MAX_ATTEMPTS:
             logger.warning("Signup blocked (rate limit) for IP %s", ip)
             return render(request, self.template_name, {"form": SignupForm(), "locked_out": True}, status=429)
@@ -93,11 +118,11 @@ class SignupView(View):
         ip = _client_ip(request)
 
         if not form.is_valid():
-            attempts = cache.get(self._throttle_key, 0) + 1
-            cache.set(self._throttle_key, attempts, SIGNUP_LOCKOUT_SECONDS)
+            attempts = _safe_cache_get(self._throttle_key, 0) + 1
+            _safe_cache_set(self._throttle_key, attempts, SIGNUP_LOCKOUT_SECONDS)
             return render(request, self.template_name, {"form": form})
 
-        cache.delete(self._throttle_key)
+        _safe_cache_delete(self._throttle_key)
         data = form.cleaned_data
         full_name = data["full_name"].strip()
         parts = full_name.split(" ", 1)

@@ -1,2 +1,2 @@
 release: python manage.py createcachetable
-web: gunicorn project.wsgi
+web: python manage.py createcachetable; gunicorn project.wsgi
