@@ -1,3 +1,5 @@
+import random
+
 from django.contrib.auth.models import User
 from django.core.validators import RegexValidator
 from django.db import models
@@ -10,6 +12,14 @@ IFSC_VALIDATOR = RegexValidator(
     regex=r'^[A-Z]{4}0[A-Z0-9]{6}$',
     message="Enter a valid IFSC code (format: AAAA0999999).",
 )
+
+
+def generate_user_id_code():
+    """A unique, zero-padded 4-digit code (e.g. '0042'), assigned once per user."""
+    while True:
+        candidate = f"{random.randint(0, 9999):04d}"
+        if not UserProfile.objects.filter(user_id_code=candidate).exists():
+            return candidate
 
 
 # ---------- MASTER TABLE ----------
@@ -277,7 +287,12 @@ class UserProfile(models.Model):
     qc_verticals = models.CharField(max_length=255, blank=True, null=True)  # comma-separated
 
     membership_id = models.CharField(max_length=50, blank=True, null=True)
-    user_id_code = models.CharField(max_length=50, blank=True, null=True)  # business "User ID" code
+    user_id_code = models.CharField(max_length=4, unique=True, blank=True, null=True)  # system-assigned 4-digit User ID
+
+    def save(self, *args, **kwargs):
+        if not self.user_id_code:
+            self.user_id_code = generate_user_id_code()
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.user.username

@@ -82,7 +82,10 @@
                 {% for u in users %}
                 <tr class="user-row" style="border-bottom:1px solid var(--border); background:#fff;">
                     <td style="padding:16px; vertical-align:top;">
-                        <strong style="font-size:15px; color:var(--text); display:block;" class="search-target">{{ u.username }}</strong>
+                        <strong style="font-size:15px; color:var(--text); display:block;" class="search-target">
+                            {{ u.username }}
+                            <span style="font-size:11px; font-weight:700; color:#7c3aed; background:#f5f3ff; border:1px solid #ddd6fe; border-radius:6px; padding:2px 6px; margin-left:6px; vertical-align:middle;" class="search-target">ID {{ u.user_id_code }}</span>
+                        </strong>
                         <small style="color:var(--muted);" class="search-target">{{ u.email }}</small>
                     </td>
                     <td style="padding:16px; vertical-align:middle; color:#475569;" class="search-target">

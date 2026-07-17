@@ -1411,7 +1411,9 @@ HIERARCHY_FIELDS = [
     "posp_code", "posp_name",
     "agent_type",
     "pan", "bank_account", "bank_name", "ifsc",
-    "membership_id", "user_id_code", "qc_verticals",
+    "membership_id", "qc_verticals",
+    # NOTE: user_id_code is deliberately excluded — it's system-assigned
+    # (UserProfile.save() auto-fills it) and unique, not admin-editable.
 ]
 HIERARCHY_FLAGS = ["is_qc", "is_plvc", "personal_qc"]
 HIERARCHY_FIELD_LABELS = [
@@ -1424,7 +1426,7 @@ HIERARCHY_FIELD_LABELS = [
     ("posp_code", "Ref/POSP Code"), ("posp_name", "Ref/POSP Name"),
     ("agent_type", "Agent Type"),
     ("pan", "PAN"), ("bank_account", "Bank Account"), ("bank_name", "Bank Name"), ("ifsc", "IFSC"),
-    ("membership_id", "Membership ID"), ("user_id_code", "User ID"), ("qc_verticals", "QC Verticals"),
+    ("membership_id", "Membership ID"), ("qc_verticals", "QC Verticals"),
 ]
 
 
@@ -1550,6 +1552,7 @@ def user_management(request):
             "is_superuser": u.is_superuser,
             "is_admin": u.groups.filter(name="ADMIN").exists(),
             "pages": list(u.groups.values_list("name", flat=True)),
+            "user_id_code": profile.user_id_code if profile else "",
         }
         for field in HIERARCHY_FIELDS:
             d[field] = getattr(profile, field, "") or ""
