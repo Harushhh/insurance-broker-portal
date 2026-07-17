@@ -1,8 +1,6 @@
 from django.contrib import messages
+from django.contrib.auth.forms import PasswordResetForm
 from django.contrib.auth.models import User, Group
-from django.contrib.auth.tokens import default_token_generator
-from django.utils.http import urlsafe_base64_encode
-from django.utils.encoding import force_bytes
 from django.utils import timezone
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
@@ -2445,17 +2443,21 @@ def locked_policy_dashboard(request):
 # -------------------------
 def direct_password_reset(request):
     if request.method == "POST":
-        email = request.POST.get("email")
-        user = User.objects.filter(email=email).first()
-
-        if user:
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-            token = default_token_generator.make_token(user)
-            return redirect("password_reset_confirm", uidb64=uid, token=token)
-        else:
-            return render(request, "password_reset.html", {
-                "error": "We could not find an account with that email address."
-            })
+        email = request.POST.get("email", "").strip()
+        form = PasswordResetForm(data={"email": email})
+        if form.is_valid():
+            form.save(
+                request=request,
+                use_https=request.is_secure(),
+                email_template_name="registration/password_reset_email.html",
+                subject_template_name="registration/password_reset_subject.txt",
+            )
+        # Always redirect to the same "check your inbox" page whether or not
+        # the email matched an account — this is the standard way to avoid
+        # leaking which addresses have registered accounts. The actual
+        # uid/token are only ever delivered via the emailed link itself,
+        # never handed back to the requester directly.
+        return redirect("password_reset_done")
 
     return render(request, "password_reset.html")
 
