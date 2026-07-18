@@ -1830,8 +1830,26 @@ def bulk_update_rates(request):
             parsed_value, _ = MakeModelClassMaster.objects.get_or_create(name=new_value) if new_value else (None, False)
         elif field_name in ["is_ncb", "is_cpa", "is_zd"]:
             parsed_value = parse_yes_no_na(new_value)
-        elif field_name in ["status", "is_deleted"]:
+        elif field_name == "status":
             parsed_value = str(new_value).strip().upper()
+            valid_statuses = dict(RateMaster.STATUS_CHOICES)
+            if parsed_value not in valid_statuses:
+                messages.error(
+                    request,
+                    f"Bulk update rejected: '{new_value}' is not a valid Status "
+                    f"(must be one of: {', '.join(valid_statuses)}). No rows were changed."
+                )
+                return redirect("dashboard")
+        elif field_name == "is_deleted":
+            parsed_value = str(new_value).strip().upper()
+            valid_deleted = dict(RateMaster.IS_DELETED_CHOICES)
+            if parsed_value not in valid_deleted:
+                messages.error(
+                    request,
+                    f"Bulk update rejected: '{new_value}' is not a valid Is Deleted value "
+                    f"(must be one of: {', '.join(valid_deleted)}). No rows were changed."
+                )
+                return redirect("dashboard")
         elif field_name in ["vehicle_age_min", "vehicle_age_max", "cc_min", "cc_max", "user_id"]:
             parsed_value = int(float(new_value)) if new_value else None
         elif field_name in [

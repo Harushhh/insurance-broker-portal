@@ -227,6 +227,47 @@ def check_resolved_cluster_match(resolved_names, grid_val):
     return False
 
 
+# Two numbers jammed together with a slash (e.g. "6702/47500" = CC/GVW for a
+# commercial vehicle). The old digit-only regex silently concatenated both
+# into one nonsense integer ("670247500") instead of a real CC value — this
+# pattern must be caught before any numeric parsing is attempted.
+_CC_COMBINED_PATTERN = re.compile(r'\d+\s*/\s*\d+')
+
+
+def is_combined_cc_gvw(raw_value) -> bool:
+    """
+    True if a raw MIS 'cc cubic capacity' value looks like two numbers
+    combined with a slash (CC/GVW jammed into one cell) rather than a
+    single CC figure. These are never parsed — the row is routed straight
+    to FAILED - BAD DATA instead of risking a match against a fabricated
+    number.
+    """
+    if pd.isna(raw_value):
+        return False
+    return bool(_CC_COMBINED_PATTERN.search(str(raw_value)))
+
+
+def normalize_rto_code(raw_value):
+    """
+    Normalizes a raw MIS RTO value before the two-step RTOMaster lookup.
+    Handles three real-world MIS formatting issues at once:
+      - internal spaces:            "UP 32"      -> "UP32"
+      - hyphens:                    "GJ-19"      -> "GJ19"
+      - full registration numbers
+        instead of just the code:   "MH05FG9876" -> "MH05"
+    A clean RTO code is always 2 letters + 2 digits, and a full
+    registration number always starts with that code — so stripping
+    spaces/hyphens and truncating to 4 characters handles all three.
+    """
+    if pd.isna(raw_value):
+        return raw_value
+    s = str(raw_value).strip()
+    if not s or s.lower() == 'nan':
+        return s
+    s = re.sub(r'[\s\-]', '', s)
+    return s[:4]
+
+
 def process_mis_mapping(mis_file_id):
     # Always forcefully wipe the thread's DB connection state to prevent inheritance locks
     connection.close()
@@ -327,10 +368,23 @@ def process_mis_mapping(mis_file_id):
         # Vehicle Makes clusters store make-level codes (e.g. 'tata',
         # 'mahindra', 'bikeall'), not model-level detail.
         df_mis['_mis_make'] = _make.str.strip().str.lower()
-        df_mis['_mis_rto'] = safe_get_col(df_mis, 'Policy: rto no').astype(str).str.strip().str.lower()
 
-        # Regex strips letters ("1500 CC" -> 1500)
-        cc_raw = safe_get_col(df_mis, 'Policy: cc cubic capacity').astype(str).str.replace(r'[^0-9.]', '', regex=True)
+        # RTO normalization happens before the two-step master lookup: strip
+        # internal spaces and hyphens, then truncate to 4 chars so full
+        # registration numbers (e.g. "MH05FG9876") collapse to the RTO code
+        # ("MH05"). Raw value is kept alongside for readable failure messages.
+        _rto_raw_series = safe_get_col(df_mis, 'Policy: rto no').astype(str).str.strip()
+        df_mis['_mis_rto_raw'] = _rto_raw_series
+        df_mis['_mis_rto'] = _rto_raw_series.apply(normalize_rto_code).str.lower()
+
+        # Regex strips letters ("1500 CC" -> 1500). Values that jam two
+        # numbers together with a slash (CC/GVW combined, e.g. "6702/47500")
+        # are flagged up front instead of being silently digit-stripped into
+        # one nonsense integer — see is_combined_cc_gvw / FAILED - BAD DATA below.
+        _cc_raw_series = safe_get_col(df_mis, 'Policy: cc cubic capacity').astype(str).str.strip()
+        df_mis['_mis_cc_raw'] = _cc_raw_series
+        df_mis['_mis_cc_bad_data'] = _cc_raw_series.apply(is_combined_cc_gvw)
+        cc_raw = _cc_raw_series.str.replace(r'[^0-9.]', '', regex=True)
         df_mis['_mis_cc'] = pd.to_numeric(cc_raw, errors='coerce')
 
         sc_raw = safe_get_col(df_mis, 'Policy: seating capacity').astype(str).str.replace(r'[^0-9.]', '', regex=True)
@@ -357,19 +411,48 @@ def process_mis_mapping(mis_file_id):
 
         # 4. ROW-BY-ROW PROCESSING
         for idx, mis_row in df_mis.iterrows():
+
+            # --- BAD DATA GUARD: combined CC/GVW value ---
+            # Flagged during pre-compute (is_combined_cc_gvw). Never enters the
+            # elimination rules — a fabricated CC number could otherwise cause
+            # a false NO MATCH, or worse, a false MATCH against the wrong rate.
+            if mis_row['_mis_cc_bad_data']:
+                results.append({
+                    'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
+                    'Mapping Status': 'FAILED - BAD DATA',
+                    'Failure Reason': (
+                        f"Policy: cc cubic capacity value '{mis_row['_mis_cc_raw']}' looks like a "
+                        f"combined CC/GVW figure (two numbers separated by '/'). Not auto-parsed — "
+                        f"correct the source MIS data and re-run mapping for this row."
+                    ),
+                    'Displaygroupid': None,
+                    'Potype': None, 'Poodrate': None, 'Potprate': None,
+                    'Ponetrate': None, 'Poflatamount': None, 'Addtnc': None
+                })
+                continue
+
             valid_mask = pd.Series([True] * len(df_grid), index=df_grid.index)
             failed_on = []
 
             # --- RULE 1: Insurance Company ---
+            val_ins_raw = mis_row['_mis_ins']
             val_ins = mis_row['_mis_ins_mapped']
             if not val_ins:
-                failed_on.append('Policy: insurance company')
+                failed_on.append((
+                    'Policy: insurance company',
+                    f"Insurer '{val_ins_raw}' did not fuzzy-match any active Rate Master insurer "
+                    f"(threshold={INSURANCE_FUZZY_THRESHOLD}). Either no active rate is configured "
+                    f"for this insurer, or the name on file differs too much to match."
+                ))
                 valid_mask = valid_mask & False
             else:
                 rule_mask = (df_grid['insurance_company'] == val_ins)
                 valid_mask = valid_mask & rule_mask
                 if not valid_mask.any():
-                    failed_on.append('Policy: insurance company')
+                    failed_on.append((
+                        'Policy: insurance company',
+                        f"Insurer resolved to '{val_ins}' but there are 0 active Rate Master rows for that insurer."
+                    ))
 
             # --- RULE 2: Categorical Matches (RapidFuzz-backed) ---
             # Vehicle class is handled separately below (Rule 2b) with its own
@@ -385,7 +468,11 @@ def process_mis_mapping(mis_file_id):
                     rule_mask = df_grid[grid_col].apply(lambda g: check_categorical_match(val, g))
                     valid_mask = valid_mask & rule_mask
                     if not valid_mask.any():
-                        failed_on.append(label)
+                        failed_on.append((
+                            label,
+                            f"Value '{val}' did not match any remaining candidate Rate Master row's "
+                            f"{grid_col.replace('_', ' ')} (after the previous rules narrowed the field)."
+                        ))
 
             # --- RULE 2b: Vehicle Class — direct match + NA wildcard ---
             # Uses case-insensitive exact match only (no fuzzy/substring).
@@ -412,7 +499,11 @@ def process_mis_mapping(mis_file_id):
                 rule_mask = df_grid['make_model_class'].apply(match_vehicle_class)
                 valid_mask = valid_mask & rule_mask
                 if not valid_mask.any():
-                    failed_on.append('Policy: vehicle class')
+                    failed_on.append((
+                        'Policy: vehicle class',
+                        f"Vehicle class '{val_class}' has no exact match among remaining candidate "
+                        f"rate rows, and none of them has an NA-wildcard class."
+                    ))
 
             # --- RULE 3: Numeric Ranges ---
             range_rules = [
@@ -425,30 +516,46 @@ def process_mis_mapping(mis_file_id):
                     val = mis_row[mis_col]
                     if pd.isna(val):
                         rule_mask = df_grid[min_col].isna() & df_grid[max_col].isna()
+                        detail = (
+                            f"{label} is blank/unparseable on this policy, and no remaining "
+                            f"candidate rate row has an open (blank) range."
+                        )
                     else:
                         min_cond = df_grid[min_col].isna() | (df_grid[min_col] <= val)
                         max_cond = df_grid[max_col].isna() | (df_grid[max_col] >= val)
                         rule_mask = min_cond & max_cond
+                        detail = (
+                            f"{label} value {val} falls outside the range configured on every "
+                            f"remaining candidate rate row."
+                        )
                     valid_mask = valid_mask & rule_mask
                     if not valid_mask.any():
-                        failed_on.append(label)
+                        failed_on.append((label, detail))
 
             # --- RULE 4: Dates ---
             if valid_mask.any():
                 val = mis_row['_mis_date']
                 if pd.isna(val):
                     rule_mask = df_grid['from_date'].isna() & df_grid['to_date'].isna()
+                    detail = (
+                        "Inception date is blank/unparseable on this policy, and no remaining "
+                        "candidate rate row has an open (blank) date window."
+                    )
                 else:
                     min_cond = df_grid['from_date'].isna() | (df_grid['from_date'] <= val)
                     max_cond = df_grid['to_date'].isna() | (df_grid['to_date'] >= val)
                     rule_mask = min_cond & max_cond
+                    detail = (
+                        f"Inception date {val.date()} falls outside the active date window "
+                        f"on every remaining candidate rate row."
+                    )
                 valid_mask = valid_mask & rule_mask
                 if not valid_mask.any():
-                    failed_on.append('Policy: inception date')
+                    failed_on.append(('Policy: inception date', detail))
 
-            # --- RULE 5a: Vehicle Make — two-step master lookup ---
+            # --- RULE 5a: Vehicle Make — strict two-step master lookup ---
             # Step 1: resolve MIS 'MARUTI' against MakeModelMaster.make_model_cluster
-            #         -> e.g. {'private_car_all'}
+            #         -> extract the matching row's make_model_name, e.g. {'private_car_all'}
             # Step 2: check RateMaster.new_vehicle_makes for 'private_car_all'
             # No fallback: if MIS value isn't found in MakeModelMaster at all,
             # the row fails this rule.
@@ -456,33 +563,68 @@ def process_mis_mapping(mis_file_id):
                 val_make = mis_row['_mis_make']
                 if val_make == 'nan' or not val_make:
                     rule_mask = df_grid['new_vehicle_makes'] == ''
+                    detail = (
+                        "Vehicle make is blank on this policy, and no remaining candidate "
+                        "rate row allows a blank vehicle-make cluster."
+                    )
                 else:
                     resolved_make_names = resolve_make(val_make)
+                    if not resolved_make_names:
+                        detail = (
+                            f"Vehicle make '{val_make}' was not found in any MakeModelMaster "
+                            f"cluster — add it to MakeModelMaster or check the MIS value for typos."
+                        )
+                    else:
+                        preview = ", ".join(sorted(resolved_make_names)[:5])
+                        detail = (
+                            f"Vehicle make '{val_make}' resolved to master group(s) [{preview}], but no "
+                            f"remaining candidate rate row lists that group in its vehicle-make cluster."
+                        )
                     rule_mask = df_grid['new_vehicle_makes'].apply(
                         lambda g: check_resolved_cluster_match(resolved_make_names, g)
                     )
 
                 valid_mask = valid_mask & rule_mask
                 if not valid_mask.any():
-                    failed_on.append('Policy: vehicle make / model')
+                    failed_on.append(('Policy: vehicle make / model', detail))
 
             # --- RULE 5b: RTO — two-step master lookup ---
-            # Step 1: resolve MIS 'MH09' against RTOMaster.rto_cluster -> e.g. {'zyx'}
+            # _mis_rto is already normalized (normalize_rto_code): spaces/hyphens
+            # stripped, truncated to 4 chars, so full registration numbers like
+            # "MH05FG9876" resolve as "MH05" instead of failing outright.
+            # Step 1: resolve normalized MIS RTO against RTOMaster.rto_cluster -> e.g. {'zyx'}
             # Step 2: check RateMaster.new_rto_list for 'zyx'
-            # No fallback: if MIS value isn't found in RTOMaster at all,
+            # No fallback: if the normalized value isn't found in RTOMaster at all,
             # the row fails this rule.
             if valid_mask.any():
                 val_rto = mis_row['_mis_rto']
+                val_rto_raw = mis_row['_mis_rto_raw']
                 if val_rto == 'nan' or not val_rto:
                     rule_mask = df_grid['new_rto_list'] == ''
+                    detail = (
+                        "RTO is blank on this policy, and no remaining candidate rate row "
+                        "allows a blank RTO cluster."
+                    )
                 else:
                     resolved_rto_names = resolve_rto(val_rto)
+                    if not resolved_rto_names:
+                        detail = (
+                            f"RTO '{val_rto_raw}' (normalized to '{val_rto.upper()}') was not found in any "
+                            f"RTOMaster cluster — add it to RTOMaster or check the MIS value."
+                        )
+                    else:
+                        preview = ", ".join(sorted(resolved_rto_names)[:5])
+                        detail = (
+                            f"RTO '{val_rto_raw}' (normalized to '{val_rto.upper()}') resolved to master "
+                            f"group(s) [{preview}], but no remaining candidate rate row lists that group "
+                            f"in its RTO cluster."
+                        )
                     rule_mask = df_grid['new_rto_list'].apply(
                         lambda g: check_resolved_cluster_match(resolved_rto_names, g)
                     )
                 valid_mask = valid_mask & rule_mask
                 if not valid_mask.any():
-                    failed_on.append('Policy: rto no')
+                    failed_on.append(('Policy: rto no', detail))
 
             # --- RULE 6: Complex Codes (NCB, CPA, ZD) ---
             if valid_mask.any():
@@ -493,7 +635,11 @@ def process_mis_mapping(mis_file_id):
                 rule_mask = m_ncb_yes | m_ncb_no | m_ncb_na
                 valid_mask = valid_mask & rule_mask
                 if not valid_mask.any():
-                    failed_on.append('Policy: no claim bonus')
+                    failed_on.append((
+                        'Policy: no claim bonus',
+                        f"NCB value {val_ncb} doesn't satisfy the YES/NO/NA requirement on any "
+                        f"remaining candidate rate row."
+                    ))
 
             if valid_mask.any():
                 val_cpa = mis_row['_mis_cpa']
@@ -503,7 +649,11 @@ def process_mis_mapping(mis_file_id):
                 rule_mask = m_cpa_yes | m_cpa_no | m_cpa_na
                 valid_mask = valid_mask & rule_mask
                 if not valid_mask.any():
-                    failed_on.append('Policy: cpa')
+                    failed_on.append((
+                        'Policy: cpa',
+                        f"CPA value {val_cpa} doesn't satisfy the YES/NO/NA requirement on any "
+                        f"remaining candidate rate row."
+                    ))
 
             if valid_mask.any():
                 # FIX: original code computed `val_zd in [...]` once as a Python bool
@@ -520,7 +670,11 @@ def process_mis_mapping(mis_file_id):
                 rule_mask = m_zd_yes | m_zd_no | m_zd_na
                 valid_mask = valid_mask & rule_mask
                 if not valid_mask.any():
-                    failed_on.append('Policy: nil dep')
+                    failed_on.append((
+                        'Policy: nil dep',
+                        f"Nil Dep value '{val_zd}' doesn't satisfy the YES/NO/NA requirement on any "
+                        f"remaining candidate rate row."
+                    ))
 
             # --- FINAL RESOLUTION ---
             matched_grid = df_grid[valid_mask]
@@ -567,8 +721,13 @@ def process_mis_mapping(mis_file_id):
                 })
 
             else:
-                # ZERO MATCHES — record the first rule that eliminated candidates
-                reason = f"Failed on: {failed_on[0]}" if failed_on else "No rates found for criteria"
+                # ZERO MATCHES — record the first rule that eliminated candidates,
+                # with the specific value/reason for that rule so it's actionable.
+                if failed_on:
+                    first_label, first_detail = failed_on[0]
+                    reason = f"Failed on: {first_label} — {first_detail}"
+                else:
+                    reason = "No rates found for criteria"
                 results.append({
                     'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
                     'Mapping Status': '❌ NO MATCH',
@@ -585,6 +744,7 @@ def process_mis_mapping(mis_file_id):
         total_processed = len(df_mis)
         total_matched   = len(df_extracted[df_extracted['Mapping Status'] == '✅ MATCH'])
         total_multiple  = len(df_extracted[df_extracted['Mapping Status'] == '⚠️ MULTIPLE MATCHES'])
+        total_bad_data  = len(df_extracted[df_extracted['Mapping Status'] == 'FAILED - BAD DATA'])
 
         # Clean up temporary columns from df_mis before merging
         cols_to_drop = [c for c in df_mis.columns if c.startswith('_mis_')]
@@ -628,7 +788,8 @@ def process_mis_mapping(mis_file_id):
             f"Processed {total_processed} rows successfully. "
             f"Mapped {total_matched} rates. "
             f"{total_multiple} rows skipped — multiple Rate Master groups matched "
-            f"(refine Rate Master to get a single match)."
+            f"(refine Rate Master to get a single match). "
+            f"{total_bad_data} rows flagged FAILED - BAD DATA (malformed source values — see Failure Reason)."
         )
         mis_obj.save()
 
