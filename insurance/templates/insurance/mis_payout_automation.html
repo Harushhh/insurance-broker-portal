@@ -189,19 +189,22 @@
   /* ── Record count pill ───────────────────────────────────────────── */
   .record-pill {
     display: inline-flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 5px;
     background: #f0fdf4;
     border: 1px solid #bbf7d0;
     color: #16a34a;
     border-radius: 20px;
-    padding: 3px 10px;
+    padding: 5px 10px;
     font-size: 0.7rem;
     font-weight: 600;
-    white-space: nowrap;
+    white-space: normal;
+    max-width: 480px;
+    line-height: 1.5;
   }
   .record-pill-dot {
     width: 5px; height: 5px;
+    margin-top: 5px;
     border-radius: 50%;
     background: #16a34a;
     flex-shrink: 0;
