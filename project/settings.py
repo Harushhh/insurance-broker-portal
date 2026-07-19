@@ -291,5 +291,14 @@ LOGGING = {
             "level": "WARNING",
             "propagate": True,
         },
+        # Django's own default logging only sends unhandled 500s to the
+        # console when DEBUG=True, and to ADMINS by email otherwise — with
+        # no ADMINS configured, that means production 500s were being
+        # dropped with no record anywhere. Force them to stdout unconditionally.
+        "django.request": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
     },
 }
