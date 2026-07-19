@@ -12,6 +12,8 @@ from .models import MISFile, RateMaster, RTOMaster, MakeModelMaster
 INSURANCE_FUZZY_THRESHOLD = 55   # lowered from 60: handles typos in company names
                                   # (e.g. "Limted" instead of "Limited" in Liberty)
 CATEGORICAL_FUZZY_THRESHOLD = 75
+MAKE_MODEL_MIN_WORD_MATCH = 2     # Rule 5a: min words the MIS "make + model" string
+                                  # must share with a MakeModelMaster cluster entry
 
 # Words that appear in almost every insurer name and carry zero discriminative value.
 # Stripping these before matching lets the unique identifying tokens (Magma, Liberty,
@@ -227,6 +229,69 @@ def check_resolved_cluster_match(resolved_names, grid_val):
     return False
 
 
+def fuzzy_match_make_model(search_term, cluster_string, min_shared_words=MAKE_MODEL_MIN_WORD_MATCH):
+    """
+    Word-overlap matcher used for vehicle make/model (Rule 5a), replacing a
+    strict/substring match. A MakeModelMaster cluster entry counts as a match
+    if it shares at least `min_shared_words` words with the search term —
+    e.g. search "YAMAHA ALPHA" against cluster entry "YAMAHA ALPHA LX" shares
+    {"YAMAHA", "ALPHA"} = 2 words -> match — rather than requiring the whole
+    entry to match exactly or the search term to appear as one substring.
+
+    Matching is done per cluster item (not across the whole cluster field),
+    so two unrelated items can't accidentally combine to satisfy the word
+    count. If the search term itself has fewer than `min_shared_words` words
+    (e.g. model is blank), no item can ever match — that's intentional: the
+    threshold is on shared words, not a fraction of the search term.
+    """
+    if not search_term or not cluster_string:
+        return False
+
+    search_words = set(str(search_term).strip().upper().split())
+    if len(search_words) < min_shared_words:
+        return False
+
+    items = [x.strip().upper() for x in str(cluster_string).split(",") if x.strip()]
+    for item in items:
+        item_words = set(item.split())
+        if len(search_words & item_words) >= min_shared_words:
+            return True
+
+    return False
+
+
+def build_make_model_lookup(master_qs, name_field, cluster_field, min_shared_words=MAKE_MODEL_MIN_WORD_MATCH):
+    """
+    Preloads MakeModelMaster once per mapping job and builds a lookup from a
+    MIS "make + model" search string -> set of master 'name' values whose
+    cluster shares at least `min_shared_words` words with it (see
+    fuzzy_match_make_model). Mirrors build_master_lookup's shape and caching,
+    but is specific to Rule 5a's fuzzy word-overlap matching — RTO (Rule 5b)
+    still uses build_master_lookup/strict_match_in_cluster unchanged.
+    """
+    master_rows = list(master_qs.values_list(name_field, cluster_field))
+    parsed = [(name, cluster) for name, cluster in master_rows if cluster]
+
+    resolution_cache = {}
+
+    def resolve(search_term):
+        if not search_term:
+            return set()
+        key = str(search_term).strip().upper()
+        if key in resolution_cache:
+            return resolution_cache[key]
+
+        matched_names = set()
+        for name, cluster in parsed:
+            if fuzzy_match_make_model(key, cluster, min_shared_words):
+                matched_names.add(str(name).strip().lower())
+
+        resolution_cache[key] = matched_names
+        return matched_names
+
+    return resolve
+
+
 # Two numbers jammed together with a slash (e.g. "6702/47500" = CC/GVW for a
 # commercial vehicle). The old digit-only regex silently concatenated both
 # into one nonsense integer ("670247500") instead of a real CC value — this
@@ -344,7 +409,9 @@ def process_mis_mapping(mis_file_id):
         resolve_rto = build_master_lookup(
             RTOMaster.objects.all(), 'rto_name', 'rto_cluster'
         )
-        resolve_make = build_master_lookup(
+        # Vehicle make/model uses fuzzy word-overlap matching (Rule 5a), not the
+        # strict substring match RTO above still uses — see build_make_model_lookup.
+        resolve_make = build_make_model_lookup(
             MakeModelMaster.objects.all(), 'make_model_name', 'make_model_cluster'
         )
 
@@ -363,11 +430,10 @@ def process_mis_mapping(mis_file_id):
 
         _make = safe_get_col(df_mis, 'Policy: vehicle make').fillna('').astype(str)
         _model = safe_get_col(df_mis, 'Policy: model').fillna('').astype(str)
+        # Rule 5a matches on make+model concatenated with a single space
+        # (e.g. "YAMAHA" + "ALPHA" -> "yamaha alpha"), not make alone —
+        # this is the only make/model column it needs.
         df_mis['_mis_make_model'] = (_make + " " + _model).str.strip().str.lower()
-        # Make-only column: used for the Rule 5a match, since RateMaster's
-        # Vehicle Makes clusters store make-level codes (e.g. 'tata',
-        # 'mahindra', 'bikeall'), not model-level detail.
-        df_mis['_mis_make'] = _make.str.strip().str.lower()
 
         # RTO normalization happens before the two-step master lookup: strip
         # internal spaces and hyphens, then truncate to 4 chars so full
@@ -553,32 +619,41 @@ def process_mis_mapping(mis_file_id):
                 if not valid_mask.any():
                     failed_on.append(('Policy: inception date', detail))
 
-            # --- RULE 5a: Vehicle Make — strict two-step master lookup ---
-            # Step 1: resolve MIS 'MARUTI' against MakeModelMaster.make_model_cluster
-            #         -> extract the matching row's make_model_name, e.g. {'private_car_all'}
-            # Step 2: check RateMaster.new_vehicle_makes for 'private_car_all'
-            # No fallback: if MIS value isn't found in MakeModelMaster at all,
-            # the row fails this rule.
+            # --- RULE 5a: Vehicle Make/Model — two-step lookup, fuzzy word-overlap ---
+            # Input is "Policy: vehicle make" + "Policy: model" concatenated with a
+            # single space (e.g. "YAMAHA" + "ALPHA" -> "yamaha alpha"), not make alone.
+            # Step 1: match that string against MakeModelMaster.make_model_cluster via
+            #         fuzzy_match_make_model — a cluster entry matches if it shares at
+            #         least MAKE_MODEL_MIN_WORD_MATCH words with it (not a strict/substring
+            #         match) -> extract the matching row's make_model_name, e.g. {'private_car_all'}
+            # Step 2: check RateMaster.new_vehicle_makes for 'private_car_all' (unchanged —
+            #         still an exact item match against the Rate Master's own cluster list).
+            # No fallback: if the make+model string doesn't share enough words with any
+            # MakeModelMaster cluster entry, the row fails this rule. Note: if either the
+            # make or the model is blank, the search string may have only 1 word available,
+            # so the word-match threshold can never be met for that row by design.
             if valid_mask.any():
-                val_make = mis_row['_mis_make']
-                if val_make == 'nan' or not val_make:
+                val_make_model = mis_row['_mis_make_model']
+                if val_make_model == 'nan' or not val_make_model:
                     rule_mask = df_grid['new_vehicle_makes'] == ''
                     detail = (
-                        "Vehicle make is blank on this policy, and no remaining candidate "
+                        "Vehicle make/model is blank on this policy, and no remaining candidate "
                         "rate row allows a blank vehicle-make cluster."
                     )
                 else:
-                    resolved_make_names = resolve_make(val_make)
+                    resolved_make_names = resolve_make(val_make_model)
                     if not resolved_make_names:
                         detail = (
-                            f"Vehicle make '{val_make}' was not found in any MakeModelMaster "
-                            f"cluster — add it to MakeModelMaster or check the MIS value for typos."
+                            f"Vehicle make/model '{val_make_model}' did not share at least "
+                            f"{MAKE_MODEL_MIN_WORD_MATCH} words with any MakeModelMaster cluster "
+                            f"entry — add it to MakeModelMaster or check the MIS value."
                         )
                     else:
                         preview = ", ".join(sorted(resolved_make_names)[:5])
                         detail = (
-                            f"Vehicle make '{val_make}' resolved to master group(s) [{preview}], but no "
-                            f"remaining candidate rate row lists that group in its vehicle-make cluster."
+                            f"Vehicle make/model '{val_make_model}' resolved to master group(s) "
+                            f"[{preview}], but no remaining candidate rate row lists that group in "
+                            f"its vehicle-make cluster."
                         )
                     rule_mask = df_grid['new_vehicle_makes'].apply(
                         lambda g: check_resolved_cluster_match(resolved_make_names, g)
