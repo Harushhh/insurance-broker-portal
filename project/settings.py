@@ -42,9 +42,12 @@ else:
 # =========================================================
 # CSRF
 # =========================================================
+# up.railway.app is a shared, multi-tenant domain — anyone can deploy their
+# own app to some-other-name.up.railway.app. A wildcard entry here would
+# trust that app's Origin/Referer for CSRF purposes on this one too, so list
+# only the exact production hostname(s) actually in use.
 CSRF_TRUSTED_ORIGINS = [
     "https://web-production-23c64.up.railway.app",
-    "https://*.up.railway.app",
 ]
 if DEBUG:
     CSRF_TRUSTED_ORIGINS += ["http://127.0.0.1:8000", "http://localhost:8000"]
@@ -158,13 +161,58 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 local_static_dir = os.path.join(BASE_DIR, 'static')
 STATICFILES_DIRS = [local_static_dir] if os.path.exists(local_static_dir) else []
 
-STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
+# =========================================================
+# FILE STORAGE (media -> Cloudflare R2, static -> WhiteNoise, unchanged)
+# =========================================================
+STORAGES = {
+    "default": {
+        "BACKEND": "storages.backends.s3.S3Storage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
+AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL")  # https://<ACCOUNT_ID>.r2.cloudflarestorage.com
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_S3_REGION_NAME = "auto"          # R2 ignores region but boto3 requires a value; Cloudflare's own docs use "auto"
+AWS_S3_SIGNATURE_VERSION = "s3v4"    # R2 requires SigV4
+AWS_S3_ADDRESSING_STYLE = "virtual"
+
+# R2 has no ACL support — sending an ACL header errors outright, not just no-ops.
+# None tells django-storages to omit it entirely. Objects stay private regardless
+# (AWS_QUERYSTRING_AUTH defaults to True, so .url generates signed, expiring links).
+AWS_DEFAULT_ACL = None
+
+# The S3 backend's own default is True (silently overwrites a same-named key).
+# FileSystemStorage's default behavior is to auto-suffix instead — this restores
+# that, since nothing else guards against two unrelated uploads sharing a filename
+# except one specific duplicate-name check in upload_extract_pdf.
+AWS_S3_FILE_OVERWRITE = False
 
 # =========================================================
 # MEDIA FILES
 # =========================================================
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+
+# =========================================================
+# CELERY (background jobs: MIS mapping, Gemini OCR extraction)
+# =========================================================
+CELERY_BROKER_URL = os.getenv("REDIS_URL")
+CELERY_RESULT_BACKEND = os.getenv("REDIS_URL")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+
+# A worker crash/restart mid-job shouldn't silently lose it — only ack once
+# the task actually finishes, and don't let one worker process hoard more
+# than one long-running job at a time.
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
 # =========================================================
 # CACHE (used for login-attempt throttling)
@@ -234,6 +282,11 @@ EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 # Office365 (and most SMTP relays) reject mail where From doesn't match the
 # authenticated account, so this must line up with EMAIL_HOST_USER.
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', EMAIL_HOST_USER)
+
+# =========================================================
+# GEMINI (AI OCR extraction)
+# =========================================================
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 
 # =========================================================
 # DRF + SWAGGER

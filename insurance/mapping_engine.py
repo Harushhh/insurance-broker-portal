@@ -349,10 +349,14 @@ def process_mis_mapping(mis_file_id):
     try:
         # 1. READ MIS FILE
         file_ext = mis_obj.uploaded_file.name.split('.')[-1].lower()
+        # .open() rather than .path — .path isn't available on non-filesystem
+        # storage backends (e.g. S3-compatible object storage).
         if file_ext == 'csv':
-            df_mis = pd.read_csv(mis_obj.uploaded_file.path)
+            with mis_obj.uploaded_file.open('rb') as f:
+                df_mis = pd.read_csv(f)
         else:
-            df_mis = pd.read_excel(mis_obj.uploaded_file.path)
+            with mis_obj.uploaded_file.open('rb') as f:
+                df_mis = pd.read_excel(f)
 
         # Clean up column names internally
         df_mis.columns = [str(col).strip() for col in df_mis.columns]

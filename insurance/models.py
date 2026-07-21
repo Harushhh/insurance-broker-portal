@@ -102,7 +102,7 @@ class RateMaster(models.Model):
     new_vehicle_makes = models.CharField(max_length=255, null=True, blank=True)
     new_rto_list = models.CharField(max_length=255, null=True, blank=True)
     insurer_vertical = models.CharField(max_length=100, null=True, blank=True)
-    insurance_company = models.CharField(max_length=100)
+    insurance_company = models.CharField(max_length=100, db_index=True)
 
     product = models.ForeignKey(
         ProductMaster,
@@ -141,13 +141,15 @@ class RateMaster(models.Model):
     status = models.CharField(
         max_length=20,
         default="INACTIVE",
-        choices=STATUS_CHOICES
+        choices=STATUS_CHOICES,
+        db_index=True
     )
 
     is_deleted = models.CharField(
         max_length=10,
         default="NO",
         choices=IS_DELETED_CHOICES,
+        db_index=True
     )
 
     vehicle_age_min = models.FloatField(null=True, blank=True)
@@ -528,6 +530,10 @@ class LockedPolicy(models.Model):
     class Meta:
         ordering = ["-created_at"]
         unique_together = ("source_rate", "vehicle_no", "policy_holder_name")
+        # vehicle_no is only the 2nd column of the unique_together above, so
+        # lookups filtering on it alone (locked_policy_dashboard) can't use
+        # that composite index efficiently — give it its own.
+        indexes = [models.Index(fields=["vehicle_no"])]
 
     def __str__(self):
         return f"{self.vehicle_no} - {self.policy_holder_name} - {self.status}"

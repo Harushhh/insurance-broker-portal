@@ -151,7 +151,7 @@
             <input type="text" name="contact_number" class="modal-input">
 
             <div style="background:#f1f5f9; padding:12px; border-radius:8px; margin-top:10px; margin-bottom:20px;">
-                <p style="margin:0; font-size:13px; color:#475569;">Default password: <b>Changeme@123</b></p>
+                <p style="margin:0; font-size:13px; color:#475569;">A random one-time password will be generated and shown on the confirmation message — share it with the user directly.</p>
             </div>
 
             <div style="display:flex; gap:12px;">
@@ -301,7 +301,7 @@
     }
 
     function resetPasswordAndSubmit() {
-        if (confirm("Reset this user's password to the default 'Changeme@123'? You'll need to share it with them directly.")) {
+        if (confirm("Reset this user's password to a new randomly generated one-time password? You'll need to share it with them directly.")) {
             document.getElementById('edit_action_input').value = 'reset_password';
             document.getElementById('editUserForm').submit();
         }

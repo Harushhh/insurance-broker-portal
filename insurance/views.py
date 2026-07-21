@@ -1,25 +1,24 @@
 from django.contrib import messages
 from django.contrib.auth.models import User, Group
-from django.contrib.auth.tokens import default_token_generator
-from django.utils.http import urlsafe_base64_encode
-from django.utils.encoding import force_bytes
 from django.utils import timezone
 from django.shortcuts import render, redirect, get_object_or_404
 from django.http import HttpResponse, JsonResponse
 from django.db.models import Q, F, Count, Avg, Sum, Case, When, Value, CharField
 from django.core.mail import send_mail
 from django.conf import settings
-from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
 from django import forms
 import csv
 import json
 import logging
+import os
 import re
 import hashlib
+import tempfile
 import threading
 import ast
 import mimetypes
+import secrets
 
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -44,7 +43,7 @@ from .models import (
 # Import our Gemini AI utility and background logic engines
 from .utils import extract_data_with_gemini
 from .forms import ExtractionFieldForm, MISUploadForm, MappingConfigurationForm
-from .mapping_engine import process_mis_mapping
+from .tasks import process_mis_mapping_task, process_policy_document_task
 
 logger = logging.getLogger("security")
 
@@ -308,6 +307,17 @@ def apply_make_model_filter(qs, product_id: str, make_model_class: str):
     return qs
 
 
+# json.dumps() alone does not escape "</script>" — safe if only rendered as
+# JSON, unsafe the moment a template marks it |safe to embed straight into an
+# inline <script> block (as motor_payout_rates.html does). This is the same
+# escaping django.utils.html.json_script applies internally.
+_JSON_SCRIPT_ESCAPES = {ord(">"): "\\u003E", ord("<"): "\\u003C", ord("&"): "\\u0026"}
+
+
+def safe_json_for_script(value):
+    return json.dumps(value).translate(_JSON_SCRIPT_ESCAPES)
+
+
 def get_make_mapping_context():
     all_makes_objs = MakeModelMaster.objects.all()
     all_individual_makes = set()
@@ -339,7 +349,7 @@ def get_make_mapping_context():
                                     class_to_makes[str(mmc_id)].add(item)
 
     class_makes_mapping = {k: sorted(list(v)) for k, v in class_to_makes.items()}
-    return json.dumps(all_individual_makes), json.dumps(class_makes_mapping), all_individual_makes
+    return safe_json_for_script(all_individual_makes), safe_json_for_script(class_makes_mapping), all_individual_makes
 
 # =========================================================
 # AI EXTRACTION HELPERS
@@ -377,9 +387,18 @@ def process_policy_document(document_obj):
         document_obj.error_message = ""
         document_obj.save(update_fields=["status", "error_message"])
 
-        file_path = document_obj.uploaded_file.path
-        
-        mapped_data = extract_data_with_gemini(file_path)
+        # .path isn't available on non-filesystem storage backends, and the
+        # Gemini SDK wants a real local path — so pull the file down to a
+        # temp file first rather than handing it a storage-backed stream.
+        suffix = os.path.splitext(document_obj.uploaded_file.name)[1]
+        with document_obj.uploaded_file.open("rb") as src, \
+                tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(src.read())
+            tmp_path = tmp.name
+        try:
+            mapped_data = extract_data_with_gemini(tmp_path)
+        finally:
+            os.remove(tmp_path)
 
         document_obj.extracted_text = "Extracted directly via Gemini Multimodal API."
         document_obj.extraction_method = "Gemini 2.5 Flash"
@@ -619,7 +638,6 @@ def import_data_view(request):
     return render(request, "upload.html")
 
 
-@csrf_exempt 
 def api_upload_chunk(request):
     """
     Receives JSON chunks from the PapaParse frontend uploader.
@@ -1340,12 +1358,12 @@ def upload_extract_pdf(request):
                 try:
                     doc_obj = upload_form.save(commit=False)
                     doc_obj.original_filename = doc_obj.uploaded_file.name
-                    doc_obj.uploaded_by = User.objects.first() # Safe default fallback
+                    doc_obj.uploaded_by = request.user
                     doc_obj.mime_type = getattr(doc_obj.uploaded_file, "content_type", "") or ""
                     doc_obj.status = PolicyDocumentUpload.STATUS_PENDING
                     doc_obj.save()
 
-                    process_policy_document(doc_obj)
+                    process_policy_document_task.delay(doc_obj.id)
                     return redirect("upload_extract_pdf")
 
                 except Exception as e:
@@ -1447,7 +1465,7 @@ def user_management(request):
             fname = request.POST.get("full_name", "").strip()
             uemail = request.POST.get("email", "").strip()
             ucontact = request.POST.get("contact_number", "").strip()
-            upass = "Changeme@123"
+            upass = secrets.token_urlsafe(9)  # random one-time password, not a shared constant
 
             if uname:
                 if User.objects.filter(username=uname).exists():
@@ -1515,7 +1533,7 @@ def user_management(request):
 
         elif action == "reset_password" and user_id:
             u = User.objects.get(id=user_id)
-            default_password = "Changeme@123"
+            default_password = secrets.token_urlsafe(9)  # random one-time password, not a shared constant
             u.set_password(default_password)
             u.save()
             logger.info("Password reset by admin for user '%s'", u.username)
@@ -1772,7 +1790,7 @@ def edit_rate(request, group_id):
             records.update(**update_data)
 
             AuditLog.objects.create(
-                user=User.objects.first(),
+                user=request.user,
                 action="MANUAL EDIT",
                 details=f"Edited Group/Record ID {group_id} via form. Updated {record_count} rows."
             )
@@ -1790,6 +1808,23 @@ def edit_rate(request, group_id):
 # -------------------------
 # BULK UPDATE RATES
 # -------------------------
+# Only these RateMaster fields may be touched via bulk update — update_field
+# comes straight from the POST body, so anything not on this list (id,
+# group_id, created_at, ...) must be rejected rather than passed through to
+# records.update(**{field_name: ...}).
+ALLOWED_BULK_UPDATE_FIELDS = {
+    "new_vehicle_makes", "product", "sub_product", "policy_type", "fuel_type",
+    "make_model_class", "is_ncb", "is_cpa", "is_zd", "status", "is_deleted",
+    "vehicle_age_min", "vehicle_age_max", "cc_min", "cc_max", "user_id",
+    "pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5",
+    "pi_net_rate", "pi_flat_amount", "pi_vli", "tariff_min", "tariff_max",
+    "sc_min", "sc_max", "from_date", "to_date",
+    "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount",
+    "insurance_company", "insurer_vertical", "pi_type", "po_type", "veh_use",
+    "add_tnc", "remarks",
+}
+
+
 def bulk_update_rates(request):
     if request.method == "POST":
         # 1. Safely extract group IDs regardless of how JS structured the payload
@@ -1810,6 +1845,13 @@ def bulk_update_rates(request):
         new_value = request.POST.get("update_value", "").strip()
 
         if not group_ids or not field_name:
+            return redirect("dashboard")
+
+        if field_name not in ALLOWED_BULK_UPDATE_FIELDS:
+            messages.error(
+                request,
+                f"Bulk update rejected: '{field_name}' is not an editable field. No rows were changed."
+            )
             return redirect("dashboard")
 
         # 2. Fetch all exact records mapped to the selected rows
@@ -1864,7 +1906,7 @@ def bulk_update_rates(request):
 
         # 5. Log the action
         AuditLog.objects.create(
-            user=User.objects.first(),
+            user=request.user,
             action="BULK UPDATE",
             details=f"Updated {record_count} rows. Changed '{field_name}' to '{new_value}'."
         )
@@ -2094,7 +2136,7 @@ def policy_lock_checker(request):
         
         if flat_params:
             AuditLog.objects.create(
-                user=User.objects.first(),
+                user=request.user,
                 action="MOTOR_POINTS_SEARCH",
                 details=str(flat_params)
             )
@@ -2383,7 +2425,7 @@ def lock_unlock_policy(request, rate_id):
             "po_rate": po_rate,
             "po_flat_amount": rate_obj.po_flat_amount,
             "add_tnc": rate_obj.add_tnc,
-            "locked_by": User.objects.first(),
+            "locked_by": request.user,
             "rto_code": request.POST.get("rto_code", ""),
             "make_name": request.POST.get("make_names", ""),
             "fuel": request.POST.get("fuel", ""),
@@ -2408,7 +2450,7 @@ def lock_unlock_policy(request, rate_id):
     obj.sc = request.POST.get("sc", "")
     obj.mfg_year = request.POST.get("mfg_year", "")
     obj.status = "LOCKED"
-    obj.locked_by = User.objects.first()
+    obj.locked_by = request.user
     obj.locked_at = timezone.now()
     obj.save()
 
@@ -2477,37 +2519,6 @@ def locked_policy_dashboard(request):
             "locked_by_user": locked_by_user,
         }
     })
-
-# -------------------------
-# DIRECT PASSWORD RESET
-# -------------------------
-def direct_password_reset(request):
-    if request.method == "POST":
-        email = request.POST.get("email", "").strip()
-        matches = User.objects.filter(email__iexact=email)
-        user = matches.first()
-
-        if user:
-            if matches.count() > 1:
-                # Email uniqueness is enforced at creation time (signup, admin
-                # create/edit), so this shouldn't happen — but if stale/imported
-                # data ever violates that, silently resetting the wrong account
-                # is worse than a loud log. `.first()` still picks the
-                # lowest-id account, same as before.
-                logger.warning(
-                    "Multiple accounts share email %r during password reset — resetting '%s' (id=%s)",
-                    email, user.username, user.pk,
-                )
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-            token = default_token_generator.make_token(user)
-            logger.info("Direct password reset link issued for user '%s'", user.username)
-            return redirect("password_reset_confirm", uidb64=uid, token=token)
-        else:
-            return render(request, "password_reset.html", {
-                "error": "We could not find an account with that email address."
-            })
-
-    return render(request, "password_reset.html")
 
 # -------------------------
 # EXECUTIVE ANALYSIS DASHBOARD
@@ -2598,7 +2609,7 @@ def grid_management(request):
                 insurer_name=insurer_name,
                 remarks=remarks,
                 uploaded_file=uploaded_file,
-                uploaded_by=User.objects.first(),
+                uploaded_by=request.user,
                 status="PENDING"
             )
 
@@ -2793,7 +2804,6 @@ def ticket_dashboard(request):
         "tickets": tickets
     })
 
-@csrf_exempt 
 def create_ticket_api(request):
     if request.method == "POST":
         try:
@@ -2825,7 +2835,7 @@ def create_ticket_api(request):
                 if obj: form_payload["Fuel"] = obj.name
 
             ticket = SupportTicket.objects.create(
-                user=User.objects.first(), # Safe default fallback
+                user=request.user,
                 remarks=remarks,
                 form_payload=form_payload
             )
@@ -2835,7 +2845,6 @@ def create_ticket_api(request):
             
     return JsonResponse({"success": False, "message": "Invalid request method."})
 
-@csrf_exempt 
 def update_ticket_status(request):
     if request.method == "POST":
         try:
@@ -2875,11 +2884,11 @@ def mis_payout_automation(request):
         form = MISUploadForm(request.POST, request.FILES)
         if form.is_valid():
             mis_obj = form.save(commit=False)
-            mis_obj.uploaded_by = User.objects.first() # Safe default
+            mis_obj.uploaded_by = request.user
             mis_obj.save()
             
-            # Spin up the background thread so the UI doesn't block while Pandas does the heavy lifting
-            threading.Thread(target=process_mis_mapping, args=(mis_obj.id,)).start()
+            # Handed off to Celery so the UI doesn't block while Pandas does the heavy lifting
+            process_mis_mapping_task.delay(mis_obj.id)
             
             msg = "File uploaded successfully. The mapping engine has started processing in the background."
             return redirect('mis_payout_automation')
