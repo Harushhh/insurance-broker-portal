@@ -276,7 +276,13 @@ LOGOUT_REDIRECT_URL = "/login/"
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = os.getenv('EMAIL_HOST')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
+# Two mutually exclusive security modes depending on the provider/port:
+# STARTTLS (port 587, EMAIL_USE_TLS) or implicit SSL (port 465, EMAIL_USE_SSL).
+# Default keeps the previous STARTTLS-on-587 behavior; providers/accounts
+# that require port 465 (e.g. Zoho's regional servers) set EMAIL_USE_SSL=True
+# and EMAIL_USE_TLS=False instead.
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() == 'true'
+EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'False').lower() == 'true'
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD')
 # Office365 (and most SMTP relays) reject mail where From doesn't match the
