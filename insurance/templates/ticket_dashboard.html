@@ -269,8 +269,7 @@ function updateTicketStatus(ticketId, newStatus, selectElement) {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
-            // If you are enforcing CSRF on this view, uncomment the line below:
-            // 'X-CSRFToken': '{{ csrf_token }}' 
+            'X-CSRFToken': '{{ csrf_token }}'
         },
         body: JSON.stringify({
             ticket_id: ticketId,

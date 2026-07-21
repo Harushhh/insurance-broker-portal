@@ -1,6 +1,6 @@
 from functools import wraps
 
-from django.urls import path
+from django.urls import path, reverse_lazy
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.conf import settings
@@ -77,8 +77,20 @@ urlpatterns = [
     path("rto/edit/<int:pk>/", staff_required(views.edit_rto), name="edit_rto"),
     path("make-model/edit/<int:pk>/", staff_required(views.edit_make_model), name="edit_make_model"),
 
-    # Password reset — intentionally public (unauthenticated users need this)
-    path("password-reset/", views.direct_password_reset, name="password_reset"),
+    # Password reset — intentionally public (unauthenticated users need this).
+    # Uses Django's stock PasswordResetView: the token is emailed to the
+    # account's registered address (registration/password_reset_email.html)
+    # rather than handed back in the response, so knowing/guessing an email
+    # address alone is no longer enough to take over the account.
+    path(
+        "password-reset/",
+        auth_views.PasswordResetView.as_view(
+            template_name="password_reset.html",
+            email_template_name="registration/password_reset_email.html",
+            success_url=reverse_lazy("password_reset_done"),
+        ),
+        name="password_reset",
+    ),
     path(
         "password-reset/done/",
         auth_views.PasswordResetDoneView.as_view(template_name="password_reset_done.html"),
