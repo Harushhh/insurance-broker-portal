@@ -290,50 +290,42 @@
     </div>
 
     <div class="mt-4 pt-2">
-        <h6 class="fw-bold" style="color: #0f172a; font-size: 15px;">Valid Matches Found: <span style="color: #2563eb;">{{ total_found }}</span></h6>
-        
-        {% if data %}
-            <div class="table-responsive-custom">
-                <table class="table-modern">
-                    <thead>
-                        <tr>
-                            {% for field in field_names %}
-                                <th>{{ field|cut:"_"|title }}</th>
-                            {% endfor %}
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for row in data %}
-                            <tr class="{% if row.status == 'LOCKED' or row.status == 'INACTIVE' %}inactive-row{% endif %}">
-                                {% for field in field_names %}
-                                    {% with val=row|get_attr:field %}
-                                    <td {% if field == 'new_rto_list' or field == 'new_vehicle_makes' or field == 'add_tnc' %}class="cell-wrap"{% endif %}>
-                                        
-                                        {% if field == 'status' %}
-                                            {% if val == 'LOCKED' or val == 'INACTIVE' %}
-                                                <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 px-3 py-1 rounded-pill" style="font-size: 10px; letter-spacing: 0.5px;">🔒 LOCKED</span>
-                                            {% else %}
-                                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-1 rounded-pill" style="font-size: 10px; letter-spacing: 0.5px;">🔓 UNLOCKED</span>
-                                            {% endif %}
-                                        {% elif val is None or val == "" %}
-                                            <span class="text-muted opacity-50">-</span>
-                                        {% else %}
-                                            {{ val|display_value }}
-                                        {% endif %}
+        {% if has_searched %}
+            <h6 class="fw-bold" style="color: #0f172a; font-size: 15px;">Valid Matches Found: <span style="color: #2563eb;">{{ total_found }}</span></h6>
 
-                                    </td>
-                                    {% endwith %}
+            {% if data %}
+                <div class="table-responsive-custom">
+                    <table class="table-modern">
+                        <thead>
+                            <tr>
+                                {% for field in field_names %}
+                                    <th>{{ field|cut:"_"|title }}</th>
                                 {% endfor %}
                             </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
+                        </thead>
+                        <tbody id="payoutRatesBody">
+                            {% include "_motor_payout_rates_rows.html" %}
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="text-center mt-4" id="loadMoreWrap" {% if not has_more %}style="display:none;"{% endif %}>
+                    <button type="button" id="loadMoreBtn" class="btn-clear" style="border:1px solid #cbd5e1; border-radius:10px; padding:10px 28px;" data-offset="{{ next_offset }}">
+                        Load More Results
+                    </button>
+                </div>
+            {% else %}
+                <div class="p-5 text-center mt-3" style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: var(--radius-inner);">
+                    <i class="bi bi-clipboard-x text-muted opacity-50 d-block mb-3" style="font-size: 48px;"></i>
+                    <h5 class="fw-bold text-slate-800">No eligible payout records found.</h5>
+                    <p class="text-muted mb-0">Try adjusting your filters or vehicle details above to find a match.</p>
+                </div>
+            {% endif %}
         {% else %}
             <div class="p-5 text-center mt-3" style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: var(--radius-inner);">
-                <i class="bi bi-clipboard-x text-muted opacity-50 d-block mb-3" style="font-size: 48px;"></i>
-                <h5 class="fw-bold text-slate-800">No eligible payout records found.</h5>
-                <p class="text-muted mb-0">Try adjusting your filters or vehicle details above to find a match.</p>
+                <i class="bi bi-search text-muted opacity-50 d-block mb-3" style="font-size: 48px;"></i>
+                <h5 class="fw-bold text-slate-800">Select filters to view rates.</h5>
+                <p class="text-muted mb-0">Use the search form above and click "Check Eligibility" to find matching payout records.</p>
             </div>
         {% endif %}
     </div>
@@ -445,6 +437,35 @@
         productSelect.on('change', updateClassDropdown);
         classSelect.on('change', updateMakesDropdown);
     });
+
+    // Load More (chunked results)
+    const loadMoreBtn = document.getElementById('loadMoreBtn');
+    if (loadMoreBtn) {
+        loadMoreBtn.addEventListener('click', function () {
+            const params = new URLSearchParams(window.location.search);
+            params.set('skip', this.dataset.offset);
+
+            loadMoreBtn.disabled = true;
+            loadMoreBtn.textContent = 'Loading...';
+
+            fetch("{% url 'motor_payout_rates_more' %}?" + params.toString())
+                .then(function (res) { return res.json(); })
+                .then(function (payload) {
+                    document.getElementById('payoutRatesBody').insertAdjacentHTML('beforeend', payload.html);
+                    if (payload.has_more) {
+                        loadMoreBtn.dataset.offset = payload.next_offset;
+                        loadMoreBtn.disabled = false;
+                        loadMoreBtn.textContent = 'Load More Results';
+                    } else {
+                        document.getElementById('loadMoreWrap').style.display = 'none';
+                    }
+                })
+                .catch(function () {
+                    loadMoreBtn.disabled = false;
+                    loadMoreBtn.textContent = 'Load More Results';
+                });
+        });
+    }
 
     // Table Zoom Logic
     let currentFont = 13;

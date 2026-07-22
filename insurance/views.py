@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User, Group
 from django.utils import timezone
 from django.shortcuts import render, redirect, get_object_or_404
+from django.template.loader import render_to_string
 from django.http import HttpResponse, JsonResponse
 from django.db.models import Q, F, Count, Avg, Sum, Case, When, Value, CharField
 from django.core.mail import send_mail
@@ -186,7 +187,7 @@ def parse_yes_no_na(value):
 
 GROUP_FIELDS = [
     "new_vehicle_makes", "insurer_vertical", "insurance_company", "product", "sub_product",
-    "policy_type", "vehicle_age_min", "vehicle_age_max", "make_model_class",
+    "policy_type", "vehicle_age_min", "vehicle_age_max", "make_model_class", "fuel_type",
     "pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5",
     "pi_net_rate", "pi_flat_amount", "pi_vli", "pi_type",
     "tariff_min", "tariff_max", "is_ncb", "is_cpa", "cc_min", "cc_max",
@@ -319,7 +320,7 @@ def safe_json_for_script(value):
 
 
 def get_make_mapping_context():
-    all_makes_objs = MakeModelMaster.objects.all()
+    all_makes_objs = list(MakeModelMaster.objects.all())
     all_individual_makes = set()
 
     for obj in all_makes_objs:
@@ -332,21 +333,42 @@ def get_make_mapping_context():
     all_individual_makes = sorted(list(all_individual_makes))
     class_to_makes = defaultdict(set)
 
+    # Built once and reused below instead of rescanning the full
+    # MakeModelMaster table for every (rate row x make) pair — that was an
+    # O(n*m) scan repeated on every request to this and the payout/lock-checker
+    # views that call this function.
+    makes_by_name = {
+        obj.make_model_name.strip(): obj
+        for obj in all_makes_objs
+        if obj.make_model_name
+    }
+
+    # .distinct() matters a lot in practice here: many thousands of RateMaster
+    # rows (differing only in numeric rate fields) commonly share the exact
+    # same (make_model_class, new_vehicle_makes) pair, so without it this
+    # loop was repeating identical work per duplicate row. .order_by() with
+    # no arguments is required alongside it — RateMaster's default
+    # Meta.ordering is "-id", and Postgres requires ORDER BY columns to
+    # appear in a SELECT DISTINCT's column list, so without clearing it
+    # Django silently pulls the (always-unique) id into the comparison and
+    # .distinct() ends up deduplicating nothing at all.
     rate_makes = RateMaster.objects.exclude(make_model_class__isnull=True).exclude(
         new_vehicle_makes__isnull=True
-    ).exclude(new_vehicle_makes="").values_list("make_model_class_id", "new_vehicle_makes")
+    ).exclude(new_vehicle_makes="").order_by().values_list(
+        "make_model_class_id", "new_vehicle_makes"
+    ).distinct()
 
     for mmc_id, makes_str in rate_makes:
         rate_groups = [m.strip() for m in makes_str.split(",")]
         for rg in rate_groups:
-            if rg:
-                for obj in all_makes_objs:
-                    if obj.make_model_name and obj.make_model_name.strip() == rg:
-                        if obj.make_model_cluster:
-                            for item in str(obj.make_model_cluster).split(","):
-                                item = item.strip()
-                                if item:
-                                    class_to_makes[str(mmc_id)].add(item)
+            if not rg:
+                continue
+            obj = makes_by_name.get(rg)
+            if obj and obj.make_model_cluster:
+                for item in str(obj.make_model_cluster).split(","):
+                    item = item.strip()
+                    if item:
+                        class_to_makes[str(mmc_id)].add(item)
 
     class_makes_mapping = {k: sorted(list(v)) for k, v in class_to_makes.items()}
     return safe_json_for_script(all_individual_makes), safe_json_for_script(class_makes_mapping), all_individual_makes
@@ -765,6 +787,7 @@ def api_upload_chunk(request):
                             "vehicle_age_min": float(row.get("vehicle_age_min") or 0),
                             "vehicle_age_max": float(row.get("vehicle_age_max") or 0),
                             "make_model_class": mmc_obj,
+                            "fuel_type": fuel_type_obj,
                             "pi_od_rate": float(row.get("pi_od_rate") or 0),
                             "pi_tp_rate": float(row.get("pi_tp_rate") or 0),
                             "pi_tp_2": float(row.get("pi_tp_2") or 0),
@@ -1784,7 +1807,14 @@ def edit_rate(request, group_id):
     }
 
     if request.method == "POST":
-        form = RateForm(request.POST, instance=first_record)
+        # initial_data must be passed here too, not just on GET — RateForm.__init__
+        # builds the new_rto_list/new_vehicle_makes MultipleChoiceField choices from
+        # kwargs["initial"] plus the single `instance` record. Without it, POST-time
+        # choices only reflect first_record's own values, so submitting the full
+        # group-wide selection the page actually shows fails validation on every
+        # value that isn't also on first_record specifically — silently discarding
+        # the whole edit.
+        form = RateForm(request.POST, instance=first_record, initial=initial_data)
         if form.is_valid():
             update_data = {field: value for field, value in form.cleaned_data.items()}
             records.update(**update_data)
@@ -1916,7 +1946,17 @@ def bulk_update_rates(request):
 # -------------------------
 # MOTOR PAYOUT RATES
 # -------------------------
-def motor_payout_rates(request):
+MOTOR_PAYOUT_BATCH_SIZE = 50
+MOTOR_PAYOUT_MAX_RESULTS = 300
+MOTOR_PAYOUT_FIELD_NAMES = [
+    "display_group_id", "status", "insurance_company", "po_type",
+    "po_rate", "po_flat_amount", "add_tnc"
+]
+
+
+def _build_motor_payout_queryset(request, target_date):
+    """Filter-building logic shared by motor_payout_rates (first batch) and
+    motor_payout_rates_more (subsequent batches), so both stay in sync."""
     qs = RateMaster.objects.select_related(
         "product", "sub_product", "policy_type", "fuel_type",
         "make_model_class", "is_ncb", "is_cpa", "is_zd"
@@ -1924,9 +1964,6 @@ def motor_payout_rates(request):
 
     qs = qs.exclude(is_deleted="YES")
     qs = qs.filter(status__in=["ACTIVE", "INACTIVE"])
-
-    today_str = datetime.today().strftime("%Y-%m-%d")
-    target_date = request.GET.get("target_date", today_str).strip()
 
     product = (request.GET.get("product") or "").strip()
     make_model_class = (request.GET.get("make_model_class") or "").strip()
@@ -2037,8 +2074,22 @@ def motor_payout_rates(request):
         "-id"
     )
 
+    return qs, matching_rto_names, matching_make_groups, rto_code, make_names
+
+
+def _collect_motor_payout_rows(qs, matching_rto_names, matching_make_groups, rto_code, make_names, skip, limit):
+    """Streams the ordered queryset and applies the same in-Python RTO/make
+    cluster matching + group de-duplication as before, returning the slice
+    of unique groups from `skip` up to `skip + limit` (never exceeding
+    MOTOR_PAYOUT_MAX_RESULTS overall), plus whether any group exists beyond
+    that slice."""
+    effective_limit = min(limit, MOTOR_PAYOUT_MAX_RESULTS - skip)
+    if effective_limit <= 0:
+        return [], False
+
     results = []
     seen_groups = set()
+    group_index = 0
 
     for row in qs.iterator(chunk_size=2000):
         if rto_code and matching_rto_names:
@@ -2056,54 +2107,100 @@ def motor_payout_rates(request):
                 continue
 
         gid = row.group_id if row.group_id is not None else row.id
-        if gid not in seen_groups:
-            row.display_group_id = gid
+        if gid in seen_groups:
+            continue
+        seen_groups.add(gid)
 
-            mmc_name = row.make_model_class.name.strip().upper() if row.make_model_class else "NA"
-            
-            if mmc_name in ["NA", ""]:
-                prod_name = row.product.name if row.product else ""
-                translated_name = get_translated_make_model(prod_name)
-                if translated_name:
-                    row.make_model_class = MakeModelClassMaster(name=translated_name)
-                    row.display_make_model_class = translated_name
-                else:
-                    row.display_make_model_class = "NA"
+        if group_index < skip:
+            group_index += 1
+            continue
+        group_index += 1
+
+        if len(results) >= effective_limit:
+            # This row is proof at least one more group exists beyond the
+            # slice we're returning — no need to keep scanning further.
+            return results, True
+
+        row.display_group_id = gid
+
+        mmc_name = row.make_model_class.name.strip().upper() if row.make_model_class else "NA"
+
+        if mmc_name in ["NA", ""]:
+            prod_name = row.product.name if row.product else ""
+            translated_name = get_translated_make_model(prod_name)
+            if translated_name:
+                row.make_model_class = MakeModelClassMaster(name=translated_name)
+                row.display_make_model_class = translated_name
             else:
-                row.display_make_model_class = row.make_model_class.name
+                row.display_make_model_class = "NA"
+        else:
+            row.display_make_model_class = row.make_model_class.name
 
-            if row.po_net_rate and row.po_net_rate > 0:
-                row.po_rate = row.po_net_rate
-            elif row.po_od_rate and row.po_od_rate > 0:
-                row.po_rate = row.po_od_rate
-            elif row.po_tp_rate and row.po_tp_rate > 0:
-                row.po_rate = row.po_tp_rate
-            else:
-                row.po_rate = 0.0
+        if row.po_net_rate and row.po_net_rate > 0:
+            row.po_rate = row.po_net_rate
+        elif row.po_od_rate and row.po_od_rate > 0:
+            row.po_rate = row.po_od_rate
+        elif row.po_tp_rate and row.po_tp_rate > 0:
+            row.po_rate = row.po_tp_rate
+        else:
+            row.po_rate = 0.0
 
-            results.append(row)
-            seen_groups.add(gid)
+        results.append(row)
 
-        if len(results) >= 300:
-            break
+    return results, False
 
-    field_names = ["display_group_id", "status", "insurance_company", "po_type", "po_rate", "po_flat_amount", "add_tnc"]
+
+def motor_payout_rates(request):
+    has_searched = bool(request.GET)
+
+    today_str = datetime.today().strftime("%Y-%m-%d")
+    target_date = (request.GET.get("target_date") or today_str).strip()
+
+    product = (request.GET.get("product") or "").strip()
+    make_model_class = (request.GET.get("make_model_class") or "").strip()
+    sub_product = (request.GET.get("sub_product") or "").strip()
+    make_names = (request.GET.get("make_names") or "").strip()
+    rto_code = (request.GET.get("rto_code") or "").strip()
+    cc = (request.GET.get("cc") or "").strip()
+    fuel = (request.GET.get("fuel") or "").strip()
+    sc = (request.GET.get("sc") or "").strip()
+    mfg_year = (request.GET.get("mfg_year") or "").strip()
+    is_zd = (request.GET.get("is_zd") or "").strip().upper()
+    is_cpa = (request.GET.get("is_cpa") or "").strip().upper()
+    is_ncb = (request.GET.get("is_ncb") or "").strip().upper()
+
+    results = []
+    has_more = False
+
+    # Nothing is queried until the user actually submits the search form —
+    # a bare GET with no params at all (the very first page load) skips the
+    # database entirely.
+    if has_searched:
+        qs, matching_rto_names, matching_make_groups, rto_code, make_names = _build_motor_payout_queryset(request, target_date)
+        results, has_more = _collect_motor_payout_rows(
+            qs, matching_rto_names, matching_make_groups, rto_code, make_names,
+            skip=0, limit=MOTOR_PAYOUT_BATCH_SIZE
+        )
+
     all_makes_json, class_makes_mapping_json, all_makes = get_make_mapping_context()
 
     return render(request, "motor_payout_rates.html", {
+        "has_searched": has_searched,
         "data": results,
         "total_found": len(results),
-        "field_names": field_names,
+        "has_more": has_more,
+        "next_offset": len(results),
+        "field_names": MOTOR_PAYOUT_FIELD_NAMES,
         "product_list": ProductMaster.objects.all().order_by("name"),
         "sub_product_list": SubProductMaster.objects.all().order_by("name"),
         "fuel_list": FuelTypeMaster.objects.all().order_by("name"),
         "make_model_class_list": get_dynamic_make_model_class_list(product),
         "all_makes_json": all_makes_json,
         "class_makes_mapping_json": class_makes_mapping_json,
-        
+
         "make_class_mapping_json": json.dumps(NA_MAKE_MODEL_MAP),
         "all_make_classes_json": json.dumps(list(MakeModelClassMaster.objects.exclude(name__iexact="NA").values('id', 'name'))),
-        
+
         "selected": {
             "target_date": target_date,
             "product": product,
@@ -2119,6 +2216,40 @@ def motor_payout_rates(request):
             "is_cpa": is_cpa,
             "is_ncb": is_ncb,
         }
+    })
+
+
+def motor_payout_rates_more(request):
+    """AJAX 'Load More' endpoint for motor_payout_rates — same filters
+    (passed again as query params, exactly as the browser already has them
+    in the URL), plus a `skip` telling it how many groups have already been
+    shown. Returns a JSON payload with a pre-rendered HTML fragment of the
+    next rows, rather than the whole page."""
+    today_str = datetime.today().strftime("%Y-%m-%d")
+    target_date = (request.GET.get("target_date") or today_str).strip()
+
+    try:
+        skip = int(request.GET.get("skip", 0))
+    except (TypeError, ValueError):
+        skip = 0
+    skip = max(skip, 0)
+
+    qs, matching_rto_names, matching_make_groups, rto_code, make_names = _build_motor_payout_queryset(request, target_date)
+    results, has_more = _collect_motor_payout_rows(
+        qs, matching_rto_names, matching_make_groups, rto_code, make_names,
+        skip=skip, limit=MOTOR_PAYOUT_BATCH_SIZE
+    )
+
+    rows_html = render_to_string(
+        "_motor_payout_rates_rows.html",
+        {"data": results, "field_names": MOTOR_PAYOUT_FIELD_NAMES},
+        request=request,
+    )
+
+    return JsonResponse({
+        "html": rows_html,
+        "has_more": has_more,
+        "next_offset": skip + len(results),
     })
 
 # -------------------------
@@ -2688,11 +2819,20 @@ def motor_points_audit_logs(request):
         except:
             pass
 
+    # Loaded once and reused for every row below, instead of running up to 4
+    # separate ProductMaster/SubProductMaster/MakeModelClassMaster/FuelTypeMaster
+    # queries per log row (which, at 500 rows, meant up to ~2000 queries on
+    # this one page load).
+    product_names = dict(ProductMaster.objects.values_list("id", "name"))
+    sub_product_names = dict(SubProductMaster.objects.values_list("id", "name"))
+    make_model_class_names = dict(MakeModelClassMaster.objects.values_list("id", "name"))
+    fuel_type_names = dict(FuelTypeMaster.objects.values_list("id", "name"))
+
     for log in logs:
         try:
             clean_str = log.details.replace("Eligibility Check Parameters: ", "")
             params_dict = ast.literal_eval(clean_str)
-            
+
             flat_params = {}
             if isinstance(params_dict, dict):
                 for k, v in params_dict.items():
@@ -2700,23 +2840,27 @@ def motor_points_audit_logs(request):
                         flat_params[k] = v[0]
                     else:
                         flat_params[k] = v
-            
+
             if flat_params.get("product") and str(flat_params["product"]).isdigit():
-                try: flat_params["product"] = ProductMaster.objects.get(id=int(flat_params["product"])).name
-                except: pass
-                
+                name = product_names.get(int(flat_params["product"]))
+                if name:
+                    flat_params["product"] = name
+
             if flat_params.get("sub_product") and str(flat_params["sub_product"]).isdigit():
-                try: flat_params["sub_product"] = SubProductMaster.objects.get(id=int(flat_params["sub_product"])).name
-                except: pass
-                
+                name = sub_product_names.get(int(flat_params["sub_product"]))
+                if name:
+                    flat_params["sub_product"] = name
+
             if flat_params.get("make_model_class") and str(flat_params["make_model_class"]).isdigit():
-                try: flat_params["make_model_class"] = MakeModelClassMaster.objects.get(id=int(flat_params["make_model_class"])).name
-                except: pass
-                
+                name = make_model_class_names.get(int(flat_params["make_model_class"]))
+                if name:
+                    flat_params["make_model_class"] = name
+
             if flat_params.get("fuel") and str(flat_params["fuel"]).isdigit():
-                try: flat_params["fuel"] = FuelTypeMaster.objects.get(id=int(flat_params["fuel"])).name
-                except: pass
-                
+                name = fuel_type_names.get(int(flat_params["fuel"]))
+                if name:
+                    flat_params["fuel"] = name
+
             log.params = flat_params
         except Exception:
             log.params = {}

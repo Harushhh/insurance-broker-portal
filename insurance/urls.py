@@ -39,6 +39,7 @@ urlpatterns = [
     path("edit-rate/<str:group_id>/", login_required(views.edit_rate), name="edit_rate"),
     path("bulk-update/", login_required(views.bulk_update_rates), name="bulk_update_rates"),
     path("motor-payout-rates/", login_required(views.motor_payout_rates), name="motor_payout_rates"),
+    path("motor-payout-rates/more/", login_required(views.motor_payout_rates_more), name="motor_payout_rates_more"),
     path("analysis/", login_required(views.business_analysis), name="business_analysis"),
 
     # Admin-sensitive — staff only

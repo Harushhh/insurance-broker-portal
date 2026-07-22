@@ -1,0 +1,24 @@
+{% load custom_filters %}
+{% for row in data %}
+    <tr class="{% if row.status == 'LOCKED' or row.status == 'INACTIVE' %}inactive-row{% endif %}">
+        {% for field in field_names %}
+            {% with val=row|get_attr:field %}
+            <td {% if field == 'new_rto_list' or field == 'new_vehicle_makes' or field == 'add_tnc' %}class="cell-wrap"{% endif %}>
+
+                {% if field == 'status' %}
+                    {% if val == 'LOCKED' or val == 'INACTIVE' %}
+                        <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 px-3 py-1 rounded-pill" style="font-size: 10px; letter-spacing: 0.5px;">🔒 LOCKED</span>
+                    {% else %}
+                        <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-1 rounded-pill" style="font-size: 10px; letter-spacing: 0.5px;">🔓 UNLOCKED</span>
+                    {% endif %}
+                {% elif val is None or val == "" %}
+                    <span class="text-muted opacity-50">-</span>
+                {% else %}
+                    {{ val|display_value }}
+                {% endif %}
+
+            </td>
+            {% endwith %}
+        {% endfor %}
+    </tr>
+{% endfor %}
