@@ -4,7 +4,7 @@ from django.utils import timezone
 from django.shortcuts import render, redirect, get_object_or_404
 from django.template.loader import render_to_string
 from django.http import HttpResponse, JsonResponse
-from django.db.models import Q, F, Count, Avg, Sum, Case, When, Value, CharField
+from django.db.models import Q, F, Count, Sum, Case, When, Value, CharField
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db import transaction
@@ -2654,42 +2654,190 @@ def locked_policy_dashboard(request):
 # -------------------------
 # EXECUTIVE ANALYSIS DASHBOARD
 # -------------------------
+# Some insurer grids spell the same state's RTO prefix differently, and at
+# least one cluster has a stray typo. Fold those onto the standard code so
+# they land in the same heatmap bucket instead of splitting a state's data
+# across two rows.
+STATE_CODE_ALIASES = {
+    "TG": "TS",  # Telangana - some grids use TG instead of the official TS
+    "OR": "OD",  # Odisha - legacy "OR" alongside the current "OD"
+    "GC": "CG",  # Chhattisgarh - one-off typo found in an SBI cluster
+}
+
+# Insurers embed the grid's upload month directly in the batch label, e.g.
+# "MAGMA_APR26_CG2" or "SBI_MAY26_MH_-_M". Grids that instead use a plain,
+# undated label (e.g. SBI's own "AP"/"CG", or "ALLINDIA") don't carry a month
+# at all — those are treated as evergreen and stay visible regardless of
+# which month is selected, rather than disappearing from the chart.
+MONTH_TOKEN_RE = re.compile(r"(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)(\d{2})", re.IGNORECASE)
+MONTH_NAMES = {
+    "JAN": "January", "FEB": "February", "MAR": "March", "APR": "April",
+    "MAY": "May", "JUN": "June", "JUL": "July", "AUG": "August",
+    "SEP": "September", "OCT": "October", "NOV": "November", "DEC": "December",
+}
+MONTH_ORDER = list(MONTH_NAMES.keys())
+EVERGREEN = "EVERGREEN"
+
+
+def month_bucket_for(token):
+    m = MONTH_TOKEN_RE.search(token)
+    if not m:
+        return EVERGREEN
+    return m.group(1).upper() + m.group(2)
+
+
+def month_label_for(code):
+    if code == EVERGREEN:
+        return "No specific month"
+    return f"{MONTH_NAMES.get(code[:3], code[:3])} 20{code[3:]}"
+
+
+def _track_min_max(cell, prefix, value):
+    if value is None:
+        return
+    cur_min = cell.get(f"{prefix}_min")
+    cur_max = cell.get(f"{prefix}_max")
+    cell[f"{prefix}_min"] = value if cur_min is None else min(cur_min, value)
+    cell[f"{prefix}_max"] = value if cur_max is None else max(cur_max, value)
+
+
 def business_analysis(request):
-    qs = RateMaster.objects.filter(
-        is_deleted="NO",
-        status__in=["ACTIVE", "INACTIVE"]
-    )
+    rto_state_map = {}
+    for name, cluster in RTOMaster.objects.values_list("rto_name", "rto_cluster"):
+        if not name or not cluster:
+            continue
+        states = set()
+        for item in cluster.split(","):
+            item = item.strip()
+            if len(item) >= 2 and item[:2].isalpha():
+                code = item[:2].upper()
+                states.add(STATE_CODE_ALIASES.get(code, code))
+        if states:
+            rto_state_map[name.strip().upper()] = states
 
-    insurer_perf = qs.values("insurance_company").annotate(
-        avg_payout=Avg("po_net_rate")
-    ).order_by("-avg_payout")[:10]
+    qs = RateMaster.objects.filter(is_deleted="NO", status__in=["ACTIVE", "INACTIVE"])
 
-    product_mix = qs.values("product__name").annotate(
-        count=Count("id")
-    ).order_by("-count")
+    # Premium/tariff (PI) fields, not payout (PO) - what the policy is priced
+    # at, not what the broker earns. pi_tp_2..pi_tp_5 are the year 2-5 legs
+    # of a multi-year TP schedule; no upload has ever populated them, but
+    # they're wired up now so they light up the moment that data arrives.
+    RATE_FIELDS = {
+        "net": "pi_net_rate", "od": "pi_od_rate", "tp": "pi_tp_rate",
+        "tp2": "pi_tp_2", "tp3": "pi_tp_3", "tp4": "pi_tp_4", "tp5": "pi_tp_5",
+    }
 
-    rto_data = defaultdict(lambda: {"total_payout": 0, "count": 0})
-    for row in qs.values("new_rto_list", "po_net_rate", "po_od_rate", "po_tp_rate").iterator(chunk_size=5000):
-        po_rate = max(row["po_net_rate"] or 0, row["po_od_rate"] or 0, row["po_tp_rate"] or 0)
-        if po_rate > 0 and row["new_rto_list"]:
-            rtos = [rto.strip().upper() for rto in row["new_rto_list"].split(",") if rto.strip()]
-            for rto in rtos:
-                rto_data[rto]["total_payout"] += po_rate
-                rto_data[rto]["count"] += 1
+    def new_cell():
+        cell = {"age_min": None, "age_max": None, "cc_min": None, "cc_max": None,
+                "tariff_min": None, "tariff_max": None, "ncb": set(), "cpa": set(), "zd": set()}
+        for key in RATE_FIELDS:
+            cell[f"{key}_min"] = None
+            cell[f"{key}_max"] = None
+            cell[f"{key}_n"] = 0
+        return cell
 
-    top_rtos = []
-    for rto, stats in rto_data.items():
-        top_rtos.append({
-            "name": rto,
-            "avg_payout": stats["total_payout"] / stats["count"] if stats["count"] > 0 else 0,
-            "volume": stats["count"],
-        })
-    top_rtos = sorted(top_rtos, key=lambda x: x["avg_payout"], reverse=True)[:10]
+    agg = defaultdict(new_cell)
+    months_seen = set()
+
+    for row in qs.values(
+        "product__name", "sub_product__name", "insurance_company", "new_rto_list",
+        *RATE_FIELDS.values(),
+        "vehicle_age_min", "vehicle_age_max", "cc_min", "cc_max",
+        "tariff_min", "tariff_max",
+        "is_ncb__code", "is_cpa__code", "is_zd__code",
+    ).iterator(chunk_size=5000):
+        rto_list = row["new_rto_list"]
+        if not rto_list:
+            continue
+
+        states = set()
+        months = set()
+        for token in rto_list.split(","):
+            token = token.strip().upper()
+            if not token:
+                continue
+            if token in rto_state_map:
+                states |= rto_state_map[token]
+            months.add(month_bucket_for(token))
+        if not states:
+            continue
+        months = months or {EVERGREEN}
+        months_seen |= months
+
+        product = row["product__name"] or "Uncategorized"
+        sub_product = row["sub_product__name"] or "Uncategorized"
+        insurer = row["insurance_company"]
+
+        for state in states:
+            for mo in months:
+                cell = agg[(product, sub_product, insurer, state, mo)]
+                for key, field in RATE_FIELDS.items():
+                    val = row[field]
+                    if val and val > 0:
+                        cell[f"{key}_n"] += 1
+                        _track_min_max(cell, key, val)
+
+                _track_min_max(cell, "age", row["vehicle_age_min"])
+                _track_min_max(cell, "age", row["vehicle_age_max"])
+                _track_min_max(cell, "cc", row["cc_min"])
+                _track_min_max(cell, "cc", row["cc_max"])
+                _track_min_max(cell, "tariff", row["tariff_min"])
+                _track_min_max(cell, "tariff", row["tariff_max"])
+
+                if row["is_ncb__code"]:
+                    cell["ncb"].add(row["is_ncb__code"])
+                if row["is_cpa__code"]:
+                    cell["cpa"].add(row["is_cpa__code"])
+                if row["is_zd__code"]:
+                    cell["zd"].add(row["is_zd__code"])
+
+    records = []
+    product_volume = defaultdict(int)
+    sub_product_volume = defaultdict(int)
+    insurer_set = set()
+    state_set = set()
+
+    for (product, sub_product, insurer, state, month), cell in agg.items():
+        total_n = sum(cell[f"{key}_n"] for key in RATE_FIELDS)
+        if not total_n:
+            continue
+        rec = {
+            "product": product, "sub_product": sub_product, "insurer": insurer, "state": state, "month": month,
+            "age_min": cell["age_min"], "age_max": cell["age_max"],
+            "cc_min": cell["cc_min"], "cc_max": cell["cc_max"],
+            "tariff_min": cell["tariff_min"], "tariff_max": cell["tariff_max"],
+            "ncb": sorted(cell["ncb"]), "cpa": sorted(cell["cpa"]), "zd": sorted(cell["zd"]),
+        }
+        for key in RATE_FIELDS:
+            n = cell[f"{key}_n"]
+            rec[key] = {"min": round(cell[f"{key}_min"], 2), "max": round(cell[f"{key}_max"], 2), "n": n} if n else None
+        records.append(rec)
+        product_volume[product] += total_n
+        sub_product_volume[sub_product] += total_n
+        insurer_set.add(insurer)
+        state_set.add(state)
+
+    def month_sort_key(code):
+        if code == EVERGREEN:
+            return (9999, 99)
+        mon, yy = code[:3], code[3:]
+        return (int(yy), MONTH_ORDER.index(mon) if mon in MONTH_ORDER else 99)
+
+    months_list = [
+        {"code": m, "label": month_label_for(m)}
+        for m in sorted(months_seen, key=month_sort_key) if m != EVERGREEN
+    ]
+
+    chart_data = {
+        "records": records,
+        "products": sorted(product_volume.keys(), key=lambda p: -product_volume[p]),
+        "sub_products": sorted(sub_product_volume.keys(), key=lambda p: -sub_product_volume[p]),
+        "insurers": sorted(insurer_set),
+        "states": sorted(state_set),
+        "months": months_list,
+    }
 
     return render(request, "analysis.html", {
-        "insurer_performance": insurer_perf,
-        "product_mix": product_mix,
-        "top_rtos": top_rtos,
+        "chart_data": chart_data,
     })
 
 # -------------------------
