@@ -170,6 +170,36 @@
     padding: 40px !important;
     font-weight: 600;
   }
+
+  /* Status summary cards */
+  .status-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 14px;
+    margin-bottom: 22px;
+  }
+  .status-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+    background: #fff;
+    border: 2px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 18px 20px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+  }
+  .status-card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(15,23,42,.08); }
+  .status-card .count { font-size: 28px; font-weight: 800; color: #0f172a; line-height: 1; }
+  .status-card .label { font-size: 12.5px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: 0.04em; }
+  .status-card.active { border-color: currentColor; box-shadow: 0 8px 20px rgba(15,23,42,.08); }
+  .status-card.card-all { color: #334155; }
+  .status-card.card-open { color: #2563eb; }
+  .status-card.card-followup { color: #d97706; }
+  .status-card.card-closed { color: #64748b; }
+  .status-card.active .count { color: currentColor; }
 </style>
 
 <div class="page-card">
@@ -180,6 +210,25 @@
         Review and manage issues raised regarding rate calculations and missing records.
       </div>
     </div>
+  </div>
+
+  <div class="status-cards" id="statusCards">
+    <button type="button" class="status-card card-all active" data-status-filter="ALL">
+      <span class="count">{{ total_tickets }}</span>
+      <span class="label">All Tickets</span>
+    </button>
+    <button type="button" class="status-card card-open" data-status-filter="OPEN">
+      <span class="count">{{ status_counts.OPEN }}</span>
+      <span class="label">Open Tickets</span>
+    </button>
+    <button type="button" class="status-card card-followup" data-status-filter="FOLLOW-UP">
+      <span class="count">{{ status_counts.FOLLOWUP }}</span>
+      <span class="label">Follow-up Tickets</span>
+    </button>
+    <button type="button" class="status-card card-closed" data-status-filter="CLOSED">
+      <span class="count">{{ status_counts.CLOSED }}</span>
+      <span class="label">Closed Tickets</span>
+    </button>
   </div>
 
   <div class="table-card">
@@ -204,7 +253,7 @@
         </thead>
         <tbody>
           {% for ticket in tickets %}
-          <tr>
+          <tr data-status="{{ ticket.status }}">
             <td><strong>#{{ ticket.id }}</strong></td>
             <td style="white-space: nowrap;">{{ ticket.created_at|date:"d M Y, h:i A" }}</td>
             <td>{{ ticket.user.username|default:"System" }}</td>
@@ -257,6 +306,9 @@
             </td>
           </tr>
           {% endfor %}
+          <tr id="noFilterMatchRow" style="display:none;">
+            <td colspan="6" class="empty-row">No tickets with this status.</td>
+          </tr>
         </tbody>
       </table>
     </div>
@@ -264,6 +316,32 @@
 </div>
 
 <script>
+(function () {
+  var cards = document.querySelectorAll('.status-card');
+  var rows = document.querySelectorAll('.table-modern tbody tr[data-status]');
+  var noMatchRow = document.getElementById('noFilterMatchRow');
+
+  function applyFilter(status) {
+    var visibleCount = 0;
+    rows.forEach(function (row) {
+      var show = (status === 'ALL' || row.getAttribute('data-status') === status);
+      row.style.display = show ? '' : 'none';
+      if (show) visibleCount++;
+    });
+    if (noMatchRow) {
+      noMatchRow.style.display = (rows.length > 0 && visibleCount === 0) ? '' : 'none';
+    }
+  }
+
+  cards.forEach(function (card) {
+    card.addEventListener('click', function () {
+      cards.forEach(function (c) { c.classList.remove('active'); });
+      card.classList.add('active');
+      applyFilter(card.getAttribute('data-status-filter'));
+    });
+  });
+})();
+
 function updateTicketStatus(ticketId, newStatus, selectElement) {
     fetch('/api/update-ticket-status/', {
         method: 'POST',

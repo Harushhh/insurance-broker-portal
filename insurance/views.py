@@ -49,7 +49,10 @@ from .tasks import process_mis_mapping_task, process_policy_document_task
 logger = logging.getLogger("security")
 
 # =========================================================
-# PAGE-LEVEL ACCESS GROUPS (Retained for legacy UI assignments if needed)
+# PAGE-LEVEL ACCESS GROUPS
+# Enforced by page_access_required() in insurance/urls.py — each entry here
+# is one Django Group, toggled per-user from the Access Control checkboxes
+# in user_management() below.
 # =========================================================
 PAGE_GROUPS = [
     "Can_View_Dashboard",
@@ -61,34 +64,15 @@ PAGE_GROUPS = [
     "Can_View_Audit_Log",
     "Can_View_Grid_Management",
     "Can_View_Alias_Management",
+    "Can_View_Tickets",
+    "Can_View_Policy_Locker",
+    "Can_View_Locked_Policies",
+    "Can_View_Motor_Points_Logs",
+    "Can_View_AI_Rulebook",
+    "Can_View_OCR_Pipeline",
+    "Can_View_MIS_Register",
+    "Can_View_MIS_Payout_Engine",
 ]
-
-def is_admin(user):
-    return True # Open access, login completely removed
-
-def can_view_dashboard(user):
-    return True # Open access, login completely removed
-
-def can_view_motor_payout(user):
-    return True # Open access, login completely removed
-
-def can_upload(user):
-    return True # Open access, login completely removed
-
-def can_view_rto(user):
-    return True # Open access, login completely removed
-
-def can_view_make_model(user):
-    return True # Open access, login completely removed
-
-def can_view_audit_log(user):
-    return True # Open access, login completely removed
-
-def can_view_grid_management(user):
-    return True # Open access, login completely removed
-
-def can_view_alias_management(user):
-    return True # Open access, login completely removed
 
 # =========================================================
 # NA CONFIGURATION & HELPERS
@@ -638,6 +622,10 @@ def home_dashboard(request):
 
     recent_activity = qs.order_by('-created_at')[:5]
 
+    my_tickets_qs = SupportTicket.objects.filter(user=request.user).order_by('-created_at')
+    my_open_ticket_count = my_tickets_qs.exclude(status="CLOSED").count()
+    my_tickets = my_tickets_qs[:20]
+
     context = {
         'is_admin_user': is_admin_user,
         'total_cases': total_cases,
@@ -645,6 +633,8 @@ def home_dashboard(request):
         'motor_count': motor_count,
         'health_count': health_count,
         'recent_activity': recent_activity,
+        'my_tickets': my_tickets,
+        'my_open_ticket_count': my_open_ticket_count,
     }
     return render(request, 'insurance/home.html', context)
 
@@ -2717,6 +2707,22 @@ def business_analysis(request):
 
     qs = RateMaster.objects.filter(is_deleted="NO", status__in=["ACTIVE", "INACTIVE"])
 
+    # Same date-range overlap filter used on the Rate Master Matrix
+    # (dashboard/edit_rate): keeps only rows whose validity window
+    # (from_date/to_date) covers the selected date, not an exact-match on
+    # any single date field.
+    date_range = (request.GET.get("date_range") or "").strip()
+    auto_loaded_today = request.GET.get("auto_loaded_today") or ""
+    if date_range:
+        dates = date_range.split(" - ")
+        if len(dates) == 2:
+            d_from, d_to = dates[0].strip(), dates[1].strip()
+            if d_from and d_to:
+                qs = qs.filter(
+                    (Q(from_date__lte=d_to) | Q(from_date__isnull=True)) &
+                    (Q(to_date__gte=d_from) | Q(to_date__isnull=True))
+                )
+
     # Premium/tariff (PI) fields, not payout (PO) - what the policy is priced
     # at, not what the broker earns. pi_tp_2..pi_tp_5 are the year 2-5 legs
     # of a multi-year TP schedule; no upload has ever populated them, but
@@ -2838,6 +2844,8 @@ def business_analysis(request):
 
     return render(request, "analysis.html", {
         "chart_data": chart_data,
+        "date_range": date_range,
+        "auto_loaded_today": auto_loaded_today,
     })
 
 # -------------------------
@@ -3092,8 +3100,24 @@ def mis_review(request, pk):
 # =========================================================
 def ticket_dashboard(request):
     tickets = SupportTicket.objects.select_related('user').all()
+
+    # Keyed without hyphens ("FOLLOW-UP" -> FOLLOWUP) since Django template
+    # variable lookups can't contain a "-" (`status_counts.FOLLOW-UP` is a
+    # TemplateSyntaxError, not a lookup miss).
+    raw_counts = {"OPEN": 0, "FOLLOW-UP": 0, "CLOSED": 0}
+    for row in tickets.values('status').annotate(n=Count('id')):
+        if row['status'] in raw_counts:
+            raw_counts[row['status']] = row['n']
+    status_counts = {
+        "OPEN": raw_counts["OPEN"],
+        "FOLLOWUP": raw_counts["FOLLOW-UP"],
+        "CLOSED": raw_counts["CLOSED"],
+    }
+
     return render(request, "ticket_dashboard.html", {
-        "tickets": tickets
+        "tickets": tickets,
+        "status_counts": status_counts,
+        "total_tickets": tickets.count(),
     })
 
 def create_ticket_api(request):

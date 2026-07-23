@@ -11,7 +11,15 @@
 
 {{ chart_data|json_script:"chart-data" }}
 
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/momentjs/latest/moment.min.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
+
 <style>
+    .daterangepicker { border-radius: 12px; font-family: 'Inter', sans-serif; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+    .daterangepicker .drp-buttons .btn-primary { background: #2563eb; border: none; border-radius: 6px; }
+    #dateRangeForm { margin: 0; }
     .analysis-premium-card { background:#ffffff; border-radius:16px; border:1px solid #e2e8f0; box-shadow:0 4px 20px rgba(15,23,42,0.03); margin-bottom:24px; }
     .analysis-card-header { background:#f8fafc; padding:16px 24px; border-bottom:1px solid #e2e8f0; border-radius:16px 16px 0 0; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; }
     .analysis-text-overline { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#64748b; margin-bottom:6px; display:block; }
@@ -92,10 +100,11 @@
             <label class="analysis-text-overline" for="subProductSelect">Sub product</label>
             <select id="subProductSelect"></select>
         </div>
-        <div class="field">
-            <label class="analysis-text-overline" for="monthSelect">Month</label>
-            <select id="monthSelect"></select>
-        </div>
+        <form method="GET" action="{% url 'business_analysis' %}" id="dateRangeForm" class="field">
+            <input type="hidden" name="auto_loaded_today" id="auto_loaded_today" value="{{ auto_loaded_today|default_if_none:'' }}">
+            <label class="analysis-text-overline" for="date_range">Date</label>
+            <input type="text" id="date_range" name="date_range" placeholder="Select date" value="{{ date_range|default_if_none:'' }}" autocomplete="off">
+        </form>
         <div class="field" style="flex:1;">
             <label class="analysis-text-overline" for="stateSearch">Search state</label>
             <input type="text" id="stateSearch" placeholder="e.g. Maharashtra, GJ, Delhi" autocomplete="off">
@@ -157,7 +166,7 @@
     const RATE_FIELD_LABELS = { net: 'Net', od: 'OD', tp: 'TP', tp2: 'TP2', tp3: 'TP3', tp4: 'TP4', tp5: 'TP5' };
     const RATE_KEYS = Object.keys(RATE_FIELD_LABELS);
 
-    let state = { product: PRODUCTS[0] || '', subProduct: SUB_PRODUCTS[0] || '', query: '', month: 'ALL', selected: null };
+    let state = { product: PRODUCTS[0] || '', subProduct: SUB_PRODUCTS[0] || '', query: '', selected: null };
 
     function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
     function fmtPct(v){ return (v === null || v === undefined) ? '&mdash;' : (Math.round(v*100)/100).toFixed(2) + '%'; }
@@ -199,8 +208,7 @@
     }
 
     function filteredRecords(){
-        return RECORDS.filter(r => r.product === state.product && r.sub_product === state.subProduct &&
-            (state.month === 'ALL' || r.month === state.month || r.month === 'EVERGREEN'));
+        return RECORDS.filter(r => r.product === state.product && r.sub_product === state.subProduct);
     }
 
     // Merges the (possibly several) month-bucket records for one insurer x
@@ -377,15 +385,6 @@
             renderBody();
         });
 
-        const monthSel = document.getElementById('monthSelect');
-        monthSel.innerHTML = '<option value="ALL">All months</option>' + MONTHS.map(mo => `<option value="${esc(mo.code)}">${esc(mo.label)}</option>`).join('');
-        monthSel.value = state.month;
-        monthSel.addEventListener('change', () => {
-            state.month = monthSel.value;
-            state.selected = null;
-            renderBody();
-        });
-
         const search = document.getElementById('stateSearch');
         search.addEventListener('input', () => { state.query = search.value; renderBody(); });
     }
@@ -413,8 +412,7 @@
         const range = computeColorRange(cellIndex);
 
         if(!cellIndex.size || !range){
-            const monthLabel = state.month !== 'ALL' ? (MONTHS.find(x => x.code === state.month) || {}).label : null;
-            host.innerHTML = `<div class="analysis-empty">No resolvable state data for ${esc(state.product)}${monthLabel ? ' in ' + esc(monthLabel) : ''}.</div>`;
+            host.innerHTML = `<div class="analysis-empty">No resolvable state data for ${esc(state.product)}.</div>`;
             return;
         }
         if(!cols.length){
@@ -492,5 +490,43 @@
     renderStats();
     renderBody();
 })();
+</script>
+
+<script>
+    $(document).ready(function () {
+        $('#date_range').daterangepicker({
+            autoUpdateInput: false,
+            locale: { format: 'YYYY-MM-DD', cancelLabel: 'Clear' }
+        });
+
+        $('#date_range').on('apply.daterangepicker', function (ev, picker) {
+            $(this).val(picker.startDate.format('YYYY-MM-DD') + ' - ' + picker.endDate.format('YYYY-MM-DD'));
+            document.getElementById('dateRangeForm').submit();
+        });
+
+        $('#date_range').on('cancel.daterangepicker', function () {
+            $(this).val('');
+            document.getElementById('dateRangeForm').submit();
+        });
+
+        // Default to today on a genuinely fresh visit only. auto_loaded_today
+        // is echoed back from the query string (not a cookie/session flag),
+        // so once it's set to "1" this won't fire again even if the user
+        // later clears the date deliberately to see every date.
+        const form = document.getElementById('dateRangeForm');
+        const dateRangeInput = document.getElementById('date_range');
+        const autoLoadedFlag = document.getElementById('auto_loaded_today');
+
+        const today = moment().format('YYYY-MM-DD');
+        const todayRange = `${today} - ${today}`;
+        const hasDateRange = dateRangeInput && dateRangeInput.value.trim() !== '';
+        const alreadyAutoLoaded = autoLoadedFlag && autoLoadedFlag.value === '1';
+
+        if (dateRangeInput && !hasDateRange && !alreadyAutoLoaded) {
+            dateRangeInput.value = todayRange;
+            if (autoLoadedFlag) autoLoadedFlag.value = '1';
+            form.submit();
+        }
+    });
 </script>
 {% endblock %}
