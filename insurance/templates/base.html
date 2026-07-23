@@ -328,114 +328,148 @@
                         <i class="bi bi-grid-1x2-fill"></i> Dashboard
                     </a>
                 </li>
-                
+
+                {% if 'Can_View_Tickets' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'ticket_dashboard' %}" class="nav-link {% if '/tickets/' in request.path %}active{% endif %}">
                         <i class="bi bi-ticket-detailed-fill"></i> Support Tickets
                     </a>
                 </li>
+                {% endif %}
 
+                {% if 'Can_View_Motor_Payout_Rates' in nav_pages or 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Locked_Policies' in nav_pages or 'Can_View_Motor_Points_Logs' in nav_pages %}
                 <li class="nav-title">Rates & Policies</li>
+                {% endif %}
+                {% if 'Can_View_Motor_Payout_Rates' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'motor_payout_rates' %}" class="nav-link {% if request.path == '/motor-payout-rates/' %}active{% endif %}">
                         <i class="bi bi-calculator-fill"></i> Quote Simulator
                     </a>
                 </li>
+                {% endif %}
+                {% if 'Can_View_Policy_Locker' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'policy_lock_checker' %}" class="nav-link {% if request.path == '/policy-lock-checker/' %}active{% endif %}">
                         <i class="bi bi-lock-fill"></i> Policy Locker
                     </a>
                 </li>
+                {% endif %}
+                {% if 'Can_View_Locked_Policies' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'locked_policy_dashboard' %}" class="nav-link {% if request.path == '/locked-policy-dashboard/' %}active{% endif %}">
                         <i class="bi bi-clock-history"></i> Locked Policies Log
                     </a>
                 </li>
+                {% endif %}
+                {% if 'Can_View_Motor_Points_Logs' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'motor_points_audit_logs' %}" class="nav-link {% if request.path == '/motor-points-logs/' %}active{% endif %}">
                         <i class="bi bi-journal-text"></i> Motor Points Logs
                     </a>
                 </li>
+                {% endif %}
 
+                {% if 'Can_View_AI_Rulebook' in nav_pages or 'Can_View_OCR_Pipeline' in nav_pages or 'Can_View_MIS_Register' in nav_pages or 'Can_View_MIS_Payout_Engine' in nav_pages %}
                 <li class="nav-title">Extraction & MIS</li>
+                {% endif %}
+                {% if 'Can_View_AI_Rulebook' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'field_configurator' %}" class="nav-link {% if '/configurator/' in request.path %}active{% endif %}">
                         <i class="bi bi-sliders"></i> AI Rulebook
                     </a>
                 </li>
-                
+                {% endif %}
+                {% if 'Can_View_OCR_Pipeline' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'upload_extract_pdf' %}" class="nav-link {% if request.path == '/upload-extract-pdf/' %}active{% endif %}">
                         <i class="bi bi-cpu-fill"></i> AI OCR Pipeline
                     </a>
                 </li>
+                {% endif %}
+                {% if 'Can_View_MIS_Register' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'my_mis' %}" class="nav-link {% if request.path == '/my-mis/' or '/mis-review/' in request.path %}active{% endif %}">
                         <i class="bi bi-file-earmark-text-fill"></i> Policy MIS Register
                     </a>
                 </li>
+                {% endif %}
+                {% if 'Can_View_MIS_Payout_Engine' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'mis_payout_automation' %}" class="nav-link {% if '/mis-payout-automation/' in request.path or '/mis-mapping/' in request.path %}active{% endif %}">
                         <i class="bi bi-cash-stack"></i> MIS Payout Engine
                     </a>
                 </li>
+                {% endif %}
 
+                {% if 'Can_View_Dashboard' in nav_pages or 'Can_View_RTO_Dashboard' in nav_pages or 'Can_View_Make_Model_Dashboard' in nav_pages or 'Can_Upload_CSV' in nav_pages %}
                 <li class="nav-title">Master Data</li>
-                
+                {% endif %}
+                {% if 'Can_View_Dashboard' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'dashboard' %}" class="nav-link {% if request.path == '/dashboard/' %}active{% endif %}">
                         <i class="bi bi-table"></i> Rate Master Matrix
                     </a>
                 </li>
-                
+                {% endif %}
+                {% if 'Can_View_RTO_Dashboard' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'rto_dashboard' %}" class="nav-link {% if request.path == '/rto-dashboard/' %}active{% endif %}">
                         <i class="bi bi-geo-alt-fill"></i> RTO Master Data
                     </a>
                 </li>
-
+                {% endif %}
+                {% if 'Can_View_Make_Model_Dashboard' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'make_model_dashboard' %}" class="nav-link {% if request.path == '/make-model-dashboard/' %}active{% endif %}">
                         <i class="bi bi-car-front-fill"></i> Make/Model Master
                     </a>
                 </li>
-
+                {% endif %}
+                {% if 'Can_Upload_CSV' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'upload' %}" class="nav-link {% if request.path == '/upload/' %}active{% endif %}">
                         <i class="bi bi-cloud-arrow-up-fill"></i> Import Rate Master
                     </a>
                 </li>
+                {% endif %}
 
+                {% if 'Can_View_Analysis' in nav_pages or 'Can_View_Grid_Management' in nav_pages or nav_can_access_control or 'Can_View_Audit_Log' in nav_pages %}
                 <li class="nav-title">Administration</li>
-                
+                {% endif %}
+                {% if 'Can_View_Analysis' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'business_analysis' %}" class="nav-link {% if request.path == '/analysis/' %}active{% endif %}">
                         <i class="bi bi-graph-up-arrow"></i> Payout Analytics
                     </a>
                 </li>
-
+                {% endif %}
+                {% if 'Can_View_Grid_Management' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'grid_management' %}" class="nav-link {% if request.path == '/grid-management/' %}active{% endif %}">
                         <i class="bi bi-folder-fill"></i> Grid Management
                     </a>
                 </li>
-
+                {% endif %}
+                {% if nav_can_access_control %}
                 <li class="nav-item">
                     <a href="{% url 'user_management' %}" class="nav-link {% if request.path == '/user-management/' %}active{% endif %}">
                         <i class="bi bi-people-fill"></i> Access Control
                     </a>
                 </li>
+                {% endif %}
                 <li class="nav-item">
                     <a href="{% url 'swagger-ui' %}" target="_blank" class="nav-link">
                         <i class="bi bi-code-slash"></i> API Documentation
                     </a>
                 </li>
 
+                {% if 'Can_View_Audit_Log' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'audit_logs' %}" class="nav-link {% if request.path == '/audit-log/' %}active{% endif %}">
                         <i class="bi bi-journal-code"></i> Audit Logs
                     </a>
                 </li>
+                {% endif %}
             </ul>
         </div>
 
