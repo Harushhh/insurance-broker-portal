@@ -3268,11 +3268,19 @@ def download_processed_mis(request, file_id):
     mis_obj = get_object_or_404(MISFile, id=file_id)
     if not mis_obj.processed_file:
         return HttpResponse("Processed file is not available yet. Please check back when status is COMPLETED.", status=404)
-    
-    content_type, _ = mimetypes.guess_type(mis_obj.processed_file.name)
-    response = HttpResponse(mis_obj.processed_file, content_type=content_type or 'application/octet-stream')
-    response['Content-Disposition'] = f'attachment; filename="{mis_obj.processed_file.name.split("/")[-1]}"'
-    return response
+
+    try:
+        content_type, _ = mimetypes.guess_type(mis_obj.processed_file.name)
+        response = HttpResponse(mis_obj.processed_file, content_type=content_type or 'application/octet-stream')
+        response['Content-Disposition'] = f'attachment; filename="{mis_obj.processed_file.name.split("/")[-1]}"'
+        return response
+    except Exception:
+        # The DB row can outlive the actual object in storage (deleted/moved
+        # out from under it, a storage outage, etc.) - surface a clean
+        # message instead of a raw 500 from whatever the storage backend
+        # raised trying to open it.
+        logger.exception("Could not read processed MIS file %s (id=%s) from storage", mis_obj.processed_file.name, mis_obj.id)
+        return HttpResponse("The processed file could not be retrieved from storage. Please contact support.", status=404)
 
 def mis_mapping_dashboard(request):
     mappings = MappingConfiguration.objects.all()

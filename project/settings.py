@@ -165,9 +165,19 @@ STATICFILES_DIRS = [local_static_dir] if os.path.exists(local_static_dir) else [
 # =========================================================
 # FILE STORAGE (media -> Cloudflare R2, static -> WhiteNoise, unchanged)
 # =========================================================
+# Falls back to local disk when R2 credentials aren't configured (e.g. local
+# dev) - without this, any access to a FileField's .url crashes with boto3's
+# "Required parameter name not set" the moment AWS_STORAGE_BUCKET_NAME is
+# empty, since S3Storage has no other way to build a bucket reference.
+USE_S3_STORAGE = bool(
+    os.getenv("AWS_STORAGE_BUCKET_NAME")
+    and os.getenv("AWS_ACCESS_KEY_ID")
+    and os.getenv("AWS_SECRET_ACCESS_KEY")
+)
+
 STORAGES = {
     "default": {
-        "BACKEND": "storages.backends.s3.S3Storage",
+        "BACKEND": "storages.backends.s3.S3Storage" if USE_S3_STORAGE else "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
