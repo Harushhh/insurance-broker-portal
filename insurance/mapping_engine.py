@@ -757,11 +757,42 @@ def process_mis_mapping(mis_file_id):
 
             # --- FINAL RESOLUTION ---
             matched_grid = df_grid[valid_mask]
-            matched_count = len(matched_grid)
 
-            if matched_count == 1:
-                # EXACT SINGLE MATCH — safe to apply rate
-                best_match = matched_grid.iloc[0]
+            # Rows sharing a group_id are the SAME rate card exploded across
+            # many physical DB rows (e.g. one per RTO in its cluster) - not
+            # separate options to disambiguate between. A row with no
+            # group_id is its own standalone offer, keyed by its own id.
+            # Ambiguity has to be judged on distinct groups, never on the raw
+            # row count, or a single rate card that happens to span several
+            # physical rows gets wrongly reported as "multiple groups
+            # matched" (and the old code's `.dropna()` on group_id could
+            # even hide a group-less row from the message entirely, so it
+            # would name only one Group ID while still claiming "multiple").
+            if matched_grid.empty:
+                distinct_keys = []
+            else:
+                effective_keys = matched_grid['group_id'].where(matched_grid['group_id'].notna(), matched_grid['id'])
+                distinct_keys = effective_keys.unique().tolist()
+
+            def _effective_rate(row):
+                if row.get('po_type') == 'On OD and TP':
+                    return (row.get('po_od_rate') or 0) + (row.get('po_tp_rate') or 0)
+                for field in ('po_net_rate', 'po_od_rate', 'po_tp_rate'):
+                    val = row.get(field)
+                    if val and val > 0:
+                        return val
+                return 0
+
+            if len(distinct_keys) == 1:
+                # EXACTLY ONE DISTINCT RATE GROUP — safe to apply, even when
+                # it spans several physical rows. Those are expected to be
+                # identical; if they're not, the lowest rate is the safe
+                # tie-break (same principle as the Policy Locker dedupe).
+                group_rows = matched_grid[effective_keys == distinct_keys[0]]
+                best_match = (
+                    min((row for _, row in group_rows.iterrows()), key=_effective_rate)
+                    if len(group_rows) > 1 else group_rows.iloc[0]
+                )
                 results.append({
                     'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
                     'Mapping Status': '✅ MATCH',
@@ -775,24 +806,22 @@ def process_mis_mapping(mis_file_id):
                     'Addtnc': best_match.get('add_tnc')
                 })
 
-            elif matched_count > 1:
-                # MULTIPLE MATCHES — do not apply any rate.
-                # The team must narrow the Rate Master so only one group
-                # matches this combination of fields.
-                matched_group_ids = sorted(
-                    matched_grid['group_id'].dropna().astype(int).unique().tolist()
-                )
-                group_id_str = ', '.join(str(g) for g in matched_group_ids[:10])
-                if len(matched_group_ids) > 10:
-                    group_id_str += f' … (+{len(matched_group_ids)-10} more)'
+            elif len(distinct_keys) > 1:
+                # MULTIPLE DISTINCT RATE GROUPS — genuine ambiguity between
+                # different configured rate cards; do not guess a payout
+                # rate, flag it for a human to narrow the Rate Master.
+                sorted_keys = sorted(int(k) for k in distinct_keys)
+                group_id_str = ', '.join(str(k) for k in sorted_keys[:10])
+                if len(sorted_keys) > 10:
+                    group_id_str += f' … (+{len(sorted_keys)-10} more)'
 
                 results.append({
                     'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
                     'Mapping Status': '⚠️ MULTIPLE MATCHES',
                     'Failure Reason': (
-                        f"Multiple Rate Master groups matched ({matched_count} rows). "
-                        f"Please refine Rate Master so only one group applies. "
-                        f"Matching Group IDs: {group_id_str}"
+                        f"Multiple Rate Master groups matched ({len(sorted_keys)} groups, "
+                        f"{len(matched_grid)} rows total). Please refine Rate Master so only "
+                        f"one group applies. Matching Group IDs: {group_id_str}"
                     ),
                     'Displaygroupid': None,
                     'Potype': None, 'Poodrate': None, 'Potprate': None,
