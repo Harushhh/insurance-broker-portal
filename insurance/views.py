@@ -626,6 +626,10 @@ def home_dashboard(request):
     my_open_ticket_count = my_tickets_qs.exclude(status="CLOSED").count()
     my_tickets = my_tickets_qs[:20]
 
+    my_locked_qs = LockedPolicy.objects.filter(locked_by=request.user, status="LOCKED").order_by('-locked_at')
+    my_locked_count = my_locked_qs.count()
+    my_locked_policies = my_locked_qs[:20]
+
     context = {
         'is_admin_user': is_admin_user,
         'total_cases': total_cases,
@@ -635,6 +639,9 @@ def home_dashboard(request):
         'recent_activity': recent_activity,
         'my_tickets': my_tickets,
         'my_open_ticket_count': my_open_ticket_count,
+        'my_locked_policies': my_locked_policies,
+        'my_locked_count': my_locked_count,
+        'my_notification_count': my_open_ticket_count + my_locked_count,
     }
     return render(request, 'insurance/home.html', context)
 
@@ -2452,8 +2459,43 @@ def policy_lock_checker(request):
                 results.append(row)
                 seen_groups.add(gid)
 
-            if len(results) >= 300:
+            # Capped high (not at the 300 display limit) so the same-insurer
+            # collapse below still sees the full candidate set before it's
+            # cut down for display.
+            if len(results) >= 2000:
                 break
+
+    # Different group_ids can still carry what is effectively the same rate
+    # card - same insurer, tariff range, PO type, flat amount, and add TNC,
+    # differing only in the payout rate (a data entry issue, not two
+    # genuinely different offers). Collapse those down to the single
+    # lowest-rate row. Group ID and the rate itself are deliberately left out
+    # of the matching key - group_id is exactly what differs between these
+    # near-duplicates, and rate is the one field allowed to differ. Status is
+    # also left out of the key on purpose: the real-world case this is fixing
+    # has the lower (correct) rate on the ACTIVE row and a stale, wildly
+    # inflated rate sitting on an INACTIVE duplicate - those still need to
+    # collapse together, with the lowest rate's own status winning.
+    def effective_rate(row):
+        if row.po_type == "On OD and TP":
+            return (row.po_od_rate or 0) + (row.po_tp_rate or 0)
+        return row.po_rate or 0
+
+    best_by_key = {}
+    for row in results:
+        row.effective_rate = effective_rate(row)
+        key = (
+            row.insurance_company,
+            row.tariff_min, row.tariff_max,
+            row.po_type,
+            row.po_flat_amount,
+            row.add_tnc,
+        )
+        existing = best_by_key.get(key)
+        if existing is None or row.effective_rate < existing.effective_rate:
+            best_by_key[key] = row
+
+    results = sorted(best_by_key.values(), key=lambda r: r.effective_rate, reverse=True)[:300]
 
     make_name_list = sorted({
         item.strip()

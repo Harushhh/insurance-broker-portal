@@ -72,7 +72,7 @@
             <h2 class="mb-1" style="font-weight: 800; color: #0f172a; letter-spacing: -0.02em;">Welcome back, {{ request.user.first_name|default:request.user.username|default:"Admin" }}!</h2>
             <p class="text-muted mb-0" style="font-size: 15px;">
                 {% if is_admin_user %}
-                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 me-2 rounded-pill px-3 py-1">Admin View</span> 
+                    <span class="badge bg-danger bg-opacity-10 text-danger border border-danger border-opacity-25 me-2 rounded-pill px-3 py-1"></span> 
                     Showing aggregate data for all business units.
                 {% else %}
                     <span class="badge bg-primary bg-opacity-10 text-primary border border-primary border-opacity-25 me-2 rounded-pill px-3 py-1">My View</span> 
@@ -84,8 +84,8 @@
             <div style="position: relative;">
                 <button type="button" id="ticketNotifBtn" class="btn btn-light border" style="border-radius: 12px; font-weight: 600; padding: 10px 14px; position: relative;">
                     <i class="bi bi-bell-fill"></i>
-                    {% if my_open_ticket_count > 0 %}
-                    <span class="badge rounded-pill bg-danger" style="position:absolute; top:-6px; right:-6px; font-size:10px;">{{ my_open_ticket_count }}</span>
+                    {% if my_notification_count > 0 %}
+                    <span class="badge rounded-pill bg-danger" style="position:absolute; top:-6px; right:-6px; font-size:10px;">{{ my_notification_count }}</span>
                     {% endif %}
                 </button>
                 <div id="ticketNotifPanel" style="display:none; position:absolute; top:calc(100% + 8px); right:0; width:360px; max-height:420px; overflow-y:auto; background:#fff; border:1px solid #e2e8f0; border-radius:16px; box-shadow:0 20px 45px rgba(15,23,42,.14); z-index:1000;">
@@ -104,6 +104,22 @@
                         </div>
                         {% empty %}
                         <div style="padding:24px 18px; text-align:center; color:#94a3b8; font-size:13px;">You haven't raised any tickets yet.</div>
+                        {% endfor %}
+                    </div>
+
+                    <div style="padding:14px 18px; border-bottom:1px solid #f1f5f9; border-top:1px solid #f1f5f9; font-weight:800; color:#0f172a; font-size:14px;">My Locked Rates</div>
+                    <div>
+                        {% for lp in my_locked_policies %}
+                        <div style="padding:12px 18px; border-bottom:1px solid #f8fafc;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; gap: 10px; margin-bottom:4px;">
+                                <strong style="font-size:13px; color:#0f172a;">{{ lp.vehicle_no }}</strong>
+                                <span style="font-size:10px; font-weight:800; text-transform:uppercase; letter-spacing:.04em; padding:3px 8px; border-radius:6px; white-space:nowrap; background:#dcfce7; color:#166534;">LOCKED</span>
+                            </div>
+                            <div style="font-size:12.5px; color:#475569; line-height:1.4;">{{ lp.insurance_company|default:"-" }} &middot; {{ lp.po_type|default:"-" }} &middot; {{ lp.po_rate|default:"0" }}%</div>
+                            <div style="font-size:11px; color:#94a3b8; margin-top:2px;">Locked {{ lp.locked_at|date:"d M Y, h:i A" }}</div>
+                        </div>
+                        {% empty %}
+                        <div style="padding:24px 18px; text-align:center; color:#94a3b8; font-size:13px;">You haven't locked any rates yet.</div>
                         {% endfor %}
                     </div>
                 </div>
