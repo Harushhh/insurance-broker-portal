@@ -21,7 +21,7 @@ import ast
 import mimetypes
 import secrets
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from collections import defaultdict
 from openpyxl import Workbook
@@ -72,6 +72,7 @@ PAGE_GROUPS = [
     "Can_View_OCR_Pipeline",
     "Can_View_MIS_Register",
     "Can_View_MIS_Payout_Engine",
+    "Can_View_Rate_Master_Health",
 ]
 
 # =========================================================
@@ -1941,6 +1942,87 @@ def bulk_update_rates(request):
     return redirect("dashboard")
 
 # -------------------------
+# RATE MASTER HEALTH
+# -------------------------
+# Fields a group's exploded physical rows are expected to agree on - the
+# same set mapping_engine.py's own tie-break logic already treats as "should
+# be identical within a group" (po_type/rates/flat/tnc), plus status and
+# is_deleted, which payout matching doesn't care about but a health check
+# should.
+RATE_GROUP_AGREEMENT_FIELDS = [
+    "po_type", "po_od_rate", "po_tp_rate", "po_net_rate",
+    "po_flat_amount", "add_tnc", "status", "is_deleted",
+]
+
+RATE_EXPIRY_WINDOW_DAYS = 30
+
+def rate_master_health(request):
+    # 1. GROUP DISAGREEMENT — rows sharing one group_id that don't actually
+    # agree on the fields they're supposed to (see RATE_GROUP_AGREEMENT_FIELDS).
+    rows_by_group = defaultdict(list)
+    for row in RateMaster.objects.filter(group_id__isnull=False, is_deleted="NO").values(
+        "id", "group_id", "insurance_company", *RATE_GROUP_AGREEMENT_FIELDS
+    ):
+        rows_by_group[row["group_id"]].append(row)
+
+    disagreement_groups = []
+    for gid, rows in rows_by_group.items():
+        if len(rows) < 2:
+            continue
+        first = rows[0]
+        if any(r[f] != first[f] for r in rows[1:] for f in RATE_GROUP_AGREEMENT_FIELDS):
+            disagreement_groups.append({
+                "group_id": gid,
+                "insurance_company": first["insurance_company"],
+                "row_count": len(rows),
+                "row_ids": [r["id"] for r in rows],
+            })
+    disagreement_groups.sort(key=lambda g: -g["row_count"])
+
+    # 2. COVERAGE DROP — insurers with any RateMaster history that currently
+    # have zero active, non-deleted rows.
+    all_insurers = set(
+        RateMaster.objects.exclude(insurance_company__isnull=True)
+        .exclude(insurance_company__exact="")
+        .values_list("insurance_company", flat=True)
+        .distinct()
+    )
+    active_insurers = set(
+        RateMaster.objects.filter(status="ACTIVE", is_deleted="NO")
+        .exclude(insurance_company__isnull=True)
+        .exclude(insurance_company__exact="")
+        .values_list("insurance_company", flat=True)
+        .distinct()
+    )
+    insurers_without_coverage = sorted(all_insurers - active_insurers)
+
+    # 3. EXPIRING SOON — active rows whose validity window closes within the
+    # configured window.
+    today = timezone.localdate()
+    expiring_soon = list(
+        RateMaster.objects.filter(
+            status="ACTIVE", is_deleted="NO",
+            to_date__gte=today, to_date__lte=today + timedelta(days=RATE_EXPIRY_WINDOW_DAYS)
+        )
+        .select_related("product", "sub_product")
+        .order_by("to_date")
+        .values(
+            "id", "group_id", "insurance_company", "to_date",
+            "product__name", "sub_product__name",
+        )
+    )
+    for row in expiring_soon:
+        row["display_group_id"] = row["group_id"] if row["group_id"] is not None else row["id"]
+        row["days_left"] = (row["to_date"] - today).days
+
+    return render(request, "rate_master_health.html", {
+        "disagreement_groups": disagreement_groups,
+        "insurers_without_coverage": insurers_without_coverage,
+        "expiring_soon": expiring_soon,
+        "expiry_window_days": RATE_EXPIRY_WINDOW_DAYS,
+    })
+
+# -------------------------
 # MOTOR PAYOUT RATES
 # -------------------------
 MOTOR_PAYOUT_BATCH_SIZE = 50
@@ -2893,9 +2975,67 @@ def business_analysis(request):
 # -------------------------
 # AUDIT TRAIL LOGS
 # -------------------------
+def _filtered_audit_logs(request):
+    qs = AuditLog.objects.select_related("user").order_by("-timestamp")
+
+    user_id = (request.GET.get("user") or "").strip()
+    action = (request.GET.get("action") or "").strip()
+    date_range = (request.GET.get("date_range") or "").strip()
+
+    if user_id:
+        qs = qs.filter(user_id=user_id)
+    if action:
+        qs = qs.filter(action=action)
+    if date_range:
+        dates = date_range.split(" - ")
+        if len(dates) == 2:
+            d_from, d_to = dates[0].strip(), dates[1].strip()
+            if d_from and d_to:
+                qs = qs.filter(timestamp__date__gte=d_from, timestamp__date__lte=d_to)
+
+    return qs, {"user": user_id, "action": action, "date_range": date_range}
+
 def audit_logs(request):
-    logs = AuditLog.objects.all().order_by("-timestamp")[:200]
-    return render(request, "audit_log.html", {"logs": logs})
+    qs, selected = _filtered_audit_logs(request)
+
+    # AuditLog's default ordering (-timestamp) makes .distinct() on a single
+    # column ineffective at the SQL level (timestamp isn't in the SELECT, so
+    # "DISTINCT action" ends up including every differently-timestamped
+    # row) - dedupe in Python instead of relying on DB-level DISTINCT here.
+    user_ids = set(AuditLog.objects.exclude(user__isnull=True).values_list("user_id", flat=True))
+    user_choices = User.objects.filter(id__in=user_ids).order_by("username")
+    action_choices = sorted(set(AuditLog.objects.exclude(action="").values_list("action", flat=True)))
+
+    return render(request, "audit_log.html", {
+        "logs": qs[:200],
+        "user_choices": user_choices,
+        "action_choices": action_choices,
+        "selected": selected,
+    })
+
+def export_audit_log_xlsx(request):
+    qs, _ = _filtered_audit_logs(request)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Audit Log"
+    ws.append(["ID", "Date & Time", "User", "Action Type", "Details"])
+
+    for log in qs[:2000]:
+        ws.append([
+            log.id,
+            log.timestamp.strftime("%Y-%m-%d %H:%M:%S") if log.timestamp else "",
+            log.user.username if log.user else "System",
+            log.action,
+            log.details,
+        ])
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = 'attachment; filename="audit_log.xlsx"'
+    wb.save(response)
+    return response
 
 # -------------------------
 # EMAIL BACKGROUND

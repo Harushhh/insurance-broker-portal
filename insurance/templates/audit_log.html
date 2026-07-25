@@ -2,11 +2,55 @@
 {% block title %}Security Audit Log{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/momentjs/latest/moment.min.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
+<style>
+    .daterangepicker { border-radius: 12px; font-family: 'Inter', sans-serif; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+    .daterangepicker .drp-buttons .btn-primary { background: #2563eb; border: none; border-radius: 6px; }
+    .audit-filters { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-top: 16px; }
+    .audit-filters .field { display: flex; flex-direction: column; gap: 6px; }
+    .audit-filters label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+    .audit-filters select, .audit-filters input { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 14px; font-size: 13px; color: #0f172a; background: #fff; height: 40px; min-width: 190px; }
+    .audit-btn { height: 40px; padding: 0 18px; border-radius: 8px; font-size: 13px; font-weight: 700; border: none; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
+    .audit-btn-primary { background: #2563eb; color: #fff; }
+    .audit-btn-light { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }
+</style>
+
 <div class="card" style="margin-bottom: 20px; padding: 24px; background: #fff; border: 1px solid #e2e8f0; border-top: 4px solid #ef4444;">
     <h2 style="margin:0; color:#0f172a;">🕵️‍♂️ Security Audit & History Log</h2>
     <p style="color:#64748b; margin:8px 0 0; font-size: 14px;">
         Strict compliance tracking. All bulk updates and edits are permanently recorded here.
     </p>
+
+    <form method="GET" action="{% url 'audit_logs' %}" id="auditFilterForm" class="audit-filters">
+        <div class="field">
+            <label for="auditUser">User</label>
+            <select id="auditUser" name="user">
+                <option value="">All users</option>
+                {% for u in user_choices %}
+                    <option value="{{ u.id }}" {% if selected.user == u.id|stringformat:"s" %}selected{% endif %}>{{ u.username }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label for="auditAction">Action Type</label>
+            <select id="auditAction" name="action">
+                <option value="">All actions</option>
+                {% for a in action_choices %}
+                    <option value="{{ a }}" {% if selected.action == a %}selected{% endif %}>{{ a }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label for="auditDateRange">Date Range</label>
+            <input type="text" id="auditDateRange" name="date_range" placeholder="Select dates" value="{{ selected.date_range|default_if_none:'' }}" autocomplete="off">
+        </div>
+        <button type="submit" class="audit-btn audit-btn-primary">Apply</button>
+        <a href="{% url 'audit_logs' %}" class="audit-btn audit-btn-light">Clear</a>
+        <a href="{% url 'export_audit_log_xlsx' %}?user={{ selected.user|urlencode }}&action={{ selected.action|urlencode }}&date_range={{ selected.date_range|urlencode }}" class="audit-btn audit-btn-light">⬇️ Export XLSX</a>
+    </form>
 </div>
 
 <div class="table-wrap card" style="padding:0; overflow:hidden;">
@@ -37,4 +81,21 @@
         </tbody>
     </table>
 </div>
+
+<script>
+    $(document).ready(function () {
+        $('#auditDateRange').daterangepicker({
+            autoUpdateInput: false,
+            locale: { format: 'YYYY-MM-DD', cancelLabel: 'Clear' }
+        });
+
+        $('#auditDateRange').on('apply.daterangepicker', function (ev, picker) {
+            $(this).val(picker.startDate.format('YYYY-MM-DD') + ' - ' + picker.endDate.format('YYYY-MM-DD'));
+        });
+
+        $('#auditDateRange').on('cancel.daterangepicker', function () {
+            $(this).val('');
+        });
+    });
+</script>
 {% endblock %}

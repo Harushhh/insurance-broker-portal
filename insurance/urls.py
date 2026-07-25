@@ -68,12 +68,14 @@ urlpatterns = [
     path("dashboard/", page_access_required("Can_View_Dashboard")(views.dashboard), name="dashboard"),
     path("edit-rate/<str:group_id>/", page_access_required("Can_View_Dashboard")(views.edit_rate), name="edit_rate"),
     path("bulk-update/", page_access_required("Can_View_Dashboard")(views.bulk_update_rates), name="bulk_update_rates"),
+    path("rate-master-health/", page_access_required("Can_View_Rate_Master_Health")(views.rate_master_health), name="rate_master_health"),
     path("motor-payout-rates/", page_access_required("Can_View_Motor_Payout_Rates")(views.motor_payout_rates), name="motor_payout_rates"),
     path("motor-payout-rates/more/", page_access_required("Can_View_Motor_Payout_Rates")(views.motor_payout_rates_more), name="motor_payout_rates_more"),
     path("analysis/", page_access_required("Can_View_Analysis")(views.business_analysis), name="business_analysis"),
 
     # Admin-sensitive — staff only (or granted per-page below)
     path("audit-log/", page_access_required("Can_View_Audit_Log")(views.audit_logs), name="audit_logs"),
+    path("audit-log/export/", page_access_required("Can_View_Audit_Log")(views.export_audit_log_xlsx), name="export_audit_log_xlsx"),
     path("user-management/", staff_required(views.user_management), name="user_management"),
     path("grid-management/", page_access_required("Can_View_Grid_Management")(views.grid_management), name="grid_management"),
 

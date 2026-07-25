@@ -337,7 +337,7 @@
                 </li>
                 {% endif %}
 
-                {% if 'Can_View_Motor_Payout_Rates' in nav_pages or 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Locked_Policies' in nav_pages or 'Can_View_Motor_Points_Logs' in nav_pages %}
+                {% if 'Can_View_Motor_Payout_Rates' in nav_pages or 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Locked_Policies' in nav_pages or 'Can_View_Motor_Points_Logs' in nav_pages or 'Can_View_Rate_Master_Health' in nav_pages %}
                 <li class="nav-title">Rates & Policies</li>
                 {% endif %}
                 {% if 'Can_View_Motor_Payout_Rates' in nav_pages %}
@@ -365,6 +365,13 @@
                 <li class="nav-item">
                     <a href="{% url 'motor_points_audit_logs' %}" class="nav-link {% if request.path == '/motor-points-logs/' %}active{% endif %}">
                         <i class="bi bi-journal-text"></i> Motor Points Logs
+                    </a>
+                </li>
+                {% endif %}
+                {% if 'Can_View_Rate_Master_Health' in nav_pages %}
+                <li class="nav-item">
+                    <a href="{% url 'rate_master_health' %}" class="nav-link {% if request.path == '/rate-master-health/' %}active{% endif %}">
+                        <i class="bi bi-heart-pulse-fill"></i> Rate Master Health
                     </a>
                 </li>
                 {% endif %}
