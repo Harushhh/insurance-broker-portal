@@ -647,6 +647,55 @@ class LockedPolicy(models.Model):
 
 
 # =========================================================
+# SPECIAL RATE REQUESTS
+# =========================================================
+class SpecialRateRequest(models.Model):
+    RATE_TYPE_CHOICES = [
+        ("MG-BG", "Special MG-BG"),
+        ("BG", "Special BG"),
+    ]
+
+    STATUS_CHOICES = [
+        ("PENDING", "Pending"),
+        ("APPROVED", "Approved"),
+        ("REJECTED", "Rejected"),
+    ]
+
+    rate_type = models.CharField(max_length=10, choices=RATE_TYPE_CHOICES, db_index=True)
+    entry_no = models.CharField(max_length=100)
+    # Mandatory for MG-BG, optional for BG — enforced in the form layer
+    # (SpecialRateRequestForm subclasses), not here, since the same model
+    # backs both request types.
+    insurer_approval_file = models.FileField(
+        upload_to="special_rate_requests/%Y/%m/", blank=True, null=True
+    )
+    remarks = models.TextField()
+    requested_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="special_rate_requests"
+    )
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="PENDING", db_index=True)
+    reviewed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_special_rate_requests"
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.get_rate_type_display()} #{self.entry_no}"
+
+
+# =========================================================
 # SUPPORT TICKET SYSTEM
 # =========================================================
 class SupportTicket(models.Model):

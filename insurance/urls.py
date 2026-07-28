@@ -87,6 +87,11 @@ urlpatterns = [
     path("user-management/", staff_required(views.user_management), name="user_management"),
     path("grid-management/", page_access_required("Can_View_Grid_Management")(views.grid_management), name="grid_management"),
 
+    # Special Rate Requests
+    path("special-rates/", page_access_required("Can_View_Special_Rates")(views.special_rate_requests), name="special_rate_requests"),
+    path("special-rates/review/", page_access_required("Can_Review_Special_Rates")(views.special_rate_requests_review), name="special_rate_requests_review"),
+    path("api/update-special-rate-status/", page_access_required("Can_Review_Special_Rates")(views.update_special_rate_request_status), name="update_special_rate_request_status"),
+
     # Ticketing System
     path('tickets/', page_access_required("Can_View_Tickets")(views.ticket_dashboard), name='ticket_dashboard'),
     # Left on plain login_required (not gated by Can_View_Tickets): also called

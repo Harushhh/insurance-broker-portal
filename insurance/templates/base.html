@@ -337,8 +337,22 @@
                 </li>
                 {% endif %}
 
-                {% if 'Can_View_Motor_Payout_Rates' in nav_pages or 'Can_View_Health_Payout_Rates' in nav_pages or 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Locked_Policies' in nav_pages or 'Can_View_Motor_Points_Logs' in nav_pages or 'Can_View_Rate_Master_Health' in nav_pages %}
+                {% if 'Can_View_Motor_Payout_Rates' in nav_pages or 'Can_View_Health_Payout_Rates' in nav_pages or 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Locked_Policies' in nav_pages or 'Can_View_Motor_Points_Logs' in nav_pages or 'Can_View_Rate_Master_Health' in nav_pages or 'Can_View_Special_Rates' in nav_pages or 'Can_Review_Special_Rates' in nav_pages %}
                 <li class="nav-title">Rates & Policies</li>
+                {% endif %}
+                {% if 'Can_View_Special_Rates' in nav_pages %}
+                <li class="nav-item">
+                    <a href="{% url 'special_rate_requests' %}" class="nav-link {% if request.path == '/special-rates/' %}active{% endif %}">
+                        <i class="bi bi-stars"></i> Special Rate Requests
+                    </a>
+                </li>
+                {% endif %}
+                {% if 'Can_Review_Special_Rates' in nav_pages %}
+                <li class="nav-item">
+                    <a href="{% url 'special_rate_requests_review' %}" class="nav-link {% if request.path == '/special-rates/review/' %}active{% endif %}">
+                        <i class="bi bi-clipboard2-check-fill"></i> Special Rates Review
+                    </a>
+                </li>
                 {% endif %}
                 {% if 'Can_View_Motor_Payout_Rates' in nav_pages %}
                 <li class="nav-item">

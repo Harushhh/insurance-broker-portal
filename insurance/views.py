@@ -40,12 +40,15 @@ from .models import (
     RateGroup, AuditLog, GridDocument, UserProfile,
     ExtractionField, FieldSynonym, PolicyDocumentUpload, PolicyMISRecord,
     LockedPolicy, SupportTicket, MISFile, MappingConfiguration,
-    HealthRateMaster,
+    HealthRateMaster, SpecialRateRequest,
 )
 
 # Import our Gemini AI utility and background logic engines
 from .utils import extract_data_with_gemini
-from .forms import ExtractionFieldForm, MISUploadForm, MappingConfigurationForm
+from .forms import (
+    ExtractionFieldForm, MISUploadForm, MappingConfigurationForm,
+    MgBgRateRequestForm, BgRateRequestForm,
+)
 from .tasks import process_mis_mapping_task, process_policy_document_task
 from .health_grid_utils import (
     parse_number as parse_health_number,
@@ -84,6 +87,8 @@ PAGE_GROUPS = [
     "Can_View_Health_Rate_Master",
     "Can_View_Pincode_Dashboard",
     "Can_View_Health_Payout_Rates",
+    "Can_View_Special_Rates",
+    "Can_Review_Special_Rates",
 ]
 
 # =========================================================
@@ -3924,6 +3929,103 @@ def mis_review(request, pk):
         'record': record,
         'field_data': field_data
     })
+
+# =========================================================
+# SPECIAL RATE REQUESTS
+# =========================================================
+def special_rate_requests(request):
+    mgbg_form = MgBgRateRequestForm(prefix="mgbg")
+    bg_form = BgRateRequestForm(prefix="bg")
+    active_section = "MG-BG"
+
+    if request.method == "POST" and "submit_mgbg" in request.POST:
+        active_section = "MG-BG"
+        mgbg_form = MgBgRateRequestForm(request.POST, request.FILES, prefix="mgbg")
+        if mgbg_form.is_valid():
+            req_obj = mgbg_form.save(commit=False)
+            req_obj.rate_type = "MG-BG"
+            req_obj.requested_by = request.user
+            req_obj.save()
+            messages.success(request, f"✅ Your Special MG-BG request (Entry No {req_obj.entry_no}) has been submitted.")
+            return redirect("special_rate_requests")
+        messages.error(request, "⚠️ Please correct the errors below and resubmit.")
+
+    elif request.method == "POST" and "submit_bg" in request.POST:
+        active_section = "BG"
+        bg_form = BgRateRequestForm(request.POST, request.FILES, prefix="bg")
+        if bg_form.is_valid():
+            req_obj = bg_form.save(commit=False)
+            req_obj.rate_type = "BG"
+            req_obj.requested_by = request.user
+            req_obj.save()
+            messages.success(request, f"✅ Your Special BG request (Entry No {req_obj.entry_no}) has been submitted.")
+            return redirect("special_rate_requests")
+        messages.error(request, "⚠️ Please correct the errors below and resubmit.")
+
+    my_requests = SpecialRateRequest.objects.filter(requested_by=request.user).order_by("-created_at")
+
+    return render(request, "special_rate_requests.html", {
+        "mgbg_form": mgbg_form,
+        "bg_form": bg_form,
+        "active_section": active_section,
+        "my_requests": my_requests,
+    })
+
+
+def special_rate_requests_review(request):
+    requests_qs = SpecialRateRequest.objects.select_related("requested_by", "reviewed_by").all()
+
+    status_counts = {"PENDING": 0, "APPROVED": 0, "REJECTED": 0}
+    for row in requests_qs.values("status").annotate(n=Count("id")):
+        if row["status"] in status_counts:
+            status_counts[row["status"]] = row["n"]
+
+    # Keyed without the hyphen ("MG-BG" -> MGBG) since Django template variable
+    # lookups can't contain a "-" (`rate_type_counts.MG-BG` is a
+    # TemplateSyntaxError, not a lookup miss).
+    raw_type_counts = {"MG-BG": 0, "BG": 0}
+    for row in requests_qs.values("rate_type").annotate(n=Count("id")):
+        if row["rate_type"] in raw_type_counts:
+            raw_type_counts[row["rate_type"]] = row["n"]
+    rate_type_counts = {
+        "MGBG": raw_type_counts["MG-BG"],
+        "BG": raw_type_counts["BG"],
+    }
+
+    return render(request, "special_rate_requests_review.html", {
+        "requests": requests_qs,
+        "status_counts": status_counts,
+        "rate_type_counts": rate_type_counts,
+        "total_requests": requests_qs.count(),
+    })
+
+
+def update_special_rate_request_status(request):
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            request_id = data.get("request_id")
+            new_status = (data.get("status") or "").upper()
+
+            if not request_id or not new_status:
+                return JsonResponse({"success": False, "message": "Request ID and status are required."})
+
+            valid_statuses = ["PENDING", "APPROVED", "REJECTED"]
+            if new_status not in valid_statuses:
+                return JsonResponse({"success": False, "message": "Invalid status."})
+
+            req_obj = SpecialRateRequest.objects.get(id=request_id)
+            req_obj.status = new_status
+            req_obj.reviewed_by = request.user
+            req_obj.reviewed_at = timezone.now()
+            req_obj.save()
+
+            return JsonResponse({"success": True})
+
+        except SpecialRateRequest.DoesNotExist:
+            return JsonResponse({"success": False, "message": "Request not found."})
+        except Exception as e:
+            return JsonResponse({"success": False, "message": str(e)})
 
 # =========================================================
 # TICKETING SYSTEM VIEWS

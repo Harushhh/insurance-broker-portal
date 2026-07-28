@@ -1,7 +1,7 @@
 from django import forms
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
-from .models import ExtractionField, FieldSynonym, MISFile, MappingConfiguration
+from .models import ExtractionField, FieldSynonym, MISFile, MappingConfiguration, SpecialRateRequest
 
 class ExtractionFieldForm(forms.ModelForm):
     class Meta:
@@ -86,3 +86,46 @@ class SignupForm(forms.Form):
         if password1:
             validate_password(password1)
         return cleaned_data
+
+
+# ==========================================
+# SPECIAL RATE REQUESTS
+# ==========================================
+ALLOWED_INSURER_APPROVAL_EXTENSIONS = ["pdf", "png", "jpg", "jpeg"]
+
+
+class SpecialRateRequestForm(forms.ModelForm):
+    """
+    Shared base for the two Special Rate Request sections. rate_type is
+    deliberately excluded from the fields below — the view sets it
+    server-side based on which submit button fired, so it can't be spoofed
+    via a tampered hidden input to dodge the MG-BG mandatory-file rule.
+    """
+    class Meta:
+        model = SpecialRateRequest
+        fields = ["entry_no", "insurer_approval_file", "remarks"]
+        widgets = {
+            "entry_no": forms.TextInput(attrs={"class": "field-input", "placeholder": "e.g. ENT-2026-0001"}),
+            "insurer_approval_file": forms.FileInput(attrs={"class": "field-file", "accept": ".pdf,.png,.jpg,.jpeg"}),
+            "remarks": forms.Textarea(attrs={"class": "field-textarea", "rows": 4, "placeholder": "Add context for this request..."}),
+        }
+
+    def clean_insurer_approval_file(self):
+        f = self.cleaned_data.get("insurer_approval_file")
+        if f:
+            ext = f.name.rsplit(".", 1)[-1].lower() if "." in f.name else ""
+            if ext not in ALLOWED_INSURER_APPROVAL_EXTENSIONS:
+                raise forms.ValidationError("Only PDF, PNG, JPG, or JPEG files are allowed.")
+        return f
+
+
+class MgBgRateRequestForm(SpecialRateRequestForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["insurer_approval_file"].required = True
+
+
+class BgRateRequestForm(SpecialRateRequestForm):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["insurer_approval_file"].required = False
