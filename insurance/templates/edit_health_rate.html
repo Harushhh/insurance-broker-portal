@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Edit Health Rate{% endblock %}
+
+{% block content %}
+<div class="edit-wrapper">
+    <div class="edit-card">
+
+        <div class="edit-header">
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <div class="header-icon">
+                    <i class="bi bi-heart-pulse-fill" style="font-size: 22px;"></i>
+                </div>
+                <div>
+                    <h2 style="margin: 0; color: #0f172a; font-size: 22px;">Edit Health Rate #{{ record.id }}</h2>
+                    <p style="margin: 4px 0 0; color: #64748b; font-size: 13.5px;">{{ record.insurance_company }} &middot; {{ record.product_name|default:"-" }}</p>
+                </div>
+            </div>
+            <a href="{% url 'health_rate_master' %}" class="btn-back">&larr; Back to Health Rate Master</a>
+        </div>
+
+        <form method="POST">
+            {% csrf_token %}
+            <div class="form-grid">
+                {% for field in form %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="error-text">{{ field.errors|striptags }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn-submit">
+                    <i class="bi bi-check-circle-fill"></i>
+                    Save Changes
+                </button>
+                <a href="{% url 'health_rate_master' %}" class="btn-cancel">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .edit-wrapper { max-width: 1150px; margin: 0 auto; padding: 20px 15px 40px; }
+    .edit-card { background: #ffffff; border-radius: 20px; box-shadow: 0 10px 40px -10px rgba(0,0,0,0.08); border: 1px solid #e2e8f0; padding: 40px; }
+
+    .edit-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #f1f5f9; padding-bottom: 24px; margin-bottom: 24px; flex-wrap: wrap; gap: 16px; }
+    .header-icon { display: flex; align-items: center; justify-content: center; width: 48px; height: 48px; background: #eff6ff; color: #2563eb; border-radius: 12px; box-shadow: 0 4px 6px rgba(37,99,235,0.1); }
+    .btn-back { padding: 10px 16px; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1; border-radius: 10px; text-decoration: none; font-size: 13.5px; font-weight: 600; transition: all 0.2s; }
+    .btn-back:hover { background: #f1f5f9; color: #0f172a; }
+
+    .form-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px 20px; }
+    @media (max-width: 950px) { .form-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 650px) { .form-grid { grid-template-columns: 1fr; } }
+
+    .form-group { display: flex; flex-direction: column; }
+    .form-group label { font-size: 11.5px; font-weight: 800; color: #475569; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px; }
+    .error-text { color: #ef4444; font-size: 12px; margin-top: 6px; font-weight: 600; background: #fef2f2; padding: 6px 8px; border-radius: 6px; border: 1px solid #fecaca; }
+
+    .form-group textarea { grid-column: span 3; }
+    @media (max-width: 950px) { .form-group:has(textarea) { grid-column: span 2; } }
+    @media (max-width: 650px) { .form-group:has(textarea) { grid-column: span 1; } }
+
+    .form-control, input[type="text"], input[type="number"], input[type="date"], select, textarea {
+        width: 100%; padding: 12px 14px; border: 1px solid #cbd5e1; border-radius: 10px; font-size: 14px; color: #0f172a;
+        background-color: #f8fafc; box-sizing: border-box; font-family: inherit; transition: all 0.2s ease;
+    }
+    input[type="text"], input[type="number"], input[type="date"], select { height: 46px; }
+    textarea { min-height: 90px; resize: vertical; }
+    .form-control:focus, input:focus, select:focus, textarea:focus {
+        outline: none; border-color: #2563eb; background-color: #ffffff; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+    }
+
+    .form-actions { display: flex; gap: 16px; margin-top: 40px; padding-top: 30px; border-top: 2px solid #f1f5f9; }
+    .btn-submit { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 14px 28px; background: linear-gradient(135deg, #2563eb, #0ea5e9); color: #ffffff; border: none; border-radius: 12px; font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2); }
+    .btn-submit:hover { box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3); transform: translateY(-1px); }
+    .btn-cancel { display: flex; align-items: center; justify-content: center; padding: 14px 28px; background: #f8fafc; color: #475569; border: 1px solid #cbd5e1; border-radius: 12px; font-size: 15px; font-weight: 600; text-decoration: none; transition: all 0.2s; }
+    .btn-cancel:hover { background: #f1f5f9; color: #0f172a; border-color: #94a3b8; }
+</style>
+{% endblock %}

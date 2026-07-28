@@ -69,6 +69,14 @@ urlpatterns = [
     path("edit-rate/<str:group_id>/", page_access_required("Can_View_Dashboard")(views.edit_rate), name="edit_rate"),
     path("bulk-update/", page_access_required("Can_View_Dashboard")(views.bulk_update_rates), name="bulk_update_rates"),
     path("rate-master-health/", page_access_required("Can_View_Rate_Master_Health")(views.rate_master_health), name="rate_master_health"),
+
+    # Health Rate Master
+    path("health-rate-master/", page_access_required("Can_View_Health_Rate_Master")(views.health_rate_master), name="health_rate_master"),
+    path("health-rate-master/edit/<int:pk>/", page_access_required("Can_View_Health_Rate_Master")(views.health_rate_master_edit), name="health_rate_master_edit"),
+    path("health-rate-master/bulk-update/", page_access_required("Can_View_Health_Rate_Master")(views.health_rate_master_bulk_update), name="health_rate_master_bulk_update"),
+    path("health-rate-master/export/", page_access_required("Can_View_Health_Rate_Master")(views.export_health_rates_xlsx), name="export_health_rates_xlsx"),
+    path("health-payout-rates/", page_access_required("Can_View_Health_Payout_Rates")(views.health_payout_rates), name="health_payout_rates"),
+
     path("motor-payout-rates/", page_access_required("Can_View_Motor_Payout_Rates")(views.motor_payout_rates), name="motor_payout_rates"),
     path("motor-payout-rates/more/", page_access_required("Can_View_Motor_Payout_Rates")(views.motor_payout_rates_more), name="motor_payout_rates_more"),
     path("analysis/", page_access_required("Can_View_Analysis")(views.business_analysis), name="business_analysis"),
@@ -103,14 +111,17 @@ urlpatterns = [
     path("export/", page_access_required("Can_View_Dashboard")(views.export_rates_xlsx), name="export_rates_xlsx"),
     path("export-rto/", page_access_required("Can_View_RTO_Dashboard")(views.export_rto_xlsx), name="export_rto_xlsx"),
     path("export-make-model/", page_access_required("Can_View_Make_Model_Dashboard")(views.export_make_model_xlsx), name="export_make_model_xlsx"),
+    path("export-pincode/", page_access_required("Can_View_Pincode_Dashboard")(views.export_pincode_xlsx), name="export_pincode_xlsx"),
 
     # Master dashboards
     path("rto-dashboard/", page_access_required("Can_View_RTO_Dashboard")(views.rto_dashboard), name="rto_dashboard"),
     path("make-model-dashboard/", page_access_required("Can_View_Make_Model_Dashboard")(views.make_model_dashboard), name="make_model_dashboard"),
+    path("pincode-dashboard/", page_access_required("Can_View_Pincode_Dashboard")(views.pincode_dashboard), name="pincode_dashboard"),
 
     # Master edit routes
     path("rto/edit/<int:pk>/", page_access_required("Can_View_RTO_Dashboard")(views.edit_rto), name="edit_rto"),
     path("make-model/edit/<int:pk>/", page_access_required("Can_View_Make_Model_Dashboard")(views.edit_make_model), name="edit_make_model"),
+    path("pincode/edit/<int:pk>/", page_access_required("Can_View_Pincode_Dashboard")(views.edit_pincode), name="edit_pincode"),
 
     # Password reset — intentionally public (unauthenticated users need this).
     # Uses Django's stock PasswordResetView: the token is emailed to the

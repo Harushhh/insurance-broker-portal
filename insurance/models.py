@@ -225,6 +225,84 @@ class RateMaster(models.Model):
         return f"{self.insurance_company} | {product_name}"
 
 
+# ---------- HEALTH RATE TABLE ----------
+class HealthRateMaster(models.Model):
+    """
+    One row per Health commission-grid rule (from the insurer's commission
+    grid Excel). Unlike RateMaster, rows aren't exploded/grouped behind a
+    separate group table — each imported row already is one rate rule, so
+    it's edited and bulk-updated directly by its own id.
+    """
+    STATUS_CHOICES = [
+        ("ACTIVE", "Active"),
+        ("INACTIVE", "Inactive"),
+    ]
+
+    IS_DELETED_CHOICES = [
+        ("YES", "Yes"),
+        ("NO", "No"),
+    ]
+
+    insurance_company = models.CharField(max_length=255, db_index=True)
+    product_name = models.CharField(max_length=50, db_index=True, blank=True, null=True)
+    policy_category = models.CharField(max_length=20, blank=True, null=True)
+    plan_names = models.TextField(blank=True, null=True)
+    business_type = models.CharField(max_length=20, blank=True, null=True)
+
+    min_deductible = models.FloatField(null=True, blank=True)
+    max_deductible = models.FloatField(null=True, blank=True)
+    min_sum_insured = models.FloatField(null=True, blank=True)
+    max_sum_insured = models.FloatField(null=True, blank=True)
+    min_age = models.FloatField(null=True, blank=True)
+    max_age = models.FloatField(null=True, blank=True)
+
+    # Source grid's "pincode" column — in practice a zone/segment code
+    # ('All', 'HDFC_Preferred', 'RGI_Preferred_1', ...), not a literal pincode.
+    pincode_zone = models.CharField(max_length=50, blank=True, null=True)
+
+    payin_rate = models.FloatField(null=True, blank=True)
+    one_year_rate = models.FloatField(null=True, blank=True)
+    multi_year_2_rate = models.FloatField(null=True, blank=True)
+    multi_year_3_rate = models.FloatField(null=True, blank=True)
+    multi_year_4_rate = models.FloatField(null=True, blank=True)
+    multi_year_5_rate = models.FloatField(null=True, blank=True)
+
+    from_date = models.DateField(null=True, blank=True)
+    to_date = models.DateField(null=True, blank=True)
+
+    status = models.CharField(
+        max_length=20,
+        default="ACTIVE",
+        choices=STATUS_CHOICES,
+        db_index=True,
+    )
+    is_deleted = models.CharField(
+        max_length=10,
+        default="NO",
+        choices=IS_DELETED_CHOICES,
+        db_index=True,
+    )
+    remarks = models.TextField(null=True, blank=True)
+
+    # Hash of the identity fields (everything except rates/status/remarks) as
+    # they appeared in the source grid row. Lets the import command re-run
+    # against an updated grid file and update rates in place via
+    # update_or_create, instead of duplicating every row on each re-import.
+    source_row_hash = models.CharField(max_length=64, blank=True, null=True, db_index=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-id"]
+        indexes = [
+            models.Index(fields=["insurance_company", "product_name"], name="healthrate_insurer_prod_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.insurance_company} | {self.product_name or 'No Product'}"
+
+
 class RTOMaster(models.Model):
     rto_name = models.CharField(max_length=100, unique=True)
     rto_cluster = models.TextField(blank=True, null=True)
@@ -245,6 +323,24 @@ class MakeModelMaster(models.Model):
 
     def __str__(self):
         return self.make_model_name
+
+
+class PincodeMaster(models.Model):
+    """
+    Health's equivalent of RTOMaster: maps a zone label — a HealthRateMaster.
+    pincode_zone value like 'HDFC_Preferred' — to the actual comma-separated
+    pincodes that fall in it. Lets a raw pincode search resolve to the right
+    zone(s), the same way an RTO code search resolves through RTOMaster's
+    rto_cluster to the group name stored on RateMaster.new_rto_list.
+    """
+    pincode_zone = models.CharField(max_length=100, unique=True)
+    pincode_cluster = models.TextField(blank=True, null=True)
+
+    class Meta:
+        ordering = ["pincode_zone"]
+
+    def __str__(self):
+        return self.pincode_zone
 
 
 class UserProfile(models.Model):
@@ -554,6 +650,12 @@ class LockedPolicy(models.Model):
 # SUPPORT TICKET SYSTEM
 # =========================================================
 class SupportTicket(models.Model):
+    CATEGORY_CHOICES = [
+        ("MOTOR", "Motor"),
+        ("HEALTH", "Health"),
+        ("LIFE", "Life"),
+    ]
+
     user = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -564,6 +666,7 @@ class SupportTicket(models.Model):
     remarks = models.TextField()
     form_payload = models.JSONField(default=dict, blank=True, null=True)
     status = models.CharField(max_length=20, default="OPEN")
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="MOTOR", db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

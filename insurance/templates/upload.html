@@ -74,7 +74,7 @@
         <h2 class="mb-1" style="font-weight: 800; color: #0f172a; letter-spacing: -0.02em; font-size: 26px;">
             Import Data
         </h2>
-        <p class="text-muted mb-0" style="font-size: 14px;">Upload CSV files to update Rate Master, RTO Master, or Make Model Master.</p>
+        <p class="text-muted mb-0" style="font-size: 14px;">Upload CSV files to update Rate Master, RTO Master, Make Model Master, Health Rate Master, or Pincode Master.</p>
     </div>
     <div>
         <a href="{% url 'dashboard' %}" class="btn-soft bg-white">
@@ -92,9 +92,15 @@
                 <div class="mb-4">
                     <label class="text-overline d-block mb-2">Target Database Table</label>
                     <select id="uploadTypeSelect" name="upload_type" class="form-select-premium" required>
-                        <option value="rate_master">RateMaster (Rates CSV)</option>
-                        <option value="rto_master">RTO Master (Clusters CSV)</option>
-                        <option value="make_model_master">Make Model Master (Clusters CSV)</option>
+                        <optgroup label="Motor">
+                            <option value="rate_master">RateMaster (Rates CSV)</option>
+                            <option value="rto_master">RTO Master (Clusters CSV)</option>
+                            <option value="make_model_master">Make Model Master (Clusters CSV)</option>
+                        </optgroup>
+                        <optgroup label="Health">
+                            <option value="health_rate_master">Health Rate Master (Rates CSV)</option>
+                            <option value="pincode_master">Pincode Master (Clusters CSV)</option>
+                        </optgroup>
                     </select>
                 </div>
 
@@ -131,6 +137,7 @@
                 <li><strong>Format:</strong> Only valid <code>.csv</code> (Comma Separated Values) files are supported.</li>
                 <li><strong>Headers:</strong> The first row must contain the exact column headers expected by the system. Do not rename columns.</li>
                 <li><strong>Rate Master:</strong> Ensure all RTO strings and Make/Model strings match exactly with the existing master data to prevent validation rejections.</li>
+                <li><strong>Health Rate Master:</strong> Columns must match the field names shown on the Health Rate Master page (e.g. <code>insurance_company</code>, <code>product_name</code>, <code>min_sum_insured</code>, <code>payin_rate</code>...). Dates accept <code>DD/MM/YYYY</code> or <code>YYYY-MM-DD</code>; rate columns are plain numbers (<code>33.90</code>, not <code>"33.90%"</code>). Re-uploading the same rule (same insurer/product/category/business type/bands/zone/plan list/dates) updates its rates in place instead of duplicating it.</li>
                 <li><strong>Validation:</strong> The system will automatically skip duplicate records based on your defined hash keys.</li>
             </ul>
         </div>

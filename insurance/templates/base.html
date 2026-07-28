@@ -337,13 +337,20 @@
                 </li>
                 {% endif %}
 
-                {% if 'Can_View_Motor_Payout_Rates' in nav_pages or 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Locked_Policies' in nav_pages or 'Can_View_Motor_Points_Logs' in nav_pages or 'Can_View_Rate_Master_Health' in nav_pages %}
+                {% if 'Can_View_Motor_Payout_Rates' in nav_pages or 'Can_View_Health_Payout_Rates' in nav_pages or 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Locked_Policies' in nav_pages or 'Can_View_Motor_Points_Logs' in nav_pages or 'Can_View_Rate_Master_Health' in nav_pages %}
                 <li class="nav-title">Rates & Policies</li>
                 {% endif %}
                 {% if 'Can_View_Motor_Payout_Rates' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'motor_payout_rates' %}" class="nav-link {% if request.path == '/motor-payout-rates/' %}active{% endif %}">
                         <i class="bi bi-calculator-fill"></i> Quote Simulator
+                    </a>
+                </li>
+                {% endif %}
+                {% if 'Can_View_Health_Payout_Rates' in nav_pages %}
+                <li class="nav-item">
+                    <a href="{% url 'health_payout_rates' %}" class="nav-link {% if request.path == '/health-payout-rates/' %}active{% endif %}">
+                        <i class="bi bi-calculator"></i> Health Quote Simulator
                     </a>
                 </li>
                 {% endif %}
@@ -408,13 +415,20 @@
                 </li>
                 {% endif %}
 
-                {% if 'Can_View_Dashboard' in nav_pages or 'Can_View_RTO_Dashboard' in nav_pages or 'Can_View_Make_Model_Dashboard' in nav_pages or 'Can_Upload_CSV' in nav_pages %}
+                {% if 'Can_View_Dashboard' in nav_pages or 'Can_View_RTO_Dashboard' in nav_pages or 'Can_View_Make_Model_Dashboard' in nav_pages or 'Can_View_Pincode_Dashboard' in nav_pages or 'Can_Upload_CSV' in nav_pages %}
                 <li class="nav-title">Master Data</li>
                 {% endif %}
                 {% if 'Can_View_Dashboard' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'dashboard' %}" class="nav-link {% if request.path == '/dashboard/' %}active{% endif %}">
                         <i class="bi bi-table"></i> Rate Master Matrix
+                    </a>
+                </li>
+                {% endif %}
+                {% if 'Can_View_Health_Rate_Master' in nav_pages %}
+                <li class="nav-item">
+                    <a href="{% url 'health_rate_master' %}" class="nav-link {% if request.path == '/health-rate-master/' %}active{% endif %}">
+                        <i class="bi bi-heart-pulse"></i> Health Rate Master
                     </a>
                 </li>
                 {% endif %}
@@ -429,6 +443,13 @@
                 <li class="nav-item">
                     <a href="{% url 'make_model_dashboard' %}" class="nav-link {% if request.path == '/make-model-dashboard/' %}active{% endif %}">
                         <i class="bi bi-car-front-fill"></i> Make/Model Master
+                    </a>
+                </li>
+                {% endif %}
+                {% if 'Can_View_Pincode_Dashboard' in nav_pages %}
+                <li class="nav-item">
+                    <a href="{% url 'pincode_dashboard' %}" class="nav-link {% if request.path == '/pincode-dashboard/' %}active{% endif %}">
+                        <i class="bi bi-pin-map-fill"></i> Pincode Dashboard
                     </a>
                 </li>
                 {% endif %}

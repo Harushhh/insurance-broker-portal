@@ -1,8 +1,10 @@
 from django.contrib import admin
 from .models import (
     RateMaster,
+    HealthRateMaster,
     RTOMaster,
     MakeModelMaster,
+    PincodeMaster,
     ExtractionField,
     FieldSynonym,
     PolicyDocumentUpload,
@@ -85,11 +87,59 @@ class RateMasterAdmin(admin.ModelAdmin):
     ordering = ("-id",)
 
 
+@admin.register(HealthRateMaster)
+class HealthRateMasterAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "insurance_company",
+        "product_name",
+        "policy_category",
+        "business_type",
+        "min_sum_insured",
+        "max_sum_insured",
+        "min_deductible",
+        "max_deductible",
+        "min_age",
+        "max_age",
+        "pincode_zone",
+        "payin_rate",
+        "one_year_rate",
+        "multi_year_2_rate",
+        "multi_year_3_rate",
+        "multi_year_4_rate",
+        "multi_year_5_rate",
+        "from_date",
+        "to_date",
+        "status",
+        "is_deleted",
+        "created_at",
+    )
+    search_fields = ("insurance_company", "plan_names", "remarks")
+    list_filter = (
+        "status",
+        "is_deleted",
+        "insurance_company",
+        "product_name",
+        "policy_category",
+        "business_type",
+        "pincode_zone",
+        "created_at",
+    )
+    ordering = ("-id",)
+
+
 @admin.register(RTOMaster)
 class RTOMasterAdmin(admin.ModelAdmin):
     list_display = ("id", "rto_name", "rto_cluster")
     search_fields = ("rto_name", "rto_cluster")
     ordering = ("rto_name",)
+
+
+@admin.register(PincodeMaster)
+class PincodeMasterAdmin(admin.ModelAdmin):
+    list_display = ("id", "pincode_zone", "pincode_cluster")
+    search_fields = ("pincode_zone", "pincode_cluster")
+    ordering = ("pincode_zone",)
 
 
 @admin.register(MakeModelMaster)

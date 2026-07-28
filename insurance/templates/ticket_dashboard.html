@@ -200,6 +200,46 @@
   .status-card.card-followup { color: #d97706; }
   .status-card.card-closed { color: #64748b; }
   .status-card.active .count { color: currentColor; }
+
+  /* Category label pill (shown per-row) */
+  .category-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .category-motor { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+  .category-health { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+  .category-life { background: #f5f3ff; color: #7c3aed; border: 1px solid #ddd6fe; }
+
+  /* Category filter chips (in the table head) */
+  .category-filter-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .category-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    border: 1.5px solid #e2e8f0;
+    background: #fff;
+    color: #64748b;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+  }
+  .category-chip:hover { border-color: #cbd5e1; color: #334155; }
+  .category-chip.chip-all.active { color: #334155; background: #f1f5f9; border-color: #cbd5e1; }
+  .category-chip.chip-motor.active { color: #2563eb; background: #eff6ff; border-color: #bfdbfe; }
+  .category-chip.chip-health.active { color: #dc2626; background: #fef2f2; border-color: #fecaca; }
+  .category-chip.chip-life.active { color: #7c3aed; background: #f5f3ff; border-color: #ddd6fe; }
 </style>
 
 <div class="page-card">
@@ -232,10 +272,16 @@
   </div>
 
   <div class="table-card">
-    <div class="table-head">
+    <div class="table-head d-flex justify-content-between align-items-center flex-wrap gap-3">
       <div>
         <div class="table-title">Ticket Records</div>
         <div class="table-sub">Showing captured search parameters and user remarks.</div>
+      </div>
+      <div class="category-filter-row" id="categoryFilterRow">
+        <button type="button" class="category-chip chip-all active" data-category-filter="ALL">All ({{ total_tickets }})</button>
+        <button type="button" class="category-chip chip-motor" data-category-filter="MOTOR">🚗 Motor ({{ category_counts.MOTOR }})</button>
+        <button type="button" class="category-chip chip-health" data-category-filter="HEALTH">❤️ Health ({{ category_counts.HEALTH }})</button>
+        <button type="button" class="category-chip chip-life" data-category-filter="LIFE">🛡️ Life ({{ category_counts.LIFE }})</button>
       </div>
     </div>
 
@@ -244,6 +290,7 @@
         <thead>
           <tr>
             <th>ID</th>
+            <th>Category</th>
             <th>Date & Time</th>
             <th>Raised By</th>
             <th>Remarks</th>
@@ -253,8 +300,17 @@
         </thead>
         <tbody>
           {% for ticket in tickets %}
-          <tr data-status="{{ ticket.status }}">
+          <tr data-status="{{ ticket.status }}" data-category="{{ ticket.category }}">
             <td><strong>#{{ ticket.id }}</strong></td>
+            <td>
+              {% if ticket.category == 'HEALTH' %}
+                <span class="category-pill category-health">❤️ Health</span>
+              {% elif ticket.category == 'LIFE' %}
+                <span class="category-pill category-life">🛡️ Life</span>
+              {% else %}
+                <span class="category-pill category-motor">🚗 Motor</span>
+              {% endif %}
+            </td>
             <td style="white-space: nowrap;">{{ ticket.created_at|date:"d M Y, h:i A" }}</td>
             <td>{{ ticket.user.username|default:"System" }}</td>
             <td style="max-width: 300px; white-space: normal; line-height: 1.5; color: #334155;">
@@ -300,14 +356,14 @@
           </tr>
           {% empty %}
           <tr>
-            <td colspan="6" class="empty-row">
+            <td colspan="7" class="empty-row">
               <span style="font-size: 24px; display:block; margin-bottom: 8px;">🎉</span>
               No tickets have been raised yet.
             </td>
           </tr>
           {% endfor %}
           <tr id="noFilterMatchRow" style="display:none;">
-            <td colspan="6" class="empty-row">No tickets with this status.</td>
+            <td colspan="7" class="empty-row">No tickets match these filters.</td>
           </tr>
         </tbody>
       </table>
@@ -317,14 +373,20 @@
 
 <script>
 (function () {
-  var cards = document.querySelectorAll('.status-card');
+  var statusCards = document.querySelectorAll('.status-card');
+  var categoryChips = document.querySelectorAll('.category-chip');
   var rows = document.querySelectorAll('.table-modern tbody tr[data-status]');
   var noMatchRow = document.getElementById('noFilterMatchRow');
 
-  function applyFilter(status) {
+  var activeStatus = 'ALL';
+  var activeCategory = 'ALL';
+
+  function applyFilters() {
     var visibleCount = 0;
     rows.forEach(function (row) {
-      var show = (status === 'ALL' || row.getAttribute('data-status') === status);
+      var statusOk = (activeStatus === 'ALL' || row.getAttribute('data-status') === activeStatus);
+      var categoryOk = (activeCategory === 'ALL' || row.getAttribute('data-category') === activeCategory);
+      var show = statusOk && categoryOk;
       row.style.display = show ? '' : 'none';
       if (show) visibleCount++;
     });
@@ -333,11 +395,21 @@
     }
   }
 
-  cards.forEach(function (card) {
+  statusCards.forEach(function (card) {
     card.addEventListener('click', function () {
-      cards.forEach(function (c) { c.classList.remove('active'); });
+      statusCards.forEach(function (c) { c.classList.remove('active'); });
       card.classList.add('active');
-      applyFilter(card.getAttribute('data-status-filter'));
+      activeStatus = card.getAttribute('data-status-filter');
+      applyFilters();
+    });
+  });
+
+  categoryChips.forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      categoryChips.forEach(function (c) { c.classList.remove('active'); });
+      chip.classList.add('active');
+      activeCategory = chip.getAttribute('data-category-filter');
+      applyFilters();
     });
   });
 })();

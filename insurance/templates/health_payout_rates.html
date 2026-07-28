@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+{% load custom_filters %}
+{% block title %}Health Payout Rates - Insurance Portal{% endblock %}
+
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+<style>
+    :root {
+        --tb-font: 13px;
+        --tb-pad: 12px 16px;
+        --radius-card: 24px;
+        --radius-inner: 16px;
+        --radius-input: 12px;
+        --input-height: 48px;
+    }
+
+    .master-card {
+        background: #ffffff;
+        border-radius: var(--radius-card);
+        box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
+        padding: 32px;
+        margin-bottom: 24px;
+        border: 1px solid #f1f5f9;
+    }
+
+    .page-title { font-size: 28px; font-weight: 800; color: #0f172a; margin-bottom: 8px; letter-spacing: -0.02em; }
+    .page-subtitle { font-size: 15px; color: #64748b; margin-bottom: 24px; font-weight: 500; }
+
+    .inner-form-box { border: 1px solid #e0e7ff; border-radius: var(--radius-inner); padding: 24px; background: #ffffff; }
+    .inner-form-header { font-size: 16px; font-weight: 700; color: #2563eb; margin-bottom: 24px; display: flex; align-items: center; gap: 8px; }
+
+    .text-overline { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; margin-bottom: 8px; display: block; }
+    .form-control-saas, .form-select-saas {
+        border: 1px solid #cbd5e1; border-radius: var(--radius-input); padding: 10px 16px; font-size: 14px; color: #334155;
+        background-color: #ffffff; transition: all 0.2s ease; height: var(--input-height); width: 100%; font-weight: 500;
+    }
+    .form-control-saas::placeholder { color: #94a3b8; font-weight: 400; }
+    .form-select-saas { cursor: pointer; appearance: auto; color: #64748b; }
+    .form-control-saas:focus, .form-select-saas:focus {
+        outline: none; border-color: #3b82f6; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
+    }
+
+    .segmented-control {
+        display: flex; width: 100%; height: var(--input-height); background: #f8fafc; border: 1px solid #e2e8f0;
+        padding: 4px; border-radius: var(--radius-input); box-sizing: border-box;
+    }
+    .segmented-control label { flex: 1; margin: 0; position: relative; cursor: pointer; }
+    .segmented-control input[type="radio"] { position: absolute; opacity: 0; }
+    .segmented-control span {
+        display: flex; align-items: center; justify-content: center; height: 100%; width: 100%;
+        font-size: 13px; font-weight: 700; color: #64748b; border-radius: 8px; transition: all 0.2s ease;
+    }
+    .segmented-control input[type="radio"]:checked + span {
+        background: #ffffff; color: #2563eb; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    }
+
+    .select2-container--default .select2-selection--single {
+        border: 1px solid #cbd5e1; border-radius: var(--radius-input); height: var(--input-height); display: flex; align-items: center; background: #fff;
+    }
+    .select2-container--default .select2-selection--single .select2-selection__rendered { color: #64748b; font-size: 14px; font-weight: 500; padding-left: 16px; }
+    .select2-container--default .select2-selection--single .select2-selection__arrow { height: calc(var(--input-height) - 2px); right: 10px; }
+    .select2-container--default .select2-selection--multiple {
+        border: 1px solid #cbd5e1; border-radius: var(--radius-input); min-height: var(--input-height); padding: 2px 8px; background: #fff;
+    }
+    .select2-dropdown { border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border-top: none; padding: 4px; }
+    .select2-results__option { border-radius: 8px; margin-bottom: 2px; font-size: 14px; }
+
+    .action-bar { border-top: 1px solid #f1f5f9; padding-top: 24px; margin-top: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+    .btn-gradient { background: #2563eb; color: white; border: none; border-radius: 10px; padding: 0 28px; font-weight: 600; font-size: 14px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2); height: 44px; display: inline-flex; align-items: center;}
+    .btn-gradient:hover { background: #1d4ed8; transform: translateY(-1px); color: white; }
+    .btn-clear { color: #64748b; font-weight: 600; font-size: 14px; text-decoration: none; padding: 0 16px; display: inline-flex; align-items: center; height: 44px; transition: color 0.2s; }
+    .btn-clear:hover { color: #0f172a; }
+
+    .table-responsive-custom { max-height: 60vh; overflow-y: auto; overflow-x: auto; border: 1px solid #e2e8f0; border-radius: var(--radius-inner); margin-top: 24px; }
+    .table-modern { width: 100%; border-collapse: separate; border-spacing: 0; min-width: max-content; }
+    .table-modern th { background: #f8fafc; color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 800; padding: 16px 24px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 10; white-space: nowrap; }
+    .table-modern td { padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; border-bottom: 1px solid #f1f5f9; vertical-align: middle; white-space: nowrap; font-weight: 500;}
+    .table-modern tbody tr:hover td { background-color: #f8fafc; }
+    .cell-wrap { white-space: normal !important; word-wrap: break-word; min-width: 220px; max-width: 360px; line-height: 1.5; }
+    .rate-highlight { font-weight: 800; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 4px 10px; display: inline-block; }
+</style>
+
+<div class="master-card">
+
+    <h1 class="page-title">Health Points Checker</h1>
+    <p class="page-subtitle">Enter the customer's details below to find matching Health payout rates.</p>
+
+    <div class="inner-form-box">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <div class="inner-form-header mb-0">
+                <i class="bi bi-search"></i> Enter details below to check eligibility:
+            </div>
+            <button type="button" class="btn btn-warning btn-sm shadow-sm" onclick="openTicketModal()">
+                <i class="bi bi-exclamation-triangle"></i> Raise Issue / Ticket
+            </button>
+        </div>
+
+        <div id="ticketModal" class="modal" tabindex="-1" style="display: none; background: rgba(0,0,0,0.6); position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 9999; align-items: center; justify-content: center;">
+            <div class="modal-dialog" style="background: white; border-radius: 8px; padding: 20px; width: 90%; max-width: 500px;">
+                <div class="modal-content border-0">
+                    <div class="modal-header border-0 pb-0 d-flex justify-content-between align-items-center mb-2">
+                        <h5 class="modal-title fw-bold">Raise a Ticket</h5>
+                        <button type="button" class="btn-close" onclick="closeTicketModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer;">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="alert alert-info py-2 px-3 small border-0">
+                            <i class="bi bi-info-circle"></i> The parameters currently entered in the search form will automatically be attached to this ticket.
+                        </div>
+                        <div class="mb-3">
+                            <label for="ticketRemarks" class="form-label fw-bold">Remarks / Issue Details</label>
+                            <textarea id="ticketRemarks" class="form-control" rows="4" placeholder="Please explain what is missing or incorrect with the current rates..."></textarea>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-0 pt-0 d-flex justify-content-end gap-2">
+                        <button type="button" class="btn btn-secondary" onclick="closeTicketModal()">Cancel</button>
+                        <button type="button" class="btn btn-primary" onclick="submitTicket()">Submit Ticket</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <form method="GET" id="healthCheckForm">
+            <div class="row g-4">
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Product</label>
+                    <select name="product_name" class="form-select-saas select2-init">
+                        <option value="">Select...</option>
+                        {% for p in product_list %}
+                            <option value="{{ p }}" {% if selected.product_name == p %}selected{% endif %}>{{ p }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Sub Product</label>
+                    <select name="business_type" class="form-select-saas select2-init">
+                        <option value="">Select...</option>
+                        {% for b in business_type_list %}
+                            <option value="{{ b }}" {% if selected.business_type == b %}selected{% endif %}>{{ b }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Plan Type</label>
+                    <select name="policy_category" class="form-select-saas select2-init">
+                        <option value="">Select...</option>
+                        {% for c in category_list %}
+                            <option value="{{ c }}" {% if selected.policy_category == c %}selected{% endif %}>{{ c }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Sum Assured</label>
+                    <select name="sum_insured" class="form-select-saas select2-init">
+                        <option value="">Select...</option>
+                        {% for amount, label in sum_insured_options %}
+                            <option value="{{ amount }}" {% if selected.sum_insured == amount|stringformat:"s" %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Eldest Member Age</label>
+                    <input type="number" name="age" min="0" max="100" placeholder="e.g. 48" value="{{ selected.age|default_if_none:'' }}" class="form-control-saas">
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Pincode</label>
+                    <input type="text" name="pincode" placeholder="e.g. 400095" value="{{ selected.pincode|default_if_none:'' }}" class="form-control-saas">
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Insurer</label>
+                    <select name="insurance_company" id="insurerSelect" multiple="multiple" class="form-select-saas w-100">
+                        {% for c in insurer_list %}
+                            <option value="{{ c }}" {% if c in selected.insurance_companies %}selected{% endif %}>{{ c }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-4 col-lg-3">
+                    <label class="text-overline">Date</label>
+                    <input type="date" name="target_date" value="{{ selected.target_date }}" class="form-control-saas">
+                </div>
+
+                <div class="col-12">
+                    <label class="text-overline">Policy Term</label>
+                    <div class="segmented-control">
+                        {% for term in "12345" %}
+                        <label>
+                            <input type="radio" name="policy_term" value="{{ term }}" {% if selected.policy_term == term %}checked{% endif %}>
+                            <span>{{ term }} Yr Policy</span>
+                        </label>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="action-bar">
+                <div class="d-flex align-items-center">
+                    <button class="btn-gradient me-3" type="submit">Check Eligibility</button>
+                    <a class="btn-clear" href="{% url 'health_payout_rates' %}">Clear All</a>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <div class="mt-4 pt-2">
+        {% if has_searched %}
+            <h6 class="fw-bold" style="color: #0f172a; font-size: 15px;">
+                Valid Matches Found: <span style="color: #2563eb;">{{ total_found }}</span>
+                {% if has_more %}<span class="text-muted fw-normal" style="font-size: 13px;">(showing first {{ max_results }})</span>{% endif %}
+            </h6>
+
+            {% if data %}
+                <div class="table-responsive-custom">
+                    <table class="table-modern">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Insurer</th>
+                                <th>Applicable Rate</th>
+                                <th>Payout Type</th>
+                                <th class="cell-wrap">Plans</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in data %}
+                            <tr>
+                                <td style="font-weight: 700; color: #0f172a;">h-{{ row.id }}</td>
+                                <td>{{ row.insurance_company }}</td>
+                                <td><span class="rate-highlight">{{ row.applicable_rate|display_value }}%</span></td>
+                                <td>NET 1 Year</td>
+                                <td class="cell-wrap">{{ row.plan_names|default:"-" }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="p-5 text-center mt-3" style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: var(--radius-inner);">
+                    <i class="bi bi-clipboard-x text-muted opacity-50 d-block mb-3" style="font-size: 48px;"></i>
+                    <h5 class="fw-bold text-slate-800">No eligible payout records found.</h5>
+                    <p class="text-muted mb-0">Try adjusting your filters above to find a match.</p>
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="p-5 text-center mt-3" style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: var(--radius-inner);">
+                <i class="bi bi-search text-muted opacity-50 d-block mb-3" style="font-size: 48px;"></i>
+                <h5 class="fw-bold text-slate-800">Enter customer details to check eligibility.</h5>
+                <p class="text-muted mb-0">Fill in the form above and click "Check Eligibility" to find matching payout records.</p>
+            </div>
+        {% endif %}
+    </div>
+
+</div>
+
+<script>
+    $(document).ready(function() {
+        $('.select2-init').select2({ width: '100%', placeholder: "Select..." });
+        $('#insurerSelect').select2({ width: '100%', placeholder: "All Insurers...", allowClear: true, closeOnSelect: false });
+    });
+</script>
+
+<script>
+    // --- TICKETING SYSTEM LOGIC (same pattern as Motor's Quote Simulator) ---
+    function openTicketModal() {
+        document.getElementById('ticketModal').style.display = 'flex';
+    }
+
+    function closeTicketModal() {
+        document.getElementById('ticketModal').style.display = 'none';
+        document.getElementById('ticketRemarks').value = '';
+    }
+
+    async function submitTicket() {
+        const remarks = document.getElementById('ticketRemarks').value.trim();
+        if (!remarks) {
+            alert('Please enter your remarks before submitting.');
+            return;
+        }
+
+        const formElement = document.getElementById('healthCheckForm');
+        const formData = new FormData(formElement);
+        const formPayload = {};
+
+        const SUM_INSURED_LABELS = {
+            {% for amount, label in sum_insured_options %}'{{ amount }}': '{{ label|escapejs }}',{% endfor %}
+        };
+
+        const formatKey = (str) => {
+            const labels = {
+                'product_name': 'Product',
+                'business_type': 'Sub Product',
+                'policy_category': 'Plan Type',
+                'sum_insured': 'Sum Assured',
+                'age': 'Eldest Member Age',
+                'pincode': 'Pincode',
+                'insurance_company': 'Insurer',
+                'target_date': 'Date',
+                'policy_term': 'Policy Term',
+            };
+            return labels[str] || str.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+        };
+
+        // Multiple entries can share the same key (Insurer is a multi-select),
+        // so collect into a comma-joined string instead of letting the last
+        // value silently win.
+        const collected = {};
+        for (let [key, val] of formData.entries()) {
+            if (key === 'csrfmiddlewaretoken') continue;
+            if (!val || !val.trim()) continue;
+
+            let finalValue = val.trim();
+            if (key === 'sum_insured' && SUM_INSURED_LABELS[finalValue]) {
+                finalValue = SUM_INSURED_LABELS[finalValue];
+            }
+            if (key === 'policy_term') {
+                finalValue = finalValue + ' Yr Policy';
+            }
+
+            if (collected[key]) {
+                collected[key] += ', ' + finalValue;
+            } else {
+                collected[key] = finalValue;
+            }
+        }
+        for (let key in collected) {
+            formPayload[formatKey(key)] = collected[key];
+        }
+
+        try {
+            const response = await fetch('/api/create-ticket/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': '{{ csrf_token }}'
+                },
+                body: JSON.stringify({
+                    remarks: remarks,
+                    form_payload: formPayload,
+                    category: 'HEALTH'
+                })
+            });
+
+            const result = await response.json();
+            if (result.success) {
+                alert('Ticket raised successfully! It will now appear in your Support Tickets dashboard.');
+                closeTicketModal();
+            } else {
+                alert('Error: ' + result.message);
+            }
+        } catch (error) {
+            alert('A network error occurred while submitting the ticket. Please try again.');
+            console.error(error);
+        }
+    }
+</script>
+{% endblock %}

@@ -6,6 +6,7 @@ from django.template.loader import render_to_string
 from django.http import HttpResponse, JsonResponse
 from django.db.models import Q, F, Count, Sum, Case, When, Value, CharField
 from django.core.mail import send_mail
+from django.core.paginator import Paginator
 from django.conf import settings
 from django.db import transaction
 from django import forms
@@ -33,18 +34,25 @@ from .serializers import RateMasterSerializer
 # -----------------------------
 
 from .models import (
-    RTOMaster, MakeModelMaster, RateMaster, YesNoNAMaster,
+    RTOMaster, MakeModelMaster, PincodeMaster, RateMaster, YesNoNAMaster,
     ProductMaster, SubProductMaster, PolicyTypeMaster,
     FuelTypeMaster, MakeModelClassMaster,
     RateGroup, AuditLog, GridDocument, UserProfile,
     ExtractionField, FieldSynonym, PolicyDocumentUpload, PolicyMISRecord,
-    LockedPolicy, SupportTicket, MISFile, MappingConfiguration
+    LockedPolicy, SupportTicket, MISFile, MappingConfiguration,
+    HealthRateMaster,
 )
 
 # Import our Gemini AI utility and background logic engines
 from .utils import extract_data_with_gemini
 from .forms import ExtractionFieldForm, MISUploadForm, MappingConfigurationForm
 from .tasks import process_mis_mapping_task, process_policy_document_task
+from .health_grid_utils import (
+    parse_number as parse_health_number,
+    parse_percent as parse_health_percent,
+    parse_grid_date as parse_health_date,
+    upsert_health_rate_row,
+)
 
 logger = logging.getLogger("security")
 
@@ -73,6 +81,9 @@ PAGE_GROUPS = [
     "Can_View_MIS_Register",
     "Can_View_MIS_Payout_Engine",
     "Can_View_Rate_Master_Health",
+    "Can_View_Health_Rate_Master",
+    "Can_View_Pincode_Dashboard",
+    "Can_View_Health_Payout_Rates",
 ]
 
 # =========================================================
@@ -478,6 +489,11 @@ class MakeModelForm(forms.ModelForm):
         model = MakeModelMaster
         fields = ["make_model_name", "make_model_cluster"]
 
+class PincodeForm(forms.ModelForm):
+    class Meta:
+        model = PincodeMaster
+        fields = ["pincode_zone", "pincode_cluster"]
+
 class RateForm(forms.ModelForm):
     product = forms.ModelChoiceField(
         queryset=ProductMaster.objects.none(),
@@ -699,6 +715,18 @@ def api_upload_chunk(request):
                         )
                         inserted += 1
 
+                elif target_table == 'pincode_master':
+                    for row in rows:
+                        pincode_zone = (row.get("pincode_zone") or "").strip()
+                        pincode_cluster = (row.get("pincode_cluster") or "").strip()
+                        if not pincode_zone:
+                            raise ValueError("pincode_zone is blank")
+                        PincodeMaster.objects.update_or_create(
+                            pincode_zone=pincode_zone,
+                            defaults={"pincode_cluster": pincode_cluster or None}
+                        )
+                        inserted += 1
+
                 elif target_table == 'rate_master':
                     valid_rtos = {str(rto).lower() for rto in RTOMaster.objects.values_list("rto_name", flat=True) if rto}
                     valid_makes = {str(make).lower() for make in MakeModelMaster.objects.values_list("make_model_name", flat=True) if make}
@@ -877,13 +905,64 @@ def api_upload_chunk(request):
                     RateMaster.objects.bulk_create(instances_to_create, ignore_conflicts=True)
                     inserted = len(instances_to_create)
 
+                elif target_table == 'health_rate_master':
+                    for row in rows:
+                        insurance_company = (row.get("insurance_company") or "").strip()
+                        if not insurance_company:
+                            raise ValueError("insurance_company is blank")
+
+                        cleaned = {
+                            "insurance_company": insurance_company,
+                            "product_name": (row.get("product_name") or "").strip() or None,
+                            "policy_category": (row.get("policy_category") or "").strip() or None,
+                            "plan_names": (row.get("plan_names") or "").strip() or None,
+                            "business_type": (row.get("business_type") or "").strip() or None,
+                            "min_deductible": parse_health_number(row.get("min_deductible")),
+                            "max_deductible": parse_health_number(row.get("max_deductible")),
+                            "min_sum_insured": parse_health_number(row.get("min_sum_insured")),
+                            "max_sum_insured": parse_health_number(row.get("max_sum_insured")),
+                            "min_age": parse_health_number(row.get("min_age")),
+                            "max_age": parse_health_number(row.get("max_age")),
+                            "pincode_zone": (row.get("pincode_zone") or "").strip() or None,
+                            "from_date": parse_health_date(row.get("from_date")),
+                            "to_date": parse_health_date(row.get("to_date")),
+                            "payin_rate": parse_health_percent(row.get("payin_rate")),
+                            "one_year_rate": parse_health_percent(row.get("one_year_rate")),
+                            "multi_year_2_rate": parse_health_percent(row.get("multi_year_2_rate")),
+                            "multi_year_3_rate": parse_health_percent(row.get("multi_year_3_rate")),
+                            "multi_year_4_rate": parse_health_percent(row.get("multi_year_4_rate")),
+                            "multi_year_5_rate": parse_health_percent(row.get("multi_year_5_rate")),
+                        }
+
+                        # status/is_deleted/remarks are optional columns — only
+                        # touch them on update if this row actually provided a
+                        # value, so a re-upload that omits them doesn't clobber
+                        # manual edits made afterwards in the UI (upsert_health_
+                        # rate_row only defaults them ACTIVE/NO on creation).
+                        status_val = (row.get("status") or "").strip().upper()
+                        if status_val:
+                            if status_val not in dict(HealthRateMaster.STATUS_CHOICES):
+                                raise ValueError(f"'{status_val}' is not a valid Status (ACTIVE or INACTIVE).")
+                            cleaned["status"] = status_val
+                        is_deleted_val = (row.get("is_deleted") or "").strip().upper()
+                        if is_deleted_val:
+                            if is_deleted_val not in dict(HealthRateMaster.IS_DELETED_CHOICES):
+                                raise ValueError(f"'{is_deleted_val}' is not a valid Is Deleted value (YES or NO).")
+                            cleaned["is_deleted"] = is_deleted_val
+                        remarks_val = (row.get("remarks") or "").strip()
+                        if remarks_val:
+                            cleaned["remarks"] = remarks_val
+
+                        upsert_health_rate_row(cleaned)
+                        inserted += 1
+
                 else:
                     return JsonResponse({'status': 'error', 'message': 'Invalid table selected'}, status=400)
 
             return JsonResponse({'status': 'success', 'inserted': inserted})
 
         except Exception as e:
-            print(f"\n❌ UPLOAD ERROR: {str(e)}\n") 
+            print(f"\n[UPLOAD ERROR] {str(e)}\n")
             return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
     return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
@@ -1735,6 +1814,82 @@ def export_make_model_xlsx(request):
     return response
 
 # -------------------------
+# PINCODE DASHBOARD (Health's equivalent of RTO Dashboard)
+# -------------------------
+def _sync_pincode_zones_from_health_data():
+    """Ensures every pincode_zone value actually used in HealthRateMaster has
+    a PincodeMaster row (blank cluster if new), so the dashboard always shows
+    every zone that needs its real pincode list filled in — rather than
+    silently missing one after a Health grid re-import introduces a new zone."""
+    existing = set(PincodeMaster.objects.values_list("pincode_zone", flat=True))
+    used = set(
+        HealthRateMaster.objects.exclude(pincode_zone__isnull=True)
+        .exclude(pincode_zone="")
+        .values_list("pincode_zone", flat=True)
+        .distinct()
+    )
+    for zone in used - existing:
+        PincodeMaster.objects.get_or_create(pincode_zone=zone)
+
+
+def pincode_dashboard(request):
+    _sync_pincode_zones_from_health_data()
+
+    qs = PincodeMaster.objects.all().order_by("pincode_zone")
+
+    zone_names = request.GET.getlist("pincode_zone")
+    cluster_q = (request.GET.get("cluster_q") or "").strip()
+
+    if zone_names and "" not in zone_names:
+        qs = qs.filter(pincode_zone__in=zone_names)
+    if cluster_q:
+        qs = qs.filter(pincode_cluster__icontains=cluster_q)
+
+    zone_name_list = PincodeMaster.objects.values_list("pincode_zone", flat=True).distinct().order_by("pincode_zone")
+
+    return render(request, "pincode_dashboard.html", {
+        "data": qs,
+        "total": qs.count(),
+        "zone_name_list": zone_name_list,
+        "selected": {
+            "zone_names": zone_names,
+            "cluster_q": cluster_q
+        },
+        "is_admin": True
+    })
+
+def export_pincode_xlsx(request):
+    _sync_pincode_zones_from_health_data()
+
+    qs = PincodeMaster.objects.all().order_by("pincode_zone")
+
+    zone_names = request.GET.getlist("pincode_zone")
+    cluster_q = (request.GET.get("cluster_q") or "").strip()
+
+    if zone_names and "" not in zone_names:
+        qs = qs.filter(pincode_zone__in=zone_names)
+    if cluster_q:
+        qs = qs.filter(pincode_cluster__icontains=cluster_q)
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Pincode Master"
+    # Header row matches PincodeMaster field names — lets this export be
+    # edited and re-uploaded via Import Data's "Pincode Master (Clusters CSV)"
+    # option without renaming any columns.
+    ws.append(["id", "pincode_zone", "pincode_cluster"])
+
+    for r in qs:
+        ws.append([r.id, r.pincode_zone, r.pincode_cluster or ""])
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = 'attachment; filename="pincode_master.xlsx"'
+    wb.save(response)
+    return response
+
+# -------------------------
 # Edit Master Tables
 # -------------------------
 def edit_rto(request, pk):
@@ -1767,6 +1922,22 @@ def edit_make_model(request, pk):
         "form": form,
         "title": "Edit Make/Model Record",
         "back_url": "make_model_dashboard"
+    })
+
+def edit_pincode(request, pk):
+    obj = PincodeMaster.objects.get(id=pk)
+    if request.method == "POST":
+        form = PincodeForm(request.POST, instance=obj)
+        if form.is_valid():
+            form.save()
+            return redirect("pincode_dashboard")
+    else:
+        form = PincodeForm(instance=obj)
+
+    return render(request, "edit_master.html", {
+        "form": form,
+        "title": "Edit Pincode Zone Record",
+        "back_url": "pincode_dashboard"
     })
 
 # -------------------------
@@ -2020,6 +2191,483 @@ def rate_master_health(request):
         "insurers_without_coverage": insurers_without_coverage,
         "expiring_soon": expiring_soon,
         "expiry_window_days": RATE_EXPIRY_WINDOW_DAYS,
+    })
+
+# -------------------------
+# HEALTH RATE MASTER
+# -------------------------
+# HealthRateMaster rows aren't exploded/grouped behind a separate group
+# table like RateMaster is — one imported grid row is one editable rate
+# rule, so list/edit/bulk-update all operate directly on HealthRateMaster ids.
+HEALTH_RATE_BATCH_SIZE = 50
+
+HEALTH_RATE_FIELD_NAMES = [
+    "insurance_company", "product_name", "policy_category", "business_type",
+    "plan_names", "min_sum_insured", "max_sum_insured", "min_deductible", "max_deductible",
+    "min_age", "max_age", "pincode_zone", "payin_rate",
+    "one_year_rate", "multi_year_2_rate", "multi_year_3_rate", "multi_year_4_rate", "multi_year_5_rate",
+    "from_date", "to_date", "remarks", "status", "is_deleted",
+]
+
+# Only these HealthRateMaster fields may be touched via bulk update — same
+# safety rule as RateMaster's ALLOWED_BULK_UPDATE_FIELDS: update_field comes
+# straight from the POST body, so anything not on this list (id, source_row_hash,
+# created_at, updated_at) must be rejected rather than passed to .update().
+ALLOWED_HEALTH_BULK_UPDATE_FIELDS = {
+    "insurance_company", "product_name", "policy_category", "business_type", "plan_names",
+    "min_deductible", "max_deductible", "min_sum_insured", "max_sum_insured",
+    "min_age", "max_age", "pincode_zone",
+    "payin_rate", "one_year_rate", "multi_year_2_rate", "multi_year_3_rate",
+    "multi_year_4_rate", "multi_year_5_rate",
+    "from_date", "to_date", "status", "is_deleted", "remarks",
+}
+HEALTH_FLOAT_FIELDS = {
+    "min_deductible", "max_deductible", "min_sum_insured", "max_sum_insured",
+    "min_age", "max_age", "payin_rate", "one_year_rate",
+    "multi_year_2_rate", "multi_year_3_rate", "multi_year_4_rate", "multi_year_5_rate",
+}
+
+
+class HealthRateForm(forms.ModelForm):
+    class Meta:
+        model = HealthRateMaster
+        exclude = ["created_at", "updated_at", "source_row_hash"]
+        widgets = {
+            "plan_names": forms.Textarea(attrs={"rows": 4}),
+            "remarks": forms.Textarea(attrs={"rows": 3}),
+            "from_date": forms.DateInput(attrs={"type": "date"}),
+            "to_date": forms.DateInput(attrs={"type": "date"}),
+        }
+
+
+def _build_health_rate_queryset(request):
+    """Filter-building logic shared by health_rate_master (list) and export_health_rates_xlsx."""
+    qs = HealthRateMaster.objects.all()
+
+    q = (request.GET.get("q") or "").strip()
+    insurance_company = (request.GET.get("insurance_company") or "").strip()
+    product_name = (request.GET.get("product_name") or "").strip()
+    policy_category = (request.GET.get("policy_category") or "").strip()
+    business_type = (request.GET.get("business_type") or "").strip()
+    pincode_zone = (request.GET.get("pincode_zone") or "").strip()
+    pincode = (request.GET.get("pincode") or "").strip()
+    status_filter = (request.GET.get("status") or "").strip()
+    is_deleted_filter = (request.GET.get("is_deleted") or "").strip().upper()
+    date_range = (request.GET.get("date_range") or "").strip()
+    sum_insured_range = (request.GET.get("sum_insured_range") or "").strip()
+    age_range = (request.GET.get("age_range") or "").strip()
+    deductible_range = (request.GET.get("deductible_range") or "").strip()
+
+    if q:
+        qs = qs.filter(Q(insurance_company__icontains=q) | Q(plan_names__icontains=q))
+    if insurance_company:
+        qs = qs.filter(insurance_company=insurance_company)
+    if product_name:
+        qs = qs.filter(product_name=product_name)
+    if policy_category:
+        qs = qs.filter(policy_category=policy_category)
+    if business_type:
+        qs = qs.filter(business_type=business_type)
+    if pincode_zone:
+        qs = qs.filter(pincode_zone=pincode_zone)
+
+    # Raw pincode search: resolve through PincodeMaster's cluster to the
+    # zone(s) it belongs to, same pattern as rto_code resolving through
+    # RTOMaster.rto_cluster to a group name on Motor's dashboard(). A pincode
+    # with no known zone mapping yet matches nothing — it means the zone's
+    # real pincode list hasn't been filled in on the Pincode Dashboard.
+    if pincode:
+        matching_zone_names = []
+        potential_zones = PincodeMaster.objects.filter(pincode_cluster__icontains=pincode)
+        for zone_record in potential_zones:
+            if strict_match_in_cluster(pincode, zone_record.pincode_cluster):
+                matching_zone_names.append(zone_record.pincode_zone.strip())
+
+        if matching_zone_names:
+            qs = qs.filter(pincode_zone__in=matching_zone_names)
+        else:
+            qs = qs.none()
+
+    if status_filter:
+        qs = qs.filter(status=status_filter)
+    if is_deleted_filter:
+        qs = qs.filter(is_deleted=is_deleted_filter)
+
+    if date_range:
+        dates = date_range.split(" - ")
+        if len(dates) == 2:
+            d_from = dates[0].strip()
+            d_to = dates[1].strip()
+            if d_from and d_to:
+                qs = qs.filter(
+                    (Q(from_date__lte=d_to) | Q(from_date__isnull=True)) &
+                    (Q(to_date__gte=d_from) | Q(to_date__isnull=True))
+                )
+
+    qs = apply_range_filter(qs, "min_sum_insured", "max_sum_insured", sum_insured_range)
+    qs = apply_range_filter(qs, "min_age", "max_age", age_range)
+    qs = apply_range_filter(qs, "min_deductible", "max_deductible", deductible_range)
+
+    selected = {
+        "q": q,
+        "insurance_company": insurance_company,
+        "product_name": product_name,
+        "policy_category": policy_category,
+        "business_type": business_type,
+        "pincode_zone": pincode_zone,
+        "pincode": pincode,
+        "status": status_filter,
+        "is_deleted": is_deleted_filter,
+        "date_range": date_range,
+        "sum_insured_range": sum_insured_range,
+        "age_range": age_range,
+        "deductible_range": deductible_range,
+    }
+    return qs, selected
+
+
+def health_rate_master(request):
+    qs, selected = _build_health_rate_queryset(request)
+
+    active_count = qs.filter(status="ACTIVE").count()
+    inactive_count = qs.filter(status="INACTIVE").count()
+    total_count = qs.count()
+
+    qs = qs.order_by("-id")
+
+    try:
+        page_number = int(request.GET.get("page") or 1)
+    except ValueError:
+        page_number = 1
+    paginator = Paginator(qs, HEALTH_RATE_BATCH_SIZE)
+    page_obj = paginator.get_page(page_number)
+
+    insurer_list = HealthRateMaster.objects.exclude(insurance_company="").values_list(
+        "insurance_company", flat=True
+    ).distinct().order_by("insurance_company")
+    product_list = HealthRateMaster.objects.exclude(product_name__isnull=True).exclude(
+        product_name=""
+    ).values_list("product_name", flat=True).distinct().order_by("product_name")
+    category_list = HealthRateMaster.objects.exclude(policy_category__isnull=True).exclude(
+        policy_category=""
+    ).values_list("policy_category", flat=True).distinct().order_by("policy_category")
+    business_type_list = HealthRateMaster.objects.exclude(business_type__isnull=True).exclude(
+        business_type=""
+    ).values_list("business_type", flat=True).distinct().order_by("business_type")
+    zone_list = HealthRateMaster.objects.exclude(pincode_zone__isnull=True).exclude(
+        pincode_zone=""
+    ).values_list("pincode_zone", flat=True).distinct().order_by("pincode_zone")
+
+    return render(request, "health_rate_master.html", {
+        "page_obj": page_obj,
+        "field_names": HEALTH_RATE_FIELD_NAMES,
+        "total": total_count,
+        "active_count": active_count,
+        "inactive_count": inactive_count,
+        "insurer_list": insurer_list,
+        "product_list": product_list,
+        "category_list": category_list,
+        "business_type_list": business_type_list,
+        "zone_list": zone_list,
+        "selected": selected,
+    })
+
+
+def health_rate_master_edit(request, pk):
+    record = get_object_or_404(HealthRateMaster, pk=pk)
+
+    if request.method == "POST":
+        form = HealthRateForm(request.POST, instance=record)
+        if form.is_valid():
+            form.save()
+            AuditLog.objects.create(
+                user=request.user,
+                action="HEALTH RATE EDIT",
+                details=f"Edited HealthRateMaster #{record.pk} via form."
+            )
+            return redirect("health_rate_master")
+    else:
+        form = HealthRateForm(instance=record)
+
+    return render(request, "edit_health_rate.html", {
+        "form": form,
+        "record": record,
+    })
+
+
+def health_rate_master_bulk_update(request):
+    if request.method == "POST":
+        raw_ids = request.POST.getlist("selected_rows")
+        if not raw_ids:
+            raw_ids = [request.POST.get("selected_rows", "")]
+
+        ids = []
+        for raw in raw_ids:
+            for part in str(raw).split(","):
+                part = part.strip()
+                if part.isdigit():
+                    ids.append(int(part))
+
+        field_name = request.POST.get("update_field")
+        new_value = request.POST.get("update_value", "").strip()
+
+        if not ids or not field_name:
+            return redirect("health_rate_master")
+
+        if field_name not in ALLOWED_HEALTH_BULK_UPDATE_FIELDS:
+            messages.error(
+                request,
+                f"Bulk update rejected: '{field_name}' is not an editable field. No rows were changed."
+            )
+            return redirect("health_rate_master")
+
+        records = HealthRateMaster.objects.filter(id__in=ids)
+        record_count = records.count()
+
+        parsed_value = new_value
+        if field_name == "status":
+            parsed_value = new_value.strip().upper()
+            valid_statuses = dict(HealthRateMaster.STATUS_CHOICES)
+            if parsed_value not in valid_statuses:
+                messages.error(
+                    request,
+                    f"Bulk update rejected: '{new_value}' is not a valid Status "
+                    f"(must be one of: {', '.join(valid_statuses)}). No rows were changed."
+                )
+                return redirect("health_rate_master")
+        elif field_name == "is_deleted":
+            parsed_value = new_value.strip().upper()
+            valid_deleted = dict(HealthRateMaster.IS_DELETED_CHOICES)
+            if parsed_value not in valid_deleted:
+                messages.error(
+                    request,
+                    f"Bulk update rejected: '{new_value}' is not a valid Is Deleted value "
+                    f"(must be one of: {', '.join(valid_deleted)}). No rows were changed."
+                )
+                return redirect("health_rate_master")
+        elif field_name in HEALTH_FLOAT_FIELDS:
+            try:
+                parsed_value = float(new_value) if new_value else None
+            except ValueError:
+                messages.error(
+                    request,
+                    f"Bulk update rejected: '{new_value}' is not a valid number for '{field_name}'. No rows were changed."
+                )
+                return redirect("health_rate_master")
+
+        records.update(**{field_name: parsed_value})
+
+        AuditLog.objects.create(
+            user=request.user,
+            action="HEALTH BULK UPDATE",
+            details=f"Updated {record_count} Health rate rows. Changed '{field_name}' to '{new_value}'."
+        )
+
+    return redirect("health_rate_master")
+
+
+def export_health_rates_xlsx(request):
+    qs, _ = _build_health_rate_queryset(request)
+    qs = qs.order_by("-id")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Health Rate Master"
+
+    # Header row matches HealthRateMaster field names exactly (not friendly
+    # Title Case) — same convention as Motor's export_rates_xlsx, and it means
+    # this export can be edited and re-uploaded via Import Data's "Health
+    # Rate Master (Rates CSV)" option without renaming any columns.
+    ws.append([
+        "id", "insurance_company", "product_name", "policy_category", "business_type",
+        "plan_names", "min_deductible", "max_deductible", "min_sum_insured", "max_sum_insured",
+        "min_age", "max_age", "pincode_zone", "payin_rate", "one_year_rate",
+        "multi_year_2_rate", "multi_year_3_rate", "multi_year_4_rate", "multi_year_5_rate",
+        "from_date", "to_date", "status", "is_deleted", "remarks",
+    ])
+
+    for r in qs.iterator(chunk_size=2000):
+        ws.append([
+            r.id, r.insurance_company, r.product_name, r.policy_category, r.business_type,
+            r.plan_names, r.min_deductible, r.max_deductible, r.min_sum_insured, r.max_sum_insured,
+            r.min_age, r.max_age, r.pincode_zone, r.payin_rate, r.one_year_rate,
+            r.multi_year_2_rate, r.multi_year_3_rate, r.multi_year_4_rate, r.multi_year_5_rate,
+            r.from_date.strftime("%Y-%m-%d") if r.from_date else "",
+            r.to_date.strftime("%Y-%m-%d") if r.to_date else "",
+            r.status, r.is_deleted, r.remarks or "",
+        ])
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = 'attachment; filename="health_rates_export.xlsx"'
+    wb.save(response)
+    return response
+
+# -------------------------
+# HEALTH PAYOUT RATES CHECKER (Health's equivalent of Motor's Quote Simulator)
+# -------------------------
+HEALTH_PAYOUT_MAX_RESULTS = 200
+
+# Standard Sum Insured ladder (in rupees) offered on the "Insurance Cover"
+# dropdown. These are conventional Indian health-insurance cover tiers, not
+# values read from the data — a customer picks from a known ladder, and the
+# query checks which rate rules' [min_sum_insured, max_sum_insured] band
+# contains that amount.
+HEALTH_SUM_INSURED_OPTIONS = [
+    (500000, "5 Lakhs"), (750000, "7.5 Lakhs"), (1000000, "10 Lakhs"),
+    (1500000, "15 Lakhs"), (2000000, "20 Lakhs"), (2500000, "25 Lakhs"),
+    ("above_25L", "Above 25 Lakhs"),
+]
+HEALTH_ABOVE_25L_THRESHOLD = 2500000
+
+# Which HealthRateMaster rate column the "N Yr Policy" radio choice reads.
+HEALTH_POLICY_TERM_FIELD = {
+    "1": "one_year_rate",
+    "2": "multi_year_2_rate",
+    "3": "multi_year_3_rate",
+    "4": "multi_year_4_rate",
+    "5": "multi_year_5_rate",
+}
+
+
+def _build_health_payout_queryset(request, target_date, rate_field):
+    """Eligibility-style matching (containment on age/sum-insured/date,
+    same as Motor's cc/sc/vehicle-age matching in _build_motor_payout_queryset)
+    — deliberately different from Health Rate Master's admin filters, which
+    match a rule's own band exactly rather than checking whether it covers
+    a given customer's numbers."""
+    qs = HealthRateMaster.objects.exclude(is_deleted="YES").filter(status="ACTIVE")
+
+    product_name = (request.GET.get("product_name") or "").strip()
+    business_type = (request.GET.get("business_type") or "").strip()
+    policy_category = (request.GET.get("policy_category") or "").strip()
+    sum_insured = (request.GET.get("sum_insured") or "").strip()
+    age = (request.GET.get("age") or "").strip()
+    pincode = (request.GET.get("pincode") or "").strip()
+    insurance_companies = [c for c in request.GET.getlist("insurance_company") if c]
+
+    if target_date:
+        qs = qs.filter(
+            (Q(from_date__lte=target_date) | Q(from_date__isnull=True)) &
+            (Q(to_date__gte=target_date) | Q(to_date__isnull=True))
+        )
+
+    if product_name:
+        qs = qs.filter(product_name=product_name)
+    if business_type:
+        qs = qs.filter(business_type=business_type)
+    if policy_category:
+        qs = qs.filter(policy_category=policy_category)
+    if insurance_companies:
+        qs = qs.filter(insurance_company__in=insurance_companies)
+
+    if sum_insured == "above_25L":
+        # Open-ended option — not a single point to contain, but "does this
+        # rule's cover extend past the threshold at all" (a range-overlap
+        # check, not point-containment like the fixed Lakh amounts below).
+        qs = qs.filter(
+            Q(max_sum_insured__gt=HEALTH_ABOVE_25L_THRESHOLD) | Q(max_sum_insured__isnull=True)
+        )
+    elif sum_insured:
+        try:
+            si_val = float(sum_insured)
+            qs = qs.filter(
+                (Q(min_sum_insured__lte=si_val) | Q(min_sum_insured__isnull=True)) &
+                (Q(max_sum_insured__gte=si_val) | Q(max_sum_insured__isnull=True))
+            )
+        except ValueError:
+            pass
+
+    if age:
+        try:
+            age_val = float(age)
+            qs = qs.filter(
+                (Q(min_age__lte=age_val) | Q(min_age__isnull=True)) &
+                (Q(max_age__gte=age_val) | Q(max_age__isnull=True))
+            )
+        except ValueError:
+            pass
+
+    if pincode:
+        matching_zone_names = []
+        potential_zones = PincodeMaster.objects.filter(pincode_cluster__icontains=pincode)
+        for zone_record in potential_zones:
+            if strict_match_in_cluster(pincode, zone_record.pincode_cluster):
+                matching_zone_names.append(zone_record.pincode_zone.strip())
+        if matching_zone_names:
+            qs = qs.filter(pincode_zone__in=matching_zone_names)
+        else:
+            # Lenient fallback, same pattern as rto_code in Motor's quote
+            # checker: maybe the user typed the zone name (or "All") directly
+            # instead of an actual pincode, or that zone's cluster hasn't been
+            # populated yet on the Pincode Dashboard.
+            qs = qs.filter(pincode_zone__icontains=pincode)
+
+    qs = qs.order_by(F(rate_field).desc(nulls_last=True), F("payin_rate").desc(nulls_last=True), "-id")
+
+    return qs
+
+
+def health_payout_rates(request):
+    has_searched = bool(request.GET)
+
+    today_str = datetime.today().strftime("%Y-%m-%d")
+    target_date = (request.GET.get("target_date") or today_str).strip()
+    policy_term = (request.GET.get("policy_term") or "1").strip()
+    if policy_term not in HEALTH_POLICY_TERM_FIELD:
+        policy_term = "1"
+    rate_field = HEALTH_POLICY_TERM_FIELD[policy_term]
+
+    results = []
+    total_found = 0
+    has_more = False
+
+    if has_searched:
+        qs = _build_health_payout_queryset(request, target_date, rate_field)
+        total_found = qs.count()
+        has_more = total_found > HEALTH_PAYOUT_MAX_RESULTS
+
+        for row in qs[:HEALTH_PAYOUT_MAX_RESULTS]:
+            term_rate = getattr(row, rate_field)
+            row.applicable_rate = term_rate if term_rate is not None else row.payin_rate
+            results.append(row)
+
+    product_list = HealthRateMaster.objects.exclude(product_name__isnull=True).exclude(
+        product_name=""
+    ).values_list("product_name", flat=True).distinct().order_by("product_name")
+    business_type_list = HealthRateMaster.objects.exclude(business_type__isnull=True).exclude(
+        business_type=""
+    ).values_list("business_type", flat=True).distinct().order_by("business_type")
+    category_list = HealthRateMaster.objects.exclude(policy_category__isnull=True).exclude(
+        policy_category=""
+    ).values_list("policy_category", flat=True).distinct().order_by("policy_category")
+    insurer_list = HealthRateMaster.objects.exclude(insurance_company="").values_list(
+        "insurance_company", flat=True
+    ).distinct().order_by("insurance_company")
+
+    return render(request, "health_payout_rates.html", {
+        "has_searched": has_searched,
+        "data": results,
+        "total_found": total_found,
+        "has_more": has_more,
+        "max_results": HEALTH_PAYOUT_MAX_RESULTS,
+        "product_list": product_list,
+        "business_type_list": business_type_list,
+        "category_list": category_list,
+        "insurer_list": insurer_list,
+        "sum_insured_options": HEALTH_SUM_INSURED_OPTIONS,
+        "selected": {
+            "product_name": (request.GET.get("product_name") or "").strip(),
+            "business_type": (request.GET.get("business_type") or "").strip(),
+            "policy_category": (request.GET.get("policy_category") or "").strip(),
+            "sum_insured": (request.GET.get("sum_insured") or "").strip(),
+            "age": (request.GET.get("age") or "").strip(),
+            "pincode": (request.GET.get("pincode") or "").strip(),
+            "insurance_companies": [c for c in request.GET.getlist("insurance_company") if c],
+            "target_date": target_date,
+            "policy_term": policy_term,
+        },
     })
 
 # -------------------------
@@ -3296,9 +3944,15 @@ def ticket_dashboard(request):
         "CLOSED": raw_counts["CLOSED"],
     }
 
+    category_counts = {"MOTOR": 0, "HEALTH": 0, "LIFE": 0}
+    for row in tickets.values('category').annotate(n=Count('id')):
+        if row['category'] in category_counts:
+            category_counts[row['category']] = row['n']
+
     return render(request, "ticket_dashboard.html", {
         "tickets": tickets,
         "status_counts": status_counts,
+        "category_counts": category_counts,
         "total_tickets": tickets.count(),
     })
 
@@ -3308,9 +3962,13 @@ def create_ticket_api(request):
             data = json.loads(request.body)
             remarks = data.get("remarks", "").strip()
             form_payload = data.get("form_payload", {})
+            category = (data.get("category") or "MOTOR").strip().upper()
 
             if not remarks:
                 return JsonResponse({"success": False, "message": "Remarks are required."})
+
+            if category not in dict(SupportTicket.CATEGORY_CHOICES):
+                category = "MOTOR"
 
             # 1. Translate Product ID to Name
             if form_payload.get("Product") and str(form_payload["Product"]).isdigit():
@@ -3335,7 +3993,8 @@ def create_ticket_api(request):
             ticket = SupportTicket.objects.create(
                 user=request.user,
                 remarks=remarks,
-                form_payload=form_payload
+                form_payload=form_payload,
+                category=category,
             )
             return JsonResponse({"success": True, "ticket_id": ticket.id})
         except Exception as e:
