@@ -451,8 +451,22 @@ def process_mis_mapping(mis_file_id):
         # numbers together with a slash (CC/GVW combined, e.g. "6702/47500")
         # are flagged up front instead of being silently digit-stripped into
         # one nonsense integer — see is_combined_cc_gvw / FAILED - BAD DATA below.
-        _cc_raw_series = safe_get_col(df_mis, 'Policy: cc cubic capacity').astype(str).str.strip()
+        #
+        # GCV 3W/4W are weight-classified rather than engine-classified —
+        # Rate Master's cc_min/cc_max columns hold GVW ranges for these
+        # products (shown as "CC / GVW" in the Rate Master UI). So for those
+        # rows, source the raw value from 'Policy: gvw gross vehicle weight'
+        # instead of 'Policy: cc cubic capacity'; every other product keeps
+        # using CC as before.
+        _is_gcv = df_mis['_mis_prod'].isin(['gcv 3w', 'gcv 4w'])
+        _cc_col_series = safe_get_col(df_mis, 'Policy: cc cubic capacity').astype(str).str.strip()
+        _gvw_col_series = safe_get_col(df_mis, 'Policy: gvw gross vehicle weight').astype(str).str.strip()
+        _cc_raw_series = _gvw_col_series.where(_is_gcv, _cc_col_series)
         df_mis['_mis_cc_raw'] = _cc_raw_series
+        df_mis['_mis_cc_source_label'] = _is_gcv.map({
+            True: 'Policy: gvw gross vehicle weight',
+            False: 'Policy: cc cubic capacity'
+        })
         df_mis['_mis_cc_bad_data'] = _cc_raw_series.apply(is_combined_cc_gvw)
         cc_raw = _cc_raw_series.str.replace(r'[^0-9.]', '', regex=True)
         df_mis['_mis_cc'] = pd.to_numeric(cc_raw, errors='coerce')
@@ -491,7 +505,7 @@ def process_mis_mapping(mis_file_id):
                     'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
                     'Mapping Status': 'FAILED - BAD DATA',
                     'Failure Reason': (
-                        f"Policy: cc cubic capacity value '{mis_row['_mis_cc_raw']}' looks like a "
+                        f"{mis_row['_mis_cc_source_label']} value '{mis_row['_mis_cc_raw']}' looks like a "
                         f"combined CC/GVW figure (two numbers separated by '/'). Not auto-parsed — "
                         f"correct the source MIS data and re-run mapping for this row."
                     ),
@@ -577,7 +591,7 @@ def process_mis_mapping(mis_file_id):
 
             # --- RULE 3: Numeric Ranges ---
             range_rules = [
-                ('_mis_cc', 'cc_min', 'cc_max', 'Policy: cc cubic capacity'),
+                ('_mis_cc', 'cc_min', 'cc_max', mis_row['_mis_cc_source_label']),
                 ('_mis_sc', 'sc_min', 'sc_max', 'Policy: seating capacity'),
                 ('_mis_age', 'vehicle_age_min', 'vehicle_age_max', 'Policy: vehage')
             ]
