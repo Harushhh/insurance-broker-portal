@@ -747,7 +747,12 @@ class MISFile(models.Model):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     error_message = models.TextField(blank=True, null=True)
-    
+    # Ranked breakdown of why NO MATCH / MULTIPLE MATCHES rows failed (grouped
+    # by rule + value, e.g. "insurer X needs 110 more Rate Master rows"),
+    # computed once by process_mis_mapping and stored so the dashboard doesn't
+    # need to re-open and re-parse the processed file on every page view.
+    coverage_gaps = models.JSONField(null=True, blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(null=True, blank=True)
 

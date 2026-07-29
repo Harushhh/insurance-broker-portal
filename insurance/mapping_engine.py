@@ -1,6 +1,8 @@
 import pandas as pd
 import io
 import re
+import traceback
+from collections import Counter
 from rapidfuzz import fuzz, process as rf_process
 from django.core.files.base import ContentFile
 from django.utils import timezone
@@ -229,6 +231,21 @@ def check_resolved_cluster_match(resolved_names, grid_val):
     return False
 
 
+def _normalize_model_words(text: str) -> set:
+    """
+    Tokenizes a make/model string for Rule 5a's word-overlap match, handling
+    two common MIS/master formatting differences that would otherwise hide a
+    real word-level match despite the underlying make/model being the same:
+      - a hyphenated trim/variant suffix glued to the model:  "CITY-1.5"  -> {"CITY", "1.5"}
+      - an edition/engine number glued directly to the model: "ACTIVA6G" -> {"ACTIVA", "6G"}
+    Applied identically to both the search term and each cluster item so the
+    comparison stays symmetric.
+    """
+    normalized = text.replace('-', ' ')
+    normalized = re.sub(r'(?<=[A-Za-z])(?=\d)', ' ', normalized)
+    return set(normalized.split())
+
+
 def fuzzy_match_make_model(search_term, cluster_string, min_shared_words=MAKE_MODEL_MIN_WORD_MATCH):
     """
     Word-overlap matcher used for vehicle make/model (Rule 5a), replacing a
@@ -247,13 +264,13 @@ def fuzzy_match_make_model(search_term, cluster_string, min_shared_words=MAKE_MO
     if not search_term or not cluster_string:
         return False
 
-    search_words = set(str(search_term).strip().upper().split())
+    search_words = _normalize_model_words(str(search_term).strip().upper())
     if len(search_words) < min_shared_words:
         return False
 
     items = [x.strip().upper() for x in str(cluster_string).split(",") if x.strip()]
     for item in items:
-        item_words = set(item.split())
+        item_words = _normalize_model_words(item)
         if len(search_words & item_words) >= min_shared_words:
             return True
 
@@ -331,6 +348,67 @@ def normalize_rto_code(raw_value):
         return s
     s = re.sub(r'[\s\-]', '', s)
     return s[:4]
+
+
+_QUOTED_VALUE_PATTERN = re.compile(r"'([^']*)'")
+_FAILED_ON_PATTERN = re.compile(r"^Failed on:\s*([^—]+)—\s*(.*)$")
+_GROUP_IDS_PATTERN = re.compile(r"Matching Group IDs:\s*(.*)$")
+
+
+def _extract_gap_key(detail: str) -> str:
+    """
+    Best-effort extraction of the specific value that failed a rule, straight
+    from its already-generated Failure Reason sentence (see the RULE 1-6
+    blocks in process_mis_mapping) — e.g. the insurer/product/RTO name inside
+    the first pair of quotes. Falls back to a short prefix of the detail
+    sentence for rules that don't quote a single value (numeric ranges,
+    blank/unparseable fields), so every row still groups into *some* bucket.
+    """
+    match = _QUOTED_VALUE_PATTERN.search(detail)
+    if match and match.group(1).strip():
+        return match.group(1).strip()
+    return detail[:60].strip()
+
+
+def build_coverage_gap_summary(df_final, max_entries=25):
+    """
+    Ranks NO MATCH / MULTIPLE MATCHES rows by (rule, value) so the MIS
+    Payout Engine dashboard can show "which Rate Master gap to close next"
+    instead of someone reading Failure Reason for every row individually.
+    Runs once per processed file, purely over the already-computed output —
+    it doesn't touch or re-run any matching logic, so it carries zero risk
+    to the match/no-match decisions themselves.
+    """
+    no_match_counts = Counter()
+    no_match_reasons = df_final.loc[df_final['Mapping Status'] == '❌ NO MATCH', 'Failure Reason']
+    for reason in no_match_reasons:
+        reason = str(reason)
+        m = _FAILED_ON_PATTERN.match(reason)
+        if not m:
+            no_match_counts[('Other', reason[:60].strip())] += 1
+            continue
+        rule_label = m.group(1).strip()
+        detail = m.group(2).strip()
+        no_match_counts[(rule_label, _extract_gap_key(detail))] += 1
+
+    no_match_ranked = [
+        {'rule': rule, 'value': value, 'count': count}
+        for (rule, value), count in no_match_counts.most_common(max_entries)
+    ]
+
+    multi_counts = Counter()
+    multi_reasons = df_final.loc[df_final['Mapping Status'] == '⚠️ MULTIPLE MATCHES', 'Failure Reason']
+    for reason in multi_reasons:
+        m = _GROUP_IDS_PATTERN.search(str(reason))
+        key = m.group(1).strip() if m else str(reason)[:60].strip()
+        multi_counts[key] += 1
+
+    multiple_ranked = [
+        {'group_ids': key, 'count': count}
+        for key, count in multi_counts.most_common(max_entries)
+    ]
+
+    return {'no_match': no_match_ranked, 'multiple_matches': multiple_ranked}
 
 
 def process_mis_mapping(mis_file_id):
@@ -525,10 +603,16 @@ def process_mis_mapping(mis_file_id):
             # --- RULE 1: Insurance Company ---
             val_ins_raw = mis_row['_mis_ins']
             val_ins = mis_row['_mis_ins_mapped']
-            if not val_ins:
+            # .map() on a dict silently turns a `None` value (get_fuzzy_dict's
+            # "no fuzzy match found above threshold" marker) into float NaN —
+            # and bool(nan) is True, so a plain `if not val_ins` falls through
+            # to the wrong branch below and reports a misleading "resolved to
+            # 'nan'" instead of the real, actionable reason.
+            if pd.isna(val_ins) or not val_ins:
+                raw_display = '(blank)' if pd.isna(val_ins_raw) else val_ins_raw
                 failed_on.append((
                     'Policy: insurance company',
-                    f"Insurer '{val_ins_raw}' did not fuzzy-match any active Rate Master insurer "
+                    f"Insurer '{raw_display}' did not fuzzy-match any active Rate Master insurer "
                     f"(threshold={INSURANCE_FUZZY_THRESHOLD}). Either no active rate is configured "
                     f"for this insurer, or the name on file differs too much to match."
                 ))
@@ -918,12 +1002,22 @@ def process_mis_mapping(mis_file_id):
             f"(refine Rate Master to get a single match). "
             f"{total_bad_data} rows flagged FAILED - BAD DATA (malformed source values — see Failure Reason)."
         )
+
+        # Coverage-gap breakdown is a reporting nicety, not core output — a
+        # bug here must never turn an otherwise-successful run into FAILED
+        # and discard a perfectly good processed_file.
+        try:
+            mis_obj.coverage_gaps = build_coverage_gap_summary(df_final)
+        except Exception:
+            print("Coverage gap summary failed to build (non-fatal):")
+            print(traceback.format_exc())
+            mis_obj.coverage_gaps = None
+
         mis_obj.save()
 
     except Exception as e:
         # FIX: was `except BaseException`, which also catches KeyboardInterrupt /
         # SystemExit and can block graceful container shutdown. Narrowed to Exception.
-        import traceback
         error_trace = traceback.format_exc()
         print(f"\n❌ MIS Mapping Error: {str(e)}")
         print(error_trace)

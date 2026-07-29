@@ -210,6 +210,52 @@
     flex-shrink: 0;
   }
 
+  /* ── Coverage gap disclosure ──────────────────────────────────────── */
+  .gap-details { margin-top: 6px; max-width: 480px; }
+  .gap-summary-toggle {
+    cursor: pointer;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #2563eb;
+    list-style: none;
+  }
+  .gap-summary-toggle::-webkit-details-marker { display: none; }
+  .gap-summary-toggle:hover { color: #1d4ed8; }
+  .gap-panel {
+    margin-top: 6px;
+    border: 1px solid #e5e7eb;
+    border-radius: 8px;
+    background: #f9fafb;
+    padding: 8px 10px;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .gap-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+  .gap-table th {
+    text-align: left;
+    color: #9ca3af;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    font-size: 0.62rem;
+    padding: 3px 6px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .gap-table td {
+    padding: 3px 6px;
+    color: #374151;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .gap-table tr:last-child td { border-bottom: none; }
+  .gap-table td.gap-count { font-weight: 700; color: #dc2626; text-align: right; }
+  .gap-multi-title {
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: #6b7280;
+    margin: 8px 0 4px;
+  }
+  .gap-multi-list { margin: 0; padding-left: 16px; font-size: 0.72rem; color: #374151; }
+
   /* ── Status badges — matching app's existing badge style ─────────── */
   .status-badge {
     display: inline-flex;
@@ -484,6 +530,37 @@
                     <span class="record-pill-dot"></span>
                     {{ file.error_message }}
                   </span>
+                  {% if file.coverage_gaps.no_match or file.coverage_gaps.multiple_matches %}
+                  <details class="gap-details">
+                    <summary class="gap-summary-toggle">📋 View coverage gaps</summary>
+                    <div class="gap-panel">
+                      {% if file.coverage_gaps.no_match %}
+                      <table class="gap-table">
+                        <thead>
+                          <tr><th>Rule</th><th>Value</th><th>Rows</th></tr>
+                        </thead>
+                        <tbody>
+                          {% for gap in file.coverage_gaps.no_match %}
+                          <tr>
+                            <td>{{ gap.rule }}</td>
+                            <td>{{ gap.value }}</td>
+                            <td class="gap-count">{{ gap.count }}</td>
+                          </tr>
+                          {% endfor %}
+                        </tbody>
+                      </table>
+                      {% endif %}
+                      {% if file.coverage_gaps.multiple_matches %}
+                      <div class="gap-multi-title">Overlapping Rate Master groups to de-duplicate:</div>
+                      <ul class="gap-multi-list">
+                        {% for m in file.coverage_gaps.multiple_matches %}
+                        <li>Group IDs {{ m.group_ids }} — {{ m.count }} row{{ m.count|pluralize }}</li>
+                        {% endfor %}
+                      </ul>
+                      {% endif %}
+                    </div>
+                  </details>
+                  {% endif %}
                 {% else %}
                   <span class="text-muted-sm">—</span>
                 {% endif %}
