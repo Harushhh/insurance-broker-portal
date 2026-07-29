@@ -441,70 +441,11 @@ def process_mis_mapping(mis_file_id):
         df_mis['Original_Row_ID'] = range(len(df_mis))
         mis_cols = df_mis.columns.tolist()
 
-        # 2. FETCH RATE MASTER DATA
-        qs = RateMaster.objects.filter(status="ACTIVE", is_deleted="NO").select_related(
-            'product', 'sub_product', 'fuel_type', 'make_model_class', 'is_ncb', 'is_cpa', 'is_zd'
-        )
-
-        grid_data = []
-        for r in qs:
-            grid_data.append({
-                'id': r.id,
-                'group_id': r.group_id,
-                'po_type': r.po_type,
-                'po_od_rate': r.po_od_rate,
-                'po_tp_rate': r.po_tp_rate,
-                'po_net_rate': r.po_net_rate,
-                'po_flat_amount': r.po_flat_amount,
-                'add_tnc': r.add_tnc,
-
-                # Relational strings
-                'insurance_company': str(r.insurance_company).strip().lower() if r.insurance_company else '',
-                'product': str(r.product.name).strip().lower() if r.product else '',
-                'sub_product': str(r.sub_product.name).strip().lower() if r.sub_product else '',
-                'fuel_type': str(r.fuel_type.name).strip().lower() if r.fuel_type else '',
-                'make_model_class': str(r.make_model_class.name).strip().lower() if r.make_model_class else '',
-
-                # Bools/Codes
-                'is_ncb': str(r.is_ncb.code).strip().upper() if r.is_ncb else 'NA',
-                'is_cpa': str(r.is_cpa.code).strip().upper() if r.is_cpa else 'NA',
-                'is_zd': str(r.is_zd.code).strip().upper() if r.is_zd else 'NA',
-
-                # Clusters
-                'new_vehicle_makes': str(r.new_vehicle_makes).strip().lower() if r.new_vehicle_makes else '',
-                'new_rto_list': str(r.new_rto_list).strip().lower() if r.new_rto_list else '',
-
-                # Numerics & Dates
-                'cc_min': r.cc_min, 'cc_max': r.cc_max,
-                'sc_min': r.sc_min, 'sc_max': r.sc_max,
-                'vehicle_age_min': r.vehicle_age_min, 'vehicle_age_max': r.vehicle_age_max,
-                'tariff_min': r.tariff_min, 'tariff_max': r.tariff_max,
-                'from_date': r.from_date, 'to_date': r.to_date,
-            })
-
-        df_grid = pd.DataFrame(grid_data)
-        if df_grid.empty:
-            raise ValueError("RateMaster has no active records configured.")
-
-        # Preload RTOMaster and MakeModelMaster once per job — these power
-        # the two-step lookup chain for Rules 5a/5b below (MIS value ->
-        # master cluster -> master name -> RateMaster cluster).
-        resolve_rto = build_master_lookup(
-            RTOMaster.objects.all(), 'rto_name', 'rto_cluster'
-        )
-        # Vehicle make/model uses fuzzy word-overlap matching (Rule 5a), not the
-        # strict substring match RTO above still uses — see build_make_model_lookup.
-        resolve_make = build_make_model_lookup(
-            MakeModelMaster.objects.all(), 'make_model_name', 'make_model_cluster'
-        )
-
-        # Cast Grid numeric & date columns safely
-        for col in ['cc_min', 'cc_max', 'sc_min', 'sc_max', 'vehicle_age_min', 'vehicle_age_max', 'tariff_min', 'tariff_max']:
-            df_grid[col] = pd.to_numeric(df_grid[col], errors='coerce')
-        df_grid['from_date'] = pd.to_datetime(df_grid['from_date'], errors='coerce')
-        df_grid['to_date'] = pd.to_datetime(df_grid['to_date'], errors='coerce')
-
         # 3. PRE-COMPUTE MIS DATA
+        # Moved ahead of the Rate Master fetch (Recommendation 5): _mis_ins is
+        # needed to know which insurers this file could possibly match before
+        # fetching any Rate Master rows. Nothing else in this block depends on
+        # df_grid, so hoisting the whole section is a pure reorder.
         df_mis['_mis_ins'] = safe_get_col(df_mis, 'Policy: insurance company')
         df_mis['_mis_prod'] = safe_get_col(df_mis, 'Policy: vehproduct').astype(str).str.strip().str.lower()
         df_mis['_mis_sub_prod'] = safe_get_col(df_mis, 'Policy: sub product').astype(str).str.strip().str.lower()
@@ -565,18 +506,127 @@ def process_mis_mapping(mis_file_id):
         df_mis['_mis_cpa'] = pd.to_numeric(safe_get_col(df_mis, 'Policy: cpa'), errors='coerce')
         df_mis['_mis_zd'] = safe_get_col(df_mis, 'Policy: nil dep').astype(str).str.strip().str.upper()
 
-        # Insurance company fuzzy mapping — now powered by RapidFuzz (5-100x faster)
+        # 2. FETCH RATE MASTER DATA
+        # Two-phase (Recommendation 5): first find which insurers actually
+        # have active rows at all (cheap — one column, deduplicated), fuzzy-
+        # match this file's insurers against just that list, then fetch full
+        # rows only for the insurers this file could possibly match. Avoids
+        # materializing Rate Master rows for insurers that aren't even
+        # present in the upload.
+        distinct_raw_insurers = list(
+            RateMaster.objects.filter(status="ACTIVE", is_deleted="NO")
+            .values_list('insurance_company', flat=True).distinct()
+        )
+        if not distinct_raw_insurers:
+            raise ValueError("RateMaster has no active records configured.")
+
+        # Maps the normalized (strip+lower) name the fuzzy matcher works with
+        # back to the exact raw DB value(s) to filter on — get_fuzzy_dict
+        # normalizes its target list internally, so this mirrors that.
+        raw_by_normalized = {}
+        for raw in distinct_raw_insurers:
+            if raw and str(raw).strip():
+                raw_by_normalized.setdefault(str(raw).strip().lower(), set()).add(raw)
+
+        # Insurance company fuzzy mapping — now powered by RapidFuzz (5-100x
+        # faster), and now matched against just the distinct insurer list
+        # instead of the full grid.
         fuzzy_ins_map = get_fuzzy_dict(
             df_mis['_mis_ins'].unique(),
-            df_grid['insurance_company'].unique(),
+            distinct_raw_insurers,
             threshold=INSURANCE_FUZZY_THRESHOLD
         )
         df_mis['_mis_ins_mapped'] = df_mis['_mis_ins'].map(fuzzy_ins_map)
 
+        relevant_raw_insurers = set()
+        for normalized_name in {v for v in fuzzy_ins_map.values() if v}:
+            relevant_raw_insurers.update(raw_by_normalized.get(normalized_name, set()))
+
+        # Explicit columns= keeps df_grid's shape correct even when
+        # relevant_raw_insurers is empty (none of this file's insurers matched
+        # anything active) — pd.DataFrame.from_records([]) with no columns=
+        # would otherwise produce a frame with zero columns and break every
+        # df_grid[...] reference below. An empty-but-correctly-shaped grid is
+        # the right outcome here, not an error: it's the same result the old
+        # full fetch would have reached row-by-row (every row's insurer fails
+        # to resolve), just without spending time fetching irrelevant rows.
+        grid_columns = [
+            'id', 'group_id', 'po_type', 'po_od_rate', 'po_tp_rate', 'po_net_rate',
+            'po_flat_amount', 'add_tnc', 'insurance_company',
+            'product__name', 'sub_product__name', 'fuel_type__name', 'make_model_class__name',
+            'is_ncb__code', 'is_cpa__code', 'is_zd__code',
+            'new_vehicle_makes', 'new_rto_list',
+            'cc_min', 'cc_max', 'sc_min', 'sc_max',
+            'vehicle_age_min', 'vehicle_age_max', 'tariff_min', 'tariff_max',
+            'from_date', 'to_date',
+        ]
+        qs = RateMaster.objects.filter(
+            status="ACTIVE", is_deleted="NO", insurance_company__in=relevant_raw_insurers
+        ).values(*grid_columns)
+        df_grid = pd.DataFrame.from_records(qs, columns=grid_columns)
+
+        df_grid = df_grid.rename(columns={
+            'product__name': 'product',
+            'sub_product__name': 'sub_product',
+            'fuel_type__name': 'fuel_type',
+            'make_model_class__name': 'make_model_class',
+            'is_ncb__code': 'is_ncb',
+            'is_cpa__code': 'is_cpa',
+            'is_zd__code': 'is_zd',
+        })
+
+        # Vectorized equivalent of the old per-object normalization: blank
+        # (NULL/empty) content fields fall back to '', NCB/CPA/ZD codes fall
+        # back to 'NA' — same rules as before, just applied to a whole
+        # column at once instead of per Django object.
+        for col in ['insurance_company', 'product', 'sub_product', 'fuel_type',
+                    'make_model_class', 'new_vehicle_makes', 'new_rto_list']:
+            df_grid[col] = df_grid[col].fillna('').astype(str).str.strip().str.lower()
+
+        for col in ['is_ncb', 'is_cpa', 'is_zd']:
+            df_grid[col] = df_grid[col].fillna('NA').astype(str).str.strip().str.upper()
+
+        # Preload RTOMaster and MakeModelMaster once per job — these power
+        # the two-step lookup chain for Rules 5a/5b below (MIS value ->
+        # master cluster -> master name -> RateMaster cluster).
+        resolve_rto = build_master_lookup(
+            RTOMaster.objects.all(), 'rto_name', 'rto_cluster'
+        )
+        # Vehicle make/model uses fuzzy word-overlap matching (Rule 5a), not the
+        # strict substring match RTO above still uses — see build_make_model_lookup.
+        resolve_make = build_make_model_lookup(
+            MakeModelMaster.objects.all(), 'make_model_name', 'make_model_cluster'
+        )
+
+        # Cast Grid numeric & date columns safely
+        for col in ['cc_min', 'cc_max', 'sc_min', 'sc_max', 'vehicle_age_min', 'vehicle_age_max', 'tariff_min', 'tariff_max']:
+            df_grid[col] = pd.to_numeric(df_grid[col], errors='coerce')
+        df_grid['from_date'] = pd.to_datetime(df_grid['from_date'], errors='coerce')
+        df_grid['to_date'] = pd.to_datetime(df_grid['to_date'], errors='coerce')
+
+        # Rule 1 (insurer) is an exact match and mutually exclusive — every
+        # grid row belongs to exactly one insurer bucket. Partitioning once
+        # here turns each MIS row's insurer lookup into an O(1) dict access
+        # instead of scanning the full grid, and every rule after it then
+        # starts from that already-small slice automatically instead of
+        # rescanning the whole grid on every row.
+        grid_by_insurer = {name: sub_df for name, sub_df in df_grid.groupby('insurance_company')}
+        _empty_grid = df_grid.iloc[0:0]
+
         results = []
 
         # 4. ROW-BY-ROW PROCESSING
-        for idx, mis_row in df_mis.iterrows():
+        # Iterate a slimmed frame (just the precomputed _mis_* columns + the
+        # row id) instead of the full ~100+ column df_mis — cuts per-row
+        # Series-boxing overhead without the correctness risk of switching to
+        # .itertuples() (which would silently rename every leading-underscore
+        # column to a positional _1, _2, ... field, since Python namedtuples
+        # don't allow underscore-prefixed names). Access pattern inside the
+        # loop (mis_row['_mis_xxx']) is unchanged.
+        mis_cols_for_loop = ['Original_Row_ID'] + [c for c in df_mis.columns if c.startswith('_mis_')]
+        df_mis_slim = df_mis[mis_cols_for_loop]
+
+        for idx, mis_row in df_mis_slim.iterrows():
 
             # --- BAD DATA GUARD: combined CC/GVW value ---
             # Flagged during pre-compute (is_combined_cc_gvw). Never enters the
@@ -597,10 +647,13 @@ def process_mis_mapping(mis_file_id):
                 })
                 continue
 
-            valid_mask = pd.Series([True] * len(df_grid), index=df_grid.index)
             failed_on = []
 
             # --- RULE 1: Insurance Company ---
+            # Instead of masking the full ~100k-row grid with an equality
+            # check, jump straight to that insurer's pre-partitioned slice
+            # (grid_by_insurer, built once above) — every rule after this one
+            # then only ever sees that already-narrowed slice.
             val_ins_raw = mis_row['_mis_ins']
             val_ins = mis_row['_mis_ins_mapped']
             # .map() on a dict silently turns a `None` value (get_fuzzy_dict's
@@ -616,11 +669,10 @@ def process_mis_mapping(mis_file_id):
                     f"(threshold={INSURANCE_FUZZY_THRESHOLD}). Either no active rate is configured "
                     f"for this insurer, or the name on file differs too much to match."
                 ))
-                valid_mask = valid_mask & False
+                current_grid = _empty_grid
             else:
-                rule_mask = (df_grid['insurance_company'] == val_ins)
-                valid_mask = valid_mask & rule_mask
-                if not valid_mask.any():
+                current_grid = grid_by_insurer.get(val_ins, _empty_grid)
+                if current_grid.empty:
                     failed_on.append((
                         'Policy: insurance company',
                         f"Insurer resolved to '{val_ins}' but there are 0 active Rate Master rows for that insurer."
@@ -635,11 +687,11 @@ def process_mis_mapping(mis_file_id):
                 ('_mis_fuel', 'fuel_type', 'Policy: fuel'),
             ]
             for mis_col, grid_col, label in cat_rules:
-                if valid_mask.any():
+                if not current_grid.empty:
                     val = mis_row[mis_col]
-                    rule_mask = df_grid[grid_col].apply(lambda g: check_categorical_match(val, g))
-                    valid_mask = valid_mask & rule_mask
-                    if not valid_mask.any():
+                    rule_mask = current_grid[grid_col].apply(lambda g: check_categorical_match(val, g))
+                    current_grid = current_grid[rule_mask]
+                    if current_grid.empty:
                         failed_on.append((
                             label,
                             f"Value '{val}' did not match any remaining candidate Rate Master row's "
@@ -653,7 +705,7 @@ def process_mis_mapping(mis_file_id):
             # carries. All other RateMaster values must match exactly
             # (e.g. 'bike' == 'bike', 'car' == 'car').
             # If the MIS value itself is blank or 'na', only NA wildcard rows pass.
-            if valid_mask.any():
+            if not current_grid.empty:
                 val_class = mis_row['_mis_class']  # already .strip().lower()
                 mis_class_is_blank = (not val_class or val_class == 'nan')
 
@@ -668,9 +720,9 @@ def process_mis_mapping(mis_file_id):
                     # direct case-insensitive exact match
                     return val_class == g
 
-                rule_mask = df_grid['make_model_class'].apply(match_vehicle_class)
-                valid_mask = valid_mask & rule_mask
-                if not valid_mask.any():
+                rule_mask = current_grid['make_model_class'].apply(match_vehicle_class)
+                current_grid = current_grid[rule_mask]
+                if current_grid.empty:
                     failed_on.append((
                         'Policy: vehicle class',
                         f"Vehicle class '{val_class}' has no exact match among remaining candidate "
@@ -685,45 +737,45 @@ def process_mis_mapping(mis_file_id):
                 ('_mis_tariff', 'tariff_min', 'tariff_max', 'Policy: tariff rate'),
             ]
             for mis_col, min_col, max_col, label in range_rules:
-                if valid_mask.any():
+                if not current_grid.empty:
                     val = mis_row[mis_col]
                     if pd.isna(val):
-                        rule_mask = df_grid[min_col].isna() & df_grid[max_col].isna()
+                        rule_mask = current_grid[min_col].isna() & current_grid[max_col].isna()
                         detail = (
                             f"{label} is blank/unparseable on this policy, and no remaining "
                             f"candidate rate row has an open (blank) range."
                         )
                     else:
-                        min_cond = df_grid[min_col].isna() | (df_grid[min_col] <= val)
-                        max_cond = df_grid[max_col].isna() | (df_grid[max_col] >= val)
+                        min_cond = current_grid[min_col].isna() | (current_grid[min_col] <= val)
+                        max_cond = current_grid[max_col].isna() | (current_grid[max_col] >= val)
                         rule_mask = min_cond & max_cond
                         detail = (
                             f"{label} value {val} falls outside the range configured on every "
                             f"remaining candidate rate row."
                         )
-                    valid_mask = valid_mask & rule_mask
-                    if not valid_mask.any():
+                    current_grid = current_grid[rule_mask]
+                    if current_grid.empty:
                         failed_on.append((label, detail))
 
             # --- RULE 4: Dates ---
-            if valid_mask.any():
+            if not current_grid.empty:
                 val = mis_row['_mis_date']
                 if pd.isna(val):
-                    rule_mask = df_grid['from_date'].isna() & df_grid['to_date'].isna()
+                    rule_mask = current_grid['from_date'].isna() & current_grid['to_date'].isna()
                     detail = (
                         "Inception date is blank/unparseable on this policy, and no remaining "
                         "candidate rate row has an open (blank) date window."
                     )
                 else:
-                    min_cond = df_grid['from_date'].isna() | (df_grid['from_date'] <= val)
-                    max_cond = df_grid['to_date'].isna() | (df_grid['to_date'] >= val)
+                    min_cond = current_grid['from_date'].isna() | (current_grid['from_date'] <= val)
+                    max_cond = current_grid['to_date'].isna() | (current_grid['to_date'] >= val)
                     rule_mask = min_cond & max_cond
                     detail = (
                         f"Inception date {val.date()} falls outside the active date window "
                         f"on every remaining candidate rate row."
                     )
-                valid_mask = valid_mask & rule_mask
-                if not valid_mask.any():
+                current_grid = current_grid[rule_mask]
+                if current_grid.empty:
                     failed_on.append(('Policy: inception date', detail))
 
             # --- RULE 5a: Vehicle Make/Model — two-step lookup, fuzzy word-overlap ---
@@ -739,10 +791,10 @@ def process_mis_mapping(mis_file_id):
             # MakeModelMaster cluster entry, the row fails this rule. Note: if either the
             # make or the model is blank, the search string may have only 1 word available,
             # so the word-match threshold can never be met for that row by design.
-            if valid_mask.any():
+            if not current_grid.empty:
                 val_make_model = mis_row['_mis_make_model']
                 if val_make_model == 'nan' or not val_make_model:
-                    rule_mask = df_grid['new_vehicle_makes'] == ''
+                    rule_mask = current_grid['new_vehicle_makes'] == ''
                     detail = (
                         "Vehicle make/model is blank on this policy, and no remaining candidate "
                         "rate row allows a blank vehicle-make cluster."
@@ -762,12 +814,12 @@ def process_mis_mapping(mis_file_id):
                             f"[{preview}], but no remaining candidate rate row lists that group in "
                             f"its vehicle-make cluster."
                         )
-                    rule_mask = df_grid['new_vehicle_makes'].apply(
+                    rule_mask = current_grid['new_vehicle_makes'].apply(
                         lambda g: check_resolved_cluster_match(resolved_make_names, g)
                     )
 
-                valid_mask = valid_mask & rule_mask
-                if not valid_mask.any():
+                current_grid = current_grid[rule_mask]
+                if current_grid.empty:
                     failed_on.append(('Policy: vehicle make / model', detail))
 
             # --- RULE 5b: RTO — two-step master lookup ---
@@ -778,11 +830,11 @@ def process_mis_mapping(mis_file_id):
             # Step 2: check RateMaster.new_rto_list for 'zyx'
             # No fallback: if the normalized value isn't found in RTOMaster at all,
             # the row fails this rule.
-            if valid_mask.any():
+            if not current_grid.empty:
                 val_rto = mis_row['_mis_rto']
                 val_rto_raw = mis_row['_mis_rto_raw']
                 if val_rto == 'nan' or not val_rto:
-                    rule_mask = df_grid['new_rto_list'] == ''
+                    rule_mask = current_grid['new_rto_list'] == ''
                     detail = (
                         "RTO is blank on this policy, and no remaining candidate rate row "
                         "allows a blank RTO cluster."
@@ -801,57 +853,57 @@ def process_mis_mapping(mis_file_id):
                             f"group(s) [{preview}], but no remaining candidate rate row lists that group "
                             f"in its RTO cluster."
                         )
-                    rule_mask = df_grid['new_rto_list'].apply(
+                    rule_mask = current_grid['new_rto_list'].apply(
                         lambda g: check_resolved_cluster_match(resolved_rto_names, g)
                     )
-                valid_mask = valid_mask & rule_mask
-                if not valid_mask.any():
+                current_grid = current_grid[rule_mask]
+                if current_grid.empty:
                     failed_on.append(('Policy: rto no', detail))
 
             # --- RULE 6: Complex Codes (NCB, CPA, ZD) ---
-            if valid_mask.any():
+            if not current_grid.empty:
                 val_ncb = mis_row['_mis_ncb']
-                m_ncb_yes = (df_grid['is_ncb'] == 'YES') & (val_ncb >= 1) & (val_ncb <= 99)
-                m_ncb_no = (df_grid['is_ncb'] == 'NO') & (val_ncb == 0)
-                m_ncb_na = (df_grid['is_ncb'] == 'NA') | df_grid['is_ncb'].isna()
+                m_ncb_yes = (current_grid['is_ncb'] == 'YES') & (val_ncb >= 1) & (val_ncb <= 99)
+                m_ncb_no = (current_grid['is_ncb'] == 'NO') & (val_ncb == 0)
+                m_ncb_na = (current_grid['is_ncb'] == 'NA') | current_grid['is_ncb'].isna()
                 rule_mask = m_ncb_yes | m_ncb_no | m_ncb_na
-                valid_mask = valid_mask & rule_mask
-                if not valid_mask.any():
+                current_grid = current_grid[rule_mask]
+                if current_grid.empty:
                     failed_on.append((
                         'Policy: no claim bonus',
                         f"NCB value {val_ncb} doesn't satisfy the YES/NO/NA requirement on any "
                         f"remaining candidate rate row."
                     ))
 
-            if valid_mask.any():
+            if not current_grid.empty:
                 val_cpa = mis_row['_mis_cpa']
-                m_cpa_yes = (df_grid['is_cpa'] == 'YES') & (val_cpa >= 1) & (val_cpa <= 1000)
-                m_cpa_no = (df_grid['is_cpa'] == 'NO') & (val_cpa == 0)
-                m_cpa_na = (df_grid['is_cpa'] == 'NA') | df_grid['is_cpa'].isna()
+                m_cpa_yes = (current_grid['is_cpa'] == 'YES') & (val_cpa >= 1) & (val_cpa <= 1000)
+                m_cpa_no = (current_grid['is_cpa'] == 'NO') & (val_cpa == 0)
+                m_cpa_na = (current_grid['is_cpa'] == 'NA') | current_grid['is_cpa'].isna()
                 rule_mask = m_cpa_yes | m_cpa_no | m_cpa_na
-                valid_mask = valid_mask & rule_mask
-                if not valid_mask.any():
+                current_grid = current_grid[rule_mask]
+                if current_grid.empty:
                     failed_on.append((
                         'Policy: cpa',
                         f"CPA value {val_cpa} doesn't satisfy the YES/NO/NA requirement on any "
                         f"remaining candidate rate row."
                     ))
 
-            if valid_mask.any():
+            if not current_grid.empty:
                 # FIX: original code computed `val_zd in [...]` once as a Python bool
                 # OUTSIDE the per-row grid comparison, so it never varied per grid row
-                # correctly when combined with df_grid['is_zd'] comparisons. Made this
-                # an explicit boolean column-level mask instead.
+                # correctly when combined with current_grid['is_zd'] comparisons. Made
+                # this an explicit boolean column-level mask instead.
                 val_zd = mis_row['_mis_zd']
                 zd_is_yes_value = val_zd in ['1', 'YES', 'Y', 'TRUE']
                 zd_is_no_value = val_zd in ['0', 'NO', 'N', 'FALSE']
 
-                m_zd_yes = (df_grid['is_zd'] == 'YES') & zd_is_yes_value
-                m_zd_no = (df_grid['is_zd'] == 'NO') & zd_is_no_value
-                m_zd_na = (df_grid['is_zd'] == 'NA') | df_grid['is_zd'].isna()
+                m_zd_yes = (current_grid['is_zd'] == 'YES') & zd_is_yes_value
+                m_zd_no = (current_grid['is_zd'] == 'NO') & zd_is_no_value
+                m_zd_na = (current_grid['is_zd'] == 'NA') | current_grid['is_zd'].isna()
                 rule_mask = m_zd_yes | m_zd_no | m_zd_na
-                valid_mask = valid_mask & rule_mask
-                if not valid_mask.any():
+                current_grid = current_grid[rule_mask]
+                if current_grid.empty:
                     failed_on.append((
                         'Policy: nil dep',
                         f"Nil Dep value '{val_zd}' doesn't satisfy the YES/NO/NA requirement on any "
@@ -859,7 +911,7 @@ def process_mis_mapping(mis_file_id):
                     ))
 
             # --- FINAL RESOLUTION ---
-            matched_grid = df_grid[valid_mask]
+            matched_grid = current_grid
 
             # Rows sharing a group_id are the SAME rate card exploded across
             # many physical DB rows (e.g. one per RTO in its cluster) - not
