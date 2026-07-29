@@ -271,6 +271,25 @@
   .badge-processing { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
   .badge-completed  { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
   .badge-failed     { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+  .badge-cancelled  { background: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }
+
+  .btn-cancel-job {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: #fff;
+    border: 1px solid #fecaca;
+    color: #dc2626;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .12s, border-color .12s;
+  }
+  .btn-cancel-job:hover { background: #fef2f2; border-color: #fca5a5; }
+  .btn-cancel-job:disabled { opacity: .6; cursor: not-allowed; }
 
   /* ── Processing shimmer ──────────────────────────────────────────── */
   .processing-wrap { display: flex; flex-direction: column; gap: 5px; }
@@ -521,6 +540,8 @@
                 <span class="status-badge badge-completed">✓ Completed</span>
               {% elif file.status == 'FAILED' %}
                 <span class="status-badge badge-failed">✕ Failed</span>
+              {% elif file.status == 'CANCELLED' %}
+                <span class="status-badge badge-cancelled">⊘ Cancelled</span>
               {% endif %}
             </td>
             <td>
@@ -583,6 +604,15 @@
                 </a>
               {% elif file.status == 'FAILED' %}
                 <span class="error-tip" title="{{ file.error_message }}">Hover to see error</span>
+              {% elif file.status == 'CANCELLED' %}
+                <span class="text-muted-sm" title="{{ file.error_message }}">Cancelled</span>
+              {% elif file.status == 'PENDING' or file.status == 'PROCESSING' %}
+                <button type="button" class="btn-cancel-job"
+                        data-cancel-url="{% url 'cancel_mis_processing' file.id %}"
+                        data-file-id="{{ file.id }}"
+                        onclick="cancelJob(this)">
+                  ✕ Cancel
+                </button>
               {% else %}
                 <span class="text-muted-sm">Awaiting output…</span>
               {% endif %}
@@ -609,6 +639,30 @@
 </div>
 
 <script>
+// ── Cancel an in-progress job ─────────────────────────────────────
+async function cancelJob(btn) {
+  const fileId = btn.dataset.fileId;
+  if (!confirm(`Cancel processing for file #${fileId}?`)) return;
+
+  btn.disabled = true;
+  btn.textContent = 'Cancelling…';
+
+  try {
+    const res = await fetch(btn.dataset.cancelUrl, {
+      method: 'POST',
+      headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+    });
+    const data = await res.json();
+    if (!data.success) {
+      alert(data.message || 'Could not cancel this file.');
+    }
+  } catch (e) {
+    alert('Cancel request failed — check your connection and try again.');
+  }
+
+  doRefresh();
+}
+
 // ── Compute stats from rendered table rows ───────────────────────
 function computeStats() {
   const rows = document.querySelectorAll('#historyBody tr[data-id]');

@@ -165,6 +165,7 @@ urlpatterns = [
     # ==========================================
     path("mis-payout-automation/", page_access_required("Can_View_MIS_Payout_Engine")(views.mis_payout_automation), name="mis_payout_automation"),
     path("mis-payout/download/<int:file_id>/", page_access_required("Can_View_MIS_Payout_Engine")(views.download_processed_mis), name="download_processed_mis"),
+    path("mis-payout/cancel/<int:file_id>/", page_access_required("Can_View_MIS_Payout_Engine")(views.cancel_mis_processing), name="cancel_mis_processing"),
     path("mis-mapping/", page_access_required("Can_View_MIS_Payout_Engine")(views.mis_mapping_dashboard), name="mis_mapping_dashboard"),
     path("mis-mapping/add/", page_access_required("Can_View_MIS_Payout_Engine")(views.add_mis_mapping), name="add_mis_mapping"),
     path("mis-mapping/edit/<int:pk>/", page_access_required("Can_View_MIS_Payout_Engine")(views.edit_mis_mapping), name="edit_mis_mapping"),

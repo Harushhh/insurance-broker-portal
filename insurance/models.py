@@ -734,19 +734,23 @@ class MISFile(models.Model):
         ('PROCESSING', 'Processing'),
         ('COMPLETED', 'Completed'),
         ('FAILED', 'Failed'),
+        ('CANCELLED', 'Cancelled'),
     ]
 
     uploaded_file = models.FileField(upload_to="mis_uploads/%Y/%m/")
-    processed_file = models.FileField(upload_to="mis_processed/%Y/%m/", blank=True, null=True) 
+    processed_file = models.FileField(upload_to="mis_processed/%Y/%m/", blank=True, null=True)
     uploaded_by = models.ForeignKey(
-        User, 
-        on_delete=models.SET_NULL, 
-        null=True, 
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
         blank=True,
         related_name="mis_files"
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='PENDING')
     error_message = models.TextField(blank=True, null=True)
+    # Set right after process_mis_mapping_task.delay() so a later Cancel action
+    # can target the correct Celery task via app.control.revoke().
+    celery_task_id = models.CharField(max_length=255, null=True, blank=True)
     # Ranked breakdown of why NO MATCH / MULTIPLE MATCHES rows failed (grouped
     # by rule + value, e.g. "insurer X needs 110 more Rate Master rows"),
     # computed once by process_mis_mapping and stored so the dashboard doesn't
