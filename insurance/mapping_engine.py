@@ -342,7 +342,14 @@ def normalize_rto_code(raw_value):
     spaces/hyphens and truncating to 4 characters handles all three.
     """
     if pd.isna(raw_value):
-        return raw_value
+        # Must return a real string, not the raw NA marker: with newer
+        # pandas string-dtype semantics, an entirely-blank/missing column
+        # can still be genuine NA even after .astype(str) upstream. If this
+        # branch returns raw_value unchanged, a column that's blank on
+        # every row makes .apply() infer float64 for the whole result
+        # (all-NaN), and the caller's chained .str.lower() then crashes
+        # with "Can only use .str accessor with string values, not floating".
+        return ''
     s = str(raw_value).strip()
     if not s or s.lower() == 'nan':
         return s
