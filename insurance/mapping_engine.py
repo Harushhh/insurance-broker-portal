@@ -400,6 +400,7 @@ def process_mis_mapping(mis_file_id):
                 'cc_min': r.cc_min, 'cc_max': r.cc_max,
                 'sc_min': r.sc_min, 'sc_max': r.sc_max,
                 'vehicle_age_min': r.vehicle_age_min, 'vehicle_age_max': r.vehicle_age_max,
+                'tariff_min': r.tariff_min, 'tariff_max': r.tariff_max,
                 'from_date': r.from_date, 'to_date': r.to_date,
             })
 
@@ -420,7 +421,7 @@ def process_mis_mapping(mis_file_id):
         )
 
         # Cast Grid numeric & date columns safely
-        for col in ['cc_min', 'cc_max', 'sc_min', 'sc_max', 'vehicle_age_min', 'vehicle_age_max']:
+        for col in ['cc_min', 'cc_max', 'sc_min', 'sc_max', 'vehicle_age_min', 'vehicle_age_max', 'tariff_min', 'tariff_max']:
             df_grid[col] = pd.to_numeric(df_grid[col], errors='coerce')
         df_grid['from_date'] = pd.to_datetime(df_grid['from_date'], errors='coerce')
         df_grid['to_date'] = pd.to_datetime(df_grid['to_date'], errors='coerce')
@@ -476,6 +477,9 @@ def process_mis_mapping(mis_file_id):
 
         age_raw = safe_get_col(df_mis, 'Policy: vehage').astype(str).str.replace(r'[^0-9.]', '', regex=True)
         df_mis['_mis_age'] = pd.to_numeric(age_raw, errors='coerce')
+
+        tariff_raw = safe_get_col(df_mis, 'Policy: tariff rate').astype(str).str.replace(r'[^0-9.]', '', regex=True)
+        df_mis['_mis_tariff'] = pd.to_numeric(tariff_raw, errors='coerce')
 
         df_mis['_mis_date'] = pd.to_datetime(safe_get_col(df_mis, 'Policy: inception date'), errors='coerce', dayfirst=True)
 
@@ -593,7 +597,8 @@ def process_mis_mapping(mis_file_id):
             range_rules = [
                 ('_mis_cc', 'cc_min', 'cc_max', mis_row['_mis_cc_source_label']),
                 ('_mis_sc', 'sc_min', 'sc_max', 'Policy: seating capacity'),
-                ('_mis_age', 'vehicle_age_min', 'vehicle_age_max', 'Policy: vehage')
+                ('_mis_age', 'vehicle_age_min', 'vehicle_age_max', 'Policy: vehage'),
+                ('_mis_tariff', 'tariff_min', 'tariff_max', 'Policy: tariff rate'),
             ]
             for mis_col, min_col, max_col, label in range_rules:
                 if valid_mask.any():
