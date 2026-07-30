@@ -109,6 +109,28 @@ def safe_get_col(df, target_col):
     return pd.Series([None] * len(df), index=df.index)
 
 
+_CP_NULL_EQUIVALENTS = frozenset({'null', 'nul', 'nill', 'na'})
+
+
+def clean_cp_numeric(raw_series):
+    """
+    Parses a raw MIS field for the cp premium# calculation. Per the explicit
+    data-cleansing rule for this field: a blank/missing cell, or a literal
+    null-equivalent string ('null'/'nul'/'nill'/'na', case-insensitive), is
+    treated as the number 0 — not left blank/NaN. Anything else is parsed as
+    a number the normal way (stripping stray non-numeric characters like
+    commas); text that still isn't a valid number after that stays blank,
+    same as every other numeric MIS field elsewhere in this pipeline.
+    This 0-for-blank behavior is specific to cp premium# — it deliberately
+    isn't reused for cc/sc/age/tariff etc., where a blank value has its own
+    distinct meaning (an open-ended Rate Master range) that 0 would corrupt.
+    """
+    stripped = raw_series.astype(str).str.strip()
+    is_null_like = raw_series.isna() | (stripped == '') | stripped.str.lower().isin(_CP_NULL_EQUIVALENTS)
+    numeric = pd.to_numeric(stripped.str.replace(r'[^0-9.\-]', '', regex=True), errors='coerce')
+    return numeric.mask(is_null_like, 0)
+
+
 def consolidated_rate(rate_type, od_rate, tp_rate, net_rate):
     """
     Collapses a RateMaster row's OD/TP/Net rate trio (the same 3-way split
@@ -555,21 +577,18 @@ def process_mis_mapping(mis_file_id):
         # normalize the underscore away so 'non_motor' and 'non motor' are the same check.
         _cp_product = safe_get_col(df_mis, 'Product').astype(str).str.strip().str.lower().str.replace('_', ' ', regex=False)
 
-        _cp_total_od = pd.to_numeric(
-            safe_get_col(df_mis, 'Policy: total od').astype(str).str.replace(r'[^0-9.\-]', '', regex=True), errors='coerce'
-        )
-        _cp_gwp_net_premium = pd.to_numeric(
-            safe_get_col(df_mis, 'Policy: gwp net premium').astype(str).str.replace(r'[^0-9.\-]', '', regex=True), errors='coerce'
-        )
-        _cp_tp_terrorism_premium = pd.to_numeric(
-            safe_get_col(df_mis, 'Policy: tp terrorism premium').astype(str).str.replace(r'[^0-9.\-]', '', regex=True), errors='coerce'
-        )
+        # Data cleansing: blank cells and null-equivalent strings ('null',
+        # 'nul', 'nill', 'na' — case-insensitive) are treated as 0 for all
+        # three fields feeding this calculation.
+        _cp_total_od = clean_cp_numeric(safe_get_col(df_mis, 'Policy: total od'))
+        _cp_gwp_net_premium = clean_cp_numeric(safe_get_col(df_mis, 'Policy: gwp net premium'))
+        _cp_tp_terrorism_premium = clean_cp_numeric(safe_get_col(df_mis, 'Policy: tp terrorism premium'))
 
         _cp_is_private_car_saod_group = (_cp_policy_category == 'private car') & _cp_sub_product.isin(['1+1', '1+3', 'saod'])
         _cp_is_non_motor = _cp_product == 'non motor'
 
         df_mis['cp premium#'] = _cp_gwp_net_premium
-        df_mis.loc[_cp_is_non_motor, 'cp premium#'] = _cp_gwp_net_premium - _cp_tp_terrorism_premium.fillna(0)
+        df_mis.loc[_cp_is_non_motor, 'cp premium#'] = _cp_gwp_net_premium - _cp_tp_terrorism_premium
         df_mis.loc[_cp_is_private_car_saod_group, 'cp premium#'] = _cp_total_od
 
         # 2. FETCH RATE MASTER DATA
