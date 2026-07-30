@@ -1133,6 +1133,34 @@ def process_mis_mapping(mis_file_id):
         if 'cp premium#' not in df_final.columns:
             df_final['cp premium#'] = None
 
+        # --- CP PREMIUM# OVERWRITE — Motor rows, keyed by Pitype ---
+        # For matched Motor rows, cp premium# must reflect the specific
+        # premium component implied by Pitype instead of the general-purpose
+        # calculation above. This runs on df_final (post-match, post-blank)
+        # rather than reusing the pre-compute section's variables, both
+        # because Pitype only exists after matching and so the already-
+        # blanked-to-None Pitype on non-MATCH rows naturally excludes them
+        # here with no extra Mapping Status check needed, and because
+        # re-deriving straight from df_final's own columns avoids relying on
+        # index alignment surviving the df_mis/df_extracted merge above.
+        # Non-motor rows, and motor rows with any other Pitype (e.g. 'On OD
+        # and TP'), fall through untouched — Condition 4's fallback is simply
+        # "don't touch cp premium#" for every row none of these masks hit.
+        _pi_ov_product = safe_get_col(df_final, 'Product').astype(str).str.strip().str.lower()
+        _pi_ov_is_motor = _pi_ov_product == 'motor'
+
+        _pi_ov_total_od = clean_cp_numeric(safe_get_col(df_final, 'Policy: total od'))
+        _pi_ov_tp_premium = clean_cp_numeric(safe_get_col(df_final, 'Policy: tp premium'))
+        _pi_ov_gwp_net_premium = clean_cp_numeric(safe_get_col(df_final, 'Policy: gwp net premium'))
+
+        _pi_ov_on_od_mask = _pi_ov_is_motor & (df_final['Pitype'] == 'On OD')
+        _pi_ov_on_tp_mask = _pi_ov_is_motor & (df_final['Pitype'] == 'On TP')
+        _pi_ov_on_net_mask = _pi_ov_is_motor & (df_final['Pitype'] == 'On Net')
+
+        df_final.loc[_pi_ov_on_od_mask, 'cp premium#'] = _pi_ov_total_od
+        df_final.loc[_pi_ov_on_tp_mask, 'cp premium#'] = _pi_ov_tp_premium
+        df_final.loc[_pi_ov_on_net_mask, 'cp premium#'] = _pi_ov_gwp_net_premium
+
         # Pay-in/Pay-out/Margin — derived straight from Porate/Pirate/cp
         # premium#, computed after those have already been blanked to None
         # on non-MATCH rows, so a blank Porate/Pirate naturally makes these
