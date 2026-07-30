@@ -540,6 +540,38 @@ def process_mis_mapping(mis_file_id):
         df_mis['_mis_cpa'] = pd.to_numeric(safe_get_col(df_mis, 'Policy: cpa'), errors='coerce')
         df_mis['_mis_zd'] = safe_get_col(df_mis, 'Policy: nil dep').astype(str).str.strip().str.upper()
 
+        # --- CP PREMIUM# (reconciliation) ---
+        # Computed straight from raw MIS fields, independent of Rate Master
+        # matching, so it's populated for every row regardless of Mapping
+        # Status:
+        #   1. Private Car + sub product in {1+1, 1+3, SAOD} -> Policy: total od
+        #   2. Else, Product == Non Motor -> gwp net premium - tp terrorism premium
+        #   3. Else -> gwp net premium
+        # Checked in that order (case 1 wins over case 2 on any overlap),
+        # matching the if/elif/else the business logic was specified as.
+        _cp_policy_category = safe_get_col(df_mis, 'Policy: policy category').astype(str).str.strip().str.lower()
+        _cp_sub_product = safe_get_col(df_mis, 'Policy: sub product').astype(str).str.strip().str.lower()
+        # 'Product' values seen in practice: 'motor', 'non_motor', 'health', 'life' —
+        # normalize the underscore away so 'non_motor' and 'non motor' are the same check.
+        _cp_product = safe_get_col(df_mis, 'Product').astype(str).str.strip().str.lower().str.replace('_', ' ', regex=False)
+
+        _cp_total_od = pd.to_numeric(
+            safe_get_col(df_mis, 'Policy: total od').astype(str).str.replace(r'[^0-9.\-]', '', regex=True), errors='coerce'
+        )
+        _cp_gwp_net_premium = pd.to_numeric(
+            safe_get_col(df_mis, 'Policy: gwp net premium').astype(str).str.replace(r'[^0-9.\-]', '', regex=True), errors='coerce'
+        )
+        _cp_tp_terrorism_premium = pd.to_numeric(
+            safe_get_col(df_mis, 'Policy: tp terrorism premium').astype(str).str.replace(r'[^0-9.\-]', '', regex=True), errors='coerce'
+        )
+
+        _cp_is_private_car_saod_group = (_cp_policy_category == 'private car') & _cp_sub_product.isin(['1+1', '1+3', 'saod'])
+        _cp_is_non_motor = _cp_product == 'non motor'
+
+        df_mis['cp premium#'] = _cp_gwp_net_premium
+        df_mis.loc[_cp_is_non_motor, 'cp premium#'] = _cp_gwp_net_premium - _cp_tp_terrorism_premium.fillna(0)
+        df_mis.loc[_cp_is_private_car_saod_group, 'cp premium#'] = _cp_total_od
+
         # 2. FETCH RATE MASTER DATA
         # Two-phase (Recommendation 5): first find which insurers actually
         # have active rows at all (cheap — one column, deduplicated), fuzzy-
@@ -1075,7 +1107,14 @@ def process_mis_mapping(mis_file_id):
 
         df_final.loc[df_final['Mapping Status'] != "✅ MATCH", payout_cols] = None
 
-        generated_cols = ['Mapping Status', 'Failure Reason'] + payout_cols
+        # cp premium# is computed from raw MIS fields only (see pre-compute
+        # section above) and applies to every row regardless of Mapping
+        # Status, so it's listed separately from payout_cols rather than
+        # blanked out alongside them.
+        if 'cp premium#' not in df_final.columns:
+            df_final['cp premium#'] = None
+
+        generated_cols = ['Mapping Status', 'Failure Reason'] + payout_cols + ['cp premium#']
         original_cols = [c for c in mis_cols]
         df_final = df_final[generated_cols + original_cols]
 
