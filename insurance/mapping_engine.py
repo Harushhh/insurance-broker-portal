@@ -109,6 +109,33 @@ def safe_get_col(df, target_col):
     return pd.Series([None] * len(df), index=df.index)
 
 
+def consolidated_rate(rate_type, od_rate, tp_rate, net_rate):
+    """
+    Collapses a RateMaster row's OD/TP/Net rate trio (the same 3-way split
+    exists on both the po_* and pi_* sides) into the single rate implied by
+    its own type field, instead of exporting all three as separate columns.
+    'On OD and TP' sums both rates — same convention already used for match
+    tie-breaking (_effective_rate) and Policy Locker's po_rate.
+    """
+    if rate_type == 'On OD and TP':
+        od = od_rate if pd.notna(od_rate) else 0
+        tp = tp_rate if pd.notna(tp_rate) else 0
+        return od + tp
+    if rate_type == 'On TP':
+        return tp_rate if pd.notna(tp_rate) else None
+    if rate_type == 'On OD':
+        return od_rate if pd.notna(od_rate) else None
+    if rate_type == 'On Net':
+        return net_rate if pd.notna(net_rate) else None
+    # Unexpected/blank type — fall back to whichever column is actually
+    # populated (Net > OD > TP), so a data-quality gap in the type field
+    # doesn't produce a blank rate when a real rate value exists.
+    for val in (net_rate, od_rate, tp_rate):
+        if pd.notna(val) and val:
+            return val
+    return None
+
+
 def check_categorical_match(val, grid_val):
     """
     Smart matching for categorical fields (Fuel, Class, Product) to handle typos safely.
@@ -560,6 +587,7 @@ def process_mis_mapping(mis_file_id):
         grid_columns = [
             'id', 'group_id', 'po_type', 'po_od_rate', 'po_tp_rate', 'po_net_rate',
             'po_flat_amount', 'add_tnc', 'insurance_company',
+            'pi_type', 'pi_od_rate', 'pi_tp_rate', 'pi_net_rate', 'pi_flat_amount',
             'product__name', 'sub_product__name', 'fuel_type__name', 'make_model_class__name',
             'is_ncb__code', 'is_cpa__code', 'is_zd__code',
             'new_vehicle_makes', 'new_rto_list',
@@ -649,8 +677,9 @@ def process_mis_mapping(mis_file_id):
                         f"correct the source MIS data and re-run mapping for this row."
                     ),
                     'Displaygroupid': None,
-                    'Potype': None, 'Poodrate': None, 'Potprate': None,
-                    'Ponetrate': None, 'Poflatamount': None, 'Addtnc': None
+                    'Potype': None, 'Porate': None, 'Poflatamount': None,
+                    'Pitype': None, 'Pirate': None, 'Piflatamount': None,
+                    'Addtnc': None
                 })
                 continue
 
@@ -961,10 +990,17 @@ def process_mis_mapping(mis_file_id):
                     'Failure Reason': 'Matched Successfully',
                     'Displaygroupid': best_match.get('group_id') if pd.notna(best_match.get('group_id')) else best_match.get('id'),
                     'Potype': best_match.get('po_type'),
-                    'Poodrate': best_match.get('po_od_rate'),
-                    'Potprate': best_match.get('po_tp_rate'),
-                    'Ponetrate': best_match.get('po_net_rate'),
+                    'Porate': consolidated_rate(
+                        best_match.get('po_type'), best_match.get('po_od_rate'),
+                        best_match.get('po_tp_rate'), best_match.get('po_net_rate')
+                    ),
                     'Poflatamount': best_match.get('po_flat_amount'),
+                    'Pitype': best_match.get('pi_type'),
+                    'Pirate': consolidated_rate(
+                        best_match.get('pi_type'), best_match.get('pi_od_rate'),
+                        best_match.get('pi_tp_rate'), best_match.get('pi_net_rate')
+                    ),
+                    'Piflatamount': best_match.get('pi_flat_amount'),
                     'Addtnc': best_match.get('add_tnc')
                 })
 
@@ -986,8 +1022,9 @@ def process_mis_mapping(mis_file_id):
                         f"one group applies. Matching Group IDs: {group_id_str}"
                     ),
                     'Displaygroupid': None,
-                    'Potype': None, 'Poodrate': None, 'Potprate': None,
-                    'Ponetrate': None, 'Poflatamount': None, 'Addtnc': None
+                    'Potype': None, 'Porate': None, 'Poflatamount': None,
+                    'Pitype': None, 'Pirate': None, 'Piflatamount': None,
+                    'Addtnc': None
                 })
 
             else:
@@ -1003,8 +1040,9 @@ def process_mis_mapping(mis_file_id):
                     'Mapping Status': '❌ NO MATCH',
                     'Failure Reason': reason,
                     'Displaygroupid': None,
-                    'Potype': None, 'Poodrate': None, 'Potprate': None,
-                    'Ponetrate': None, 'Poflatamount': None, 'Addtnc': None
+                    'Potype': None, 'Porate': None, 'Poflatamount': None,
+                    'Pitype': None, 'Pirate': None, 'Piflatamount': None,
+                    'Addtnc': None
                 })
 
         # 5. ASSEMBLE FINAL EXPORT
@@ -1030,7 +1068,7 @@ def process_mis_mapping(mis_file_id):
         df_final['Mapping Status'] = df_final['Mapping Status'].fillna("❌ NO MATCH")
 
         # Ensure output columns exist
-        payout_cols = ['Displaygroupid', 'Potype', 'Poodrate', 'Potprate', 'Ponetrate', 'Poflatamount', 'Addtnc']
+        payout_cols = ['Displaygroupid', 'Potype', 'Porate', 'Poflatamount', 'Pitype', 'Pirate', 'Piflatamount', 'Addtnc']
         for p_col in payout_cols:
             if p_col not in df_final.columns:
                 df_final[p_col] = None
