@@ -661,7 +661,27 @@ class SpecialRateRequest(models.Model):
         ("REJECTED", "Rejected"),
     ]
 
+    PRODUCT_CHOICES = [
+        ("MOTOR", "Motor"),
+        ("LIFE", "Life"),
+        ("HEALTH", "Health"),
+        ("NON_MOTOR", "Non-Motor"),
+    ]
+
+    # Approval routing. Matched on *either* email or UserProfile.user_id_code
+    # (not username — display casing for the same login varies, e.g.
+    # "harsh.t" vs "Harsh.t" both exist as separate accounts in some
+    # environments) so a stale ID on one side still resolves via the other.
+    # Motor requests route to an extra approver (the Motor HOD); every other
+    # product falls back to the pair that already covers finance/full-admin
+    # sign-off.
+    BASE_APPROVER_EMAILS = ["amir.f@arhamsecure.com", "harsh.t@arhamsecure.com"]
+    BASE_APPROVER_USER_IDS = ["0556", "2966"]
+    MOTOR_ONLY_APPROVER_EMAILS = ["nikhil.m@arhamsecure.com"]
+    MOTOR_ONLY_APPROVER_USER_IDS = ["2453"]
+
     rate_type = models.CharField(max_length=10, choices=RATE_TYPE_CHOICES, db_index=True)
+    product = models.CharField(max_length=20, choices=PRODUCT_CHOICES, default="MOTOR", db_index=True)
     entry_no = models.CharField(max_length=100)
     # Mandatory for MG-BG, optional for BG — enforced in the form layer
     # (SpecialRateRequestForm subclasses), not here, since the same model
@@ -693,6 +713,44 @@ class SpecialRateRequest(models.Model):
 
     def __str__(self):
         return f"{self.get_rate_type_display()} #{self.entry_no}"
+
+    @classmethod
+    def approver_emails_for_product(cls, product):
+        if product == "MOTOR":
+            return cls.BASE_APPROVER_EMAILS + cls.MOTOR_ONLY_APPROVER_EMAILS
+        return cls.BASE_APPROVER_EMAILS
+
+    @classmethod
+    def approver_user_ids_for_product(cls, product):
+        """UserProfile.user_id_code values for whoever a request for this product routes to."""
+        if product == "MOTOR":
+            return cls.BASE_APPROVER_USER_IDS + cls.MOTOR_ONLY_APPROVER_USER_IDS
+        return cls.BASE_APPROVER_USER_IDS
+
+    @classmethod
+    def assigned_approvers_for_product(cls, product):
+        """Users routed to review requests for this product."""
+        return User.objects.filter(
+            models.Q(email__in=cls.approver_emails_for_product(product))
+            | models.Q(profile__user_id_code__in=cls.approver_user_ids_for_product(product))
+        ).distinct()
+
+    def approver_emails(self):
+        return self.approver_emails_for_product(self.product)
+
+    def approver_user_ids(self):
+        return self.approver_user_ids_for_product(self.product)
+
+    def assigned_approvers(self):
+        return self.assigned_approvers_for_product(self.product)
+
+    def can_be_reviewed_by(self, user):
+        """Full Admins can act on any request; everyone else must be a routed approver."""
+        if user.groups.filter(name="ADMIN").exists():
+            return True
+        if user.email and user.email in self.approver_emails():
+            return True
+        return UserProfile.objects.filter(user=user, user_id_code__in=self.approver_user_ids()).exists()
 
 
 # =========================================================

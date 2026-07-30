@@ -101,9 +101,18 @@ class SpecialRateRequestForm(forms.ModelForm):
     server-side based on which submit button fired, so it can't be spoofed
     via a tampered hidden input to dodge the MG-BG mandatory-file rule.
     """
+    # Declared explicitly (rather than left to ModelForm's auto-generated
+    # ChoiceField) so a blank placeholder option can be prepended — required=True
+    # still rejects that blank value, so the user must make a real choice
+    # instead of silently submitting whatever choice happens to render first.
+    product = forms.ChoiceField(
+        choices=[("", "Select Product")] + list(SpecialRateRequest.PRODUCT_CHOICES),
+        widget=forms.Select(attrs={"class": "field-input"}),
+    )
+
     class Meta:
         model = SpecialRateRequest
-        fields = ["entry_no", "insurer_approval_file", "remarks"]
+        fields = ["product", "entry_no", "insurer_approval_file", "remarks"]
         widgets = {
             "entry_no": forms.TextInput(attrs={"class": "field-input", "placeholder": "e.g. ENT-2026-0001"}),
             "insurer_approval_file": forms.FileInput(attrs={"class": "field-file", "accept": ".pdf,.png,.jpg,.jpeg"}),

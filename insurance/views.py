@@ -3992,8 +3992,22 @@ def special_rate_requests_review(request):
         "BG": raw_type_counts["BG"],
     }
 
+    # Every request's approver set is one of exactly two fixed lists (Motor
+    # vs. everything else), so resolve both once instead of querying per row.
+    approvers_by_product = {
+        "MOTOR": list(SpecialRateRequest.assigned_approvers_for_product("MOTOR")),
+        "DEFAULT": list(SpecialRateRequest.assigned_approvers_for_product("LIFE")),
+    }
+    is_full_admin = request.user.groups.filter(name="ADMIN").exists()
+
+    requests_list = list(requests_qs)
+    for req in requests_list:
+        approvers = approvers_by_product["MOTOR" if req.product == "MOTOR" else "DEFAULT"]
+        req.assigned_approver_names = ", ".join(u.get_full_name() or u.username for u in approvers)
+        req.can_review = is_full_admin or any(u.pk == request.user.pk for u in approvers)
+
     return render(request, "special_rate_requests_review.html", {
-        "requests": requests_qs,
+        "requests": requests_list,
         "status_counts": status_counts,
         "rate_type_counts": rate_type_counts,
         "total_requests": requests_qs.count(),
@@ -4015,6 +4029,9 @@ def update_special_rate_request_status(request):
                 return JsonResponse({"success": False, "message": "Invalid status."})
 
             req_obj = SpecialRateRequest.objects.get(id=request_id)
+            if not req_obj.can_be_reviewed_by(request.user):
+                return JsonResponse({"success": False, "message": "You are not an assigned approver for this request."}, status=403)
+
             req_obj.status = new_status
             req_obj.reviewed_by = request.user
             req_obj.reviewed_at = timezone.now()
