@@ -1133,7 +1133,18 @@ def process_mis_mapping(mis_file_id):
         if 'cp premium#' not in df_final.columns:
             df_final['cp premium#'] = None
 
-        generated_cols = ['Mapping Status', 'Failure Reason'] + payout_cols + ['cp premium#']
+        # Pay-in/Pay-out/Margin — derived straight from Porate/Pirate/cp
+        # premium#, computed after those have already been blanked to None
+        # on non-MATCH rows, so a blank Porate/Pirate naturally makes these
+        # blank too (arithmetic on None propagates to NaN) rather than
+        # needing separate blanking logic here.
+        reconciliation_cols = ['Pay-in Amt', 'Pay-out Amt', 'Margin Rate', 'Margin Amt']
+        df_final['Pay-in Amt'] = (df_final['Pirate'] / 100) * df_final['cp premium#']
+        df_final['Pay-out Amt'] = (df_final['Porate'] / 100) * df_final['cp premium#']
+        df_final['Margin Rate'] = df_final['Pirate'] - df_final['Porate']
+        df_final['Margin Amt'] = df_final['Pay-in Amt'] - df_final['Pay-out Amt']
+
+        generated_cols = ['Mapping Status', 'Failure Reason'] + payout_cols + ['cp premium#'] + reconciliation_cols
         original_cols = [c for c in mis_cols]
         df_final = df_final[generated_cols + original_cols]
 
