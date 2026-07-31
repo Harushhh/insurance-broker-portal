@@ -328,7 +328,7 @@
                         <thead>
                             <tr>
                                 {% for field in field_names %}
-                                    <th>{{ field|cut:"_"|title }}</th>
+                                    <th>{{ field|replace:"_"|title }}</th>
                                 {% endfor %}
                             </tr>
                         </thead>
