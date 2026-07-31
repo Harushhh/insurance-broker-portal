@@ -536,7 +536,7 @@
           </select>
         </div>
 
-        <div class="field-group">
+        <div class="field-group" id="sc_field_group" style="display:none;">
           <label>Exact SC</label>
           <input type="text" name="sc" value="{{ selected.sc }}" placeholder="e.g. 4">
         </div>
@@ -610,7 +610,6 @@
             <th>Tariff Range</th>
             <th>PO Type</th>
             <th>PO Rate</th>
-            <th>PO Flat Amount</th>
             <th>Add TNC</th>
             <th>Rate Status</th>
             <th>Action</th>
@@ -630,7 +629,6 @@
                 {{ row.po_rate|default:"0" }}%
               {% endif %}
             </td>
-            <td>₹{{ row.po_flat_amount|default:"0" }}</td>
             <td>{{ row.add_tnc|default:"-" }}</td>
             <td>
               {% if row.status == 'ACTIVE' %}
@@ -658,7 +656,7 @@
           </tr>
           {% empty %}
           <tr>
-            <td colspan="9" class="empty-row">
+            <td colspan="8" class="empty-row">
               <span style="font-size: 18px; display:block; margin-bottom: 8px;">📋</span>
               No matching records found for this combination.
             </td>
@@ -724,13 +722,16 @@
     const productTs = document.querySelector('select[name="product"]').tomselect;
     const classTs = document.querySelector('select[name="make_model_class"]').tomselect;
 
-    function updateClasses() {
+    function getSelectedProductText() {
       const selectedProductId = productTs.getValue();
-      let productText = "";
-      
       if (selectedProductId && productTs.options[selectedProductId]) {
-          productText = productTs.options[selectedProductId].text.trim();
+          return productTs.options[selectedProductId].text.trim();
       }
+      return "";
+    }
+
+    function updateClasses() {
+      const productText = getSelectedProductText();
 
       classTs.clear(true);
       classTs.clearOptions();
@@ -738,7 +739,7 @@
       if (productText && productClassMap[productText]) {
           const allowedClasses = productClassMap[productText];
           allowedClasses.forEach(cls => {
-              classTs.addOption({value: cls, text: cls}); 
+              classTs.addOption({value: cls, text: cls});
           });
       } else {
           allDbClasses.forEach(cls => {
@@ -751,8 +752,30 @@
       }
     }
 
+    // --- 3b. CONDITIONALLY SHOW "EXACT SC" ONLY FOR PCV 2W/3W/4W ---
+    const EXACT_SC_PRODUCTS = ["PCV 2W", "PCV 3W", "PCV 4W"];
+    const scFieldGroup = document.getElementById("sc_field_group");
+    const scInput = scFieldGroup.querySelector('input[name="sc"]');
+
+    function updateScVisibility() {
+      const productText = getSelectedProductText();
+
+      if (EXACT_SC_PRODUCTS.includes(productText)) {
+          scFieldGroup.style.display = "";
+          scInput.disabled = false;
+          scInput.required = true;
+      } else {
+          scFieldGroup.style.display = "none";
+          scInput.disabled = true;
+          scInput.required = false;
+          scInput.value = "";
+      }
+    }
+
     productTs.on('change', updateClasses);
+    productTs.on('change', updateScVisibility);
     updateClasses();
+    updateScVisibility();
 
     // --- 4. STRICT DATE LOGIC (Disable locking for past dates) ---
     const dateInput = document.getElementById("target_date_input");
