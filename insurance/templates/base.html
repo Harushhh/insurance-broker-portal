@@ -357,7 +357,7 @@
                 {% if 'Can_View_Motor_Payout_Rates' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'motor_payout_rates' %}" class="nav-link {% if request.path == '/motor-payout-rates/' %}active{% endif %}">
-                        <i class="bi bi-calculator-fill"></i> Quote Simulator
+                        <i class="bi bi-calculator-fill"></i> Motor Quote Simulator
                     </a>
                 </li>
                 {% endif %}
@@ -371,7 +371,7 @@
                 {% if 'Can_View_Policy_Locker' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'policy_lock_checker' %}" class="nav-link {% if request.path == '/policy-lock-checker/' %}active{% endif %}">
-                        <i class="bi bi-lock-fill"></i> Policy Locker
+                        <i class="bi bi-lock-fill"></i> Motor Policy Locker
                     </a>
                 </li>
                 {% endif %}
