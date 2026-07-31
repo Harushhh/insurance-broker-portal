@@ -11,6 +11,8 @@
                     {% else %}
                         <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 px-3 py-1 rounded-pill" style="font-size: 10px; letter-spacing: 0.5px;">🔓 UNLOCKED</span>
                     {% endif %}
+                {% elif field == 'tariff_range' %}
+                    {{ row.tariff_min|default:"0" }}-{{ row.tariff_max|default:"0" }}
                 {% elif val is None or val == "" %}
                     <span class="text-muted opacity-50">-</span>
                 {% else %}

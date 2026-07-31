@@ -2681,7 +2681,7 @@ def health_payout_rates(request):
 MOTOR_PAYOUT_BATCH_SIZE = 50
 MOTOR_PAYOUT_MAX_RESULTS = 300
 MOTOR_PAYOUT_FIELD_NAMES = [
-    "display_group_id", "status", "insurance_company", "po_type",
+    "display_group_id", "status", "insurance_company", "tariff_range", "po_type",
     "po_rate", "po_flat_amount", "add_tnc"
 ]
 
