@@ -60,8 +60,6 @@
     </style>
 </head>
 <body class="auth-body">
-    <div class="autumn-leaves-layer" data-density="16"></div>
-
     <div class="auth-shell">
         {% if messages %}
         <div class="auth-toasts">
@@ -72,7 +70,5 @@
         {% endif %}
         {% block content %}{% endblock %}
     </div>
-
-    <script src="{% static 'insurance/js/falling-leaves.js' %}"></script>
 </body>
 </html>
