@@ -975,6 +975,9 @@ def api_upload_chunk(request):
 # -------------------------
 # Dashboard (GROUPED view)
 # -------------------------
+DASHBOARD_BATCH_SIZE = 50
+
+
 def dashboard(request):
     qs = RateMaster.objects.select_related(
         "group", "product", "sub_product", "policy_type", "fuel_type",
@@ -1102,22 +1105,28 @@ def dashboard(request):
             matching_gids_set.add(gid)
             ordered_gids.append(gid)
 
-        if len(ordered_gids) >= 200:
-            break
+    paginator = Paginator(ordered_gids, DASHBOARD_BATCH_SIZE)
+    try:
+        page_number = int(request.GET.get("page") or 1)
+    except ValueError:
+        page_number = 1
+    page_obj = paginator.get_page(page_number)
+    page_gids = list(page_obj.object_list)
+    elided_page_range = list(paginator.get_elided_page_range(page_obj.number, on_each_side=1, on_ends=1))
 
     buckets = defaultdict(list)
-    if ordered_gids:
+    if page_gids:
         full_group_qs = RateMaster.objects.select_related(
             "group", "product", "sub_product", "policy_type", "fuel_type",
             "make_model_class", "is_ncb", "is_cpa", "is_zd"
-        ).filter(Q(group_id__in=ordered_gids) | Q(id__in=ordered_gids))
+        ).filter(Q(group_id__in=page_gids) | Q(id__in=page_gids))
 
         for row in full_group_qs.iterator(chunk_size=2000):
             gid = row.group_id if row.group_id is not None else row.id
             buckets[gid].append(row)
 
     grouped_rows = []
-    for gid in ordered_gids:
+    for gid in page_gids:
         rows = buckets.get(gid, [])
         if not rows:
             continue
@@ -1179,8 +1188,10 @@ def dashboard(request):
 
     return render(request, "dashboard.html", {
         "data": grouped_rows,
+        "page_obj": page_obj,
+        "elided_page_range": elided_page_range,
         "field_names": field_names,
-        "total": len(grouped_rows),
+        "total": paginator.count,
         "active_count": active_count,
         "inactive_count": inactive_count,
         "insurance_company_list": insurance_company_list,

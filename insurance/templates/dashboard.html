@@ -104,6 +104,16 @@
     .rm-tab-disabled { color: #cbd5e1 !important; cursor: not-allowed; }
     .rm-tab-disabled:hover { color: #cbd5e1 !important; }
     .rm-soon { font-size: 9px; font-weight: 800; background: #e2e8f0; color: #475569; padding: 1px 6px; border-radius: 999px; margin-left: 2px; text-transform: uppercase; }
+
+    /* Pagination */
+    .pager { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 20px; border-top: 1px solid #e2e8f0; }
+    .pager a, .pager span { padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; text-decoration: none; }
+    .pager a { background: #f8fafc; color: #334155; border: 1px solid #e2e8f0; }
+    .pager a:hover { background: #eff6ff; color: #1d4ed8; }
+    .pager .disabled { color: #cbd5e1; }
+    .pager .ellipsis { color: #94a3b8; padding: 7px 4px; border: none; }
+    .pager .page-num { min-width: 36px; text-align: center; }
+    .pager .page-num.active { background: #2563eb; color: #fff; border-color: #2563eb; }
 </style>
 
 <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3 mb-4">
@@ -362,6 +372,36 @@
                     </tbody>
                 </table>
             </div>
+
+            {% if page_obj.paginator.num_pages > 1 %}
+                <div class="pager">
+                    {% if page_obj.has_previous %}
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&{% endif %}{% endfor %}page=1">&laquo; First</a>
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}">&lsaquo; Prev</a>
+                    {% else %}
+                        <span class="disabled">&laquo; First</span>
+                        <span class="disabled">&lsaquo; Prev</span>
+                    {% endif %}
+
+                    {% for p in elided_page_range %}
+                        {% if p == page_obj.paginator.ELLIPSIS %}
+                            <span class="ellipsis">{{ p }}</span>
+                        {% elif p == page_obj.number %}
+                            <span class="page-num active">{{ p }}</span>
+                        {% else %}
+                            <a class="page-num" href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&{% endif %}{% endfor %}page={{ p }}">{{ p }}</a>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if page_obj.has_next %}
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&{% endif %}{% endfor %}page={{ page_obj.next_page_number }}">Next &rsaquo;</a>
+                        <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value|urlencode }}&{% endif %}{% endfor %}page={{ page_obj.paginator.num_pages }}">Last &raquo;</a>
+                    {% else %}
+                        <span class="disabled">Next &rsaquo;</span>
+                        <span class="disabled">Last &raquo;</span>
+                    {% endif %}
+                </div>
+            {% endif %}
         {% else %}
             <div class="text-center py-5">
                 <i class="bi bi-search" style="font-size: 48px; color: #cbd5e1;"></i>
