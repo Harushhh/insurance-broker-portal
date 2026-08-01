@@ -2131,83 +2131,8 @@ def bulk_update_rates(request):
 # -------------------------
 # RATE MASTER HEALTH
 # -------------------------
-# Fields a group's exploded physical rows are expected to agree on - the
-# same set mapping_engine.py's own tie-break logic already treats as "should
-# be identical within a group" (po_type/rates/flat/tnc), plus status and
-# is_deleted, which payout matching doesn't care about but a health check
-# should.
-RATE_GROUP_AGREEMENT_FIELDS = [
-    "po_type", "po_od_rate", "po_tp_rate", "po_net_rate",
-    "po_flat_amount", "add_tnc", "status", "is_deleted",
-]
-
-RATE_EXPIRY_WINDOW_DAYS = 30
-
 def rate_master_health(request):
-    # 1. GROUP DISAGREEMENT — rows sharing one group_id that don't actually
-    # agree on the fields they're supposed to (see RATE_GROUP_AGREEMENT_FIELDS).
-    rows_by_group = defaultdict(list)
-    for row in RateMaster.objects.filter(group_id__isnull=False, is_deleted="NO").values(
-        "id", "group_id", "insurance_company", *RATE_GROUP_AGREEMENT_FIELDS
-    ):
-        rows_by_group[row["group_id"]].append(row)
-
-    disagreement_groups = []
-    for gid, rows in rows_by_group.items():
-        if len(rows) < 2:
-            continue
-        first = rows[0]
-        if any(r[f] != first[f] for r in rows[1:] for f in RATE_GROUP_AGREEMENT_FIELDS):
-            disagreement_groups.append({
-                "group_id": gid,
-                "insurance_company": first["insurance_company"],
-                "row_count": len(rows),
-                "row_ids": [r["id"] for r in rows],
-            })
-    disagreement_groups.sort(key=lambda g: -g["row_count"])
-
-    # 2. COVERAGE DROP — insurers with any RateMaster history that currently
-    # have zero active, non-deleted rows.
-    all_insurers = set(
-        RateMaster.objects.exclude(insurance_company__isnull=True)
-        .exclude(insurance_company__exact="")
-        .values_list("insurance_company", flat=True)
-        .distinct()
-    )
-    active_insurers = set(
-        RateMaster.objects.filter(status="ACTIVE", is_deleted="NO")
-        .exclude(insurance_company__isnull=True)
-        .exclude(insurance_company__exact="")
-        .values_list("insurance_company", flat=True)
-        .distinct()
-    )
-    insurers_without_coverage = sorted(all_insurers - active_insurers)
-
-    # 3. EXPIRING SOON — active rows whose validity window closes within the
-    # configured window.
-    today = timezone.localdate()
-    expiring_soon = list(
-        RateMaster.objects.filter(
-            status="ACTIVE", is_deleted="NO",
-            to_date__gte=today, to_date__lte=today + timedelta(days=RATE_EXPIRY_WINDOW_DAYS)
-        )
-        .select_related("product", "sub_product")
-        .order_by("to_date")
-        .values(
-            "id", "group_id", "insurance_company", "to_date",
-            "product__name", "sub_product__name",
-        )
-    )
-    for row in expiring_soon:
-        row["display_group_id"] = row["group_id"] if row["group_id"] is not None else row["id"]
-        row["days_left"] = (row["to_date"] - today).days
-
-    return render(request, "rate_master_health.html", {
-        "disagreement_groups": disagreement_groups,
-        "insurers_without_coverage": insurers_without_coverage,
-        "expiring_soon": expiring_soon,
-        "expiry_window_days": RATE_EXPIRY_WINDOW_DAYS,
-    })
+    return render(request, "rate_master_health.html", {})
 
 # -------------------------
 # HEALTH RATE MASTER
