@@ -3453,7 +3453,10 @@ def locked_policy_dashboard(request):
 
     records = list(qs.order_by("-created_at")[:300])
 
+    fuel_name_by_id = {str(f.id): f.name for f in FuelTypeMaster.objects.all()}
+
     for row in records:
+        row.display_fuel = fuel_name_by_id.get((row.fuel or "").strip(), row.fuel)
         if row.source_rate:
             mmc_name = row.source_rate.make_model_class.name.strip().upper() if row.source_rate.make_model_class else "NA"
             
