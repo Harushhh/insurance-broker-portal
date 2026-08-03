@@ -3396,7 +3396,7 @@ def lock_unlock_policy(request, rate_id):
     obj.add_tnc = rate_obj.add_tnc
     obj.rto_code = request.POST.get("rto_code", "")
     obj.make_name = request.POST.get("make_names", "")
-    obj.fuel = request.POST.get("fuel", ""),
+    obj.fuel = request.POST.get("fuel", "")
     obj.cc = request.POST.get("cc", "")
     obj.sc = request.POST.get("sc", "")
     obj.mfg_year = request.POST.get("mfg_year", "")
