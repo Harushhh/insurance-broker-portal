@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.contrib.auth.models import User, Group
 from django.utils import timezone
 from django.shortcuts import render, redirect, get_object_or_404
+from django.urls import reverse
 from django.template.loader import render_to_string
 from django.http import HttpResponse, JsonResponse
 from django.db.models import Q, F, Count, Sum, Case, When, Value, CharField
@@ -12,6 +13,7 @@ from django.db import transaction
 from django import forms
 import csv
 import json
+from urllib.parse import urlencode
 import logging
 import os
 import re
@@ -4110,14 +4112,65 @@ def update_special_rate_request_status(request):
 # =========================================================
 # TICKETING SYSTEM VIEWS
 # =========================================================
+# Maps the human-readable labels the ticket-raising JS saves (see
+# formatKey() in policy_lock_checker.html / motor_payout_rates.html) back to
+# the GET param names /motor-payout-rates/ actually reads. Fields with no
+# equivalent there (Vehicle No., Policy Holder Name) are simply dropped.
+TICKET_TO_MOTOR_PAYOUT_PARAMS = {
+    "Target Date": "target_date",
+    "Product": "product",
+    "Sub Product": "sub_product",
+    "Make Model Class": "make_model_class",
+    "Make Name (Code)": "make_names",
+    "RTO Code": "rto_code",
+    "CC / GVW": "cc",
+    "Fuel": "fuel",
+    "Exact SC": "sc",
+    "Manufacturing Year": "mfg_year",
+    "Zero Dep (ZD)": "is_zd",
+    "CPA": "is_cpa",
+    "NCB": "is_ncb",
+}
+MOTOR_PAYOUT_PARAM_NAMES = set(TICKET_TO_MOTOR_PAYOUT_PARAMS.values())
+
+
+def _build_motor_payout_rates_url(ticket):
+    """_build_motor_payout_queryset accepts either a numeric id or the plain
+    text name for product/sub_product/fuel/make_model_class, so a ticket's
+    saved human-readable values can be passed straight through — no id
+    lookup needed.
+
+    Only MOTOR tickets: Health/Life payloads reuse labels like "Product" and
+    "Sub Product" for their own (non-vehicle) fields, so applying this
+    mapping to them would build a nonsense motor-rates search."""
+    if ticket.category != "MOTOR" or not ticket.form_payload:
+        return None
+
+    params = {}
+    for label, value in ticket.form_payload.items():
+        if not value:
+            continue
+        param_name = TICKET_TO_MOTOR_PAYOUT_PARAMS.get(label)
+        if not param_name and label in MOTOR_PAYOUT_PARAM_NAMES:
+            # Older tickets saved the raw field name instead of the
+            # human-readable label — already a valid param, use as-is.
+            param_name = label
+        if param_name:
+            params[param_name] = value
+
+    if not params:
+        return None
+    return reverse("motor_payout_rates") + "?" + urlencode(params)
+
+
 def ticket_dashboard(request):
-    tickets = SupportTicket.objects.select_related('user').all()
+    qs = SupportTicket.objects.select_related('user').all()
 
     # Keyed without hyphens ("FOLLOW-UP" -> FOLLOWUP) since Django template
     # variable lookups can't contain a "-" (`status_counts.FOLLOW-UP` is a
     # TemplateSyntaxError, not a lookup miss).
     raw_counts = {"OPEN": 0, "FOLLOW-UP": 0, "CLOSED": 0}
-    for row in tickets.values('status').annotate(n=Count('id')):
+    for row in qs.values('status').annotate(n=Count('id')):
         if row['status'] in raw_counts:
             raw_counts[row['status']] = row['n']
     status_counts = {
@@ -4127,15 +4180,21 @@ def ticket_dashboard(request):
     }
 
     category_counts = {"MOTOR": 0, "HEALTH": 0, "LIFE": 0}
-    for row in tickets.values('category').annotate(n=Count('id')):
+    for row in qs.values('category').annotate(n=Count('id')):
         if row['category'] in category_counts:
             category_counts[row['category']] = row['n']
+
+    total_tickets = qs.count()
+
+    tickets = list(qs)
+    for ticket in tickets:
+        ticket.motor_payout_rates_url = _build_motor_payout_rates_url(ticket)
 
     return render(request, "ticket_dashboard.html", {
         "tickets": tickets,
         "status_counts": status_counts,
         "category_counts": category_counts,
-        "total_tickets": tickets.count(),
+        "total_tickets": total_tickets,
     })
 
 def create_ticket_api(request):

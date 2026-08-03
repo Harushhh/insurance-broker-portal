@@ -164,6 +164,25 @@
     margin-right: 2px;
   }
 
+  .check-motor-payout-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    padding: 5px 12px;
+    border-radius: 8px;
+    background: #eff6ff;
+    color: #2563eb;
+    border: 1px solid #bfdbfe;
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+  }
+  .check-motor-payout-link:hover {
+    background: #dbeafe;
+    color: #1d4ed8;
+  }
+
   .empty-row {
     text-align: center;
     color: #64748b;
@@ -339,6 +358,11 @@
                   {% endif %}
                 {% endfor %}
               </ul>
+              {% if ticket.motor_payout_rates_url %}
+                <a href="{{ ticket.motor_payout_rates_url }}" target="_blank" rel="noopener" class="check-motor-payout-link">
+                  <i class="bi bi-search"></i> Check in Motor Payout Rates
+                </a>
+              {% endif %}
             </td>
             <td>
               <select 
