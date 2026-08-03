@@ -40,7 +40,7 @@ from .models import (
     RateGroup, AuditLog, GridDocument, UserProfile,
     ExtractionField, FieldSynonym, PolicyDocumentUpload, PolicyMISRecord,
     LockedPolicy, SupportTicket, MISFile, MappingConfiguration,
-    HealthRateMaster, SpecialRateRequest,
+    HealthRateMaster, SpecialRateRequest, MISFailedRow,
 )
 
 # Import our Gemini AI utility and background logic engines
@@ -2131,8 +2131,109 @@ def bulk_update_rates(request):
 # -------------------------
 # RATE MASTER HEALTH
 # -------------------------
+# Surfaces individual MIS policy rows the mapping engine
+# (mapping_engine.process_mis_mapping) could not resolve to a single payout
+# rate — ⚠️ MULTIPLE MATCHES, ❌ NO MATCH, and FAILED - BAD DATA. These are
+# stored directly in MISFailedRow (written straight from df_final when a
+# file finishes processing — see process_mis_mapping), so this view is a
+# normal indexed queryset + select_related + Paginator, not something that
+# re-parses any Excel/CSV output on every page view.
+
+MIS_HEALTH_BATCH_SIZE = 50
+
+
+def _sync_unsynced_mis_files():
+    """
+    Backfill for MISFile rows that completed before MISFailedRow existed (or
+    whose direct write at process time failed) — cheap indexed no-op query
+    in steady state once every completed file has been synced once.
+    """
+    unsynced = (
+        MISFile.objects.filter(status="COMPLETED", health_synced_at__isnull=True)
+        .exclude(processed_file="")
+        .exclude(processed_file__isnull=True)
+    )
+    if not unsynced.exists():
+        return
+    from .mapping_engine import sync_failed_rows_for_file
+    for mis_file in unsynced:
+        try:
+            sync_failed_rows_for_file(mis_file)
+        except Exception:
+            logger.exception("Could not sync MIS failure rows for MISFile %s", mis_file.id)
+
+
 def rate_master_health(request):
-    return render(request, "rate_master_health.html", {})
+    _sync_unsynced_mis_files()
+
+    status_key = (request.GET.get("failure_reason") or "").strip()
+    insurer = (request.GET.get("insurer") or "").strip()
+    date_from = (request.GET.get("date_from") or "").strip()
+    date_to = (request.GET.get("date_to") or "").strip()
+
+    qs = MISFailedRow.objects.select_related("mis_file").order_by("-mis_file__created_at", "-id")
+
+    if status_key:
+        qs = qs.filter(status_key=status_key)
+    if insurer:
+        qs = qs.filter(insurer=insurer)
+    if date_from:
+        try:
+            from_date = datetime.strptime(date_from, "%Y-%m-%d").date()
+            qs = qs.filter(mis_file__created_at__date__gte=from_date)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            to_date = datetime.strptime(date_to, "%Y-%m-%d").date()
+            qs = qs.filter(mis_file__created_at__date__lte=to_date)
+        except ValueError:
+            pass
+
+    total_all = MISFailedRow.objects.count()
+    status_counts = dict(
+        MISFailedRow.objects.values("status_key").annotate(n=Count("id")).values_list("status_key", "n")
+    )
+
+    paginator = Paginator(qs, MIS_HEALTH_BATCH_SIZE)
+    try:
+        page_number = int(request.GET.get("page") or 1)
+    except ValueError:
+        page_number = 1
+    page_obj = paginator.get_page(page_number)
+    elided_page_range = list(paginator.get_elided_page_range(page_obj.number, on_each_side=1, on_ends=1))
+
+    # select_related already joined mis_file — this only touches the current
+    # page's rows (<= MIS_HEALTH_BATCH_SIZE), not the full filtered set.
+    for r in page_obj:
+        r.file_name = (
+            r.mis_file.uploaded_file.name.rsplit("/", 1)[-1]
+            if r.mis_file.uploaded_file else f"File #{r.mis_file_id}"
+        )
+
+    insurer_list = list(
+        MISFailedRow.objects.exclude(insurer__isnull=True).exclude(insurer="")
+        .order_by().values_list("insurer", flat=True).distinct()
+    )
+    insurer_list.sort()
+
+    status_types = [c for c in MISFailedRow.STATUS_CHOICES if c[0] != "OTHER"]
+
+    return render(request, "rate_master_health.html", {
+        "page_obj": page_obj,
+        "elided_page_range": elided_page_range,
+        "total": paginator.count,
+        "total_all": total_all,
+        "status_types": status_types,
+        "status_counts": status_counts,
+        "insurer_list": insurer_list,
+        "selected": {
+            "failure_reason": status_key,
+            "insurer": insurer,
+            "date_from": date_from,
+            "date_to": date_to,
+        },
+    })
 
 # -------------------------
 # HEALTH RATE MASTER

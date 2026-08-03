@@ -818,12 +818,57 @@ class MISFile(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     processed_at = models.DateTimeField(null=True, blank=True)
 
+    # Set once this file's failed rows have been written to MISFailedRow —
+    # either right after process_mis_mapping finishes, or lazily by the Rate
+    # Master Health dashboard for files that completed before that table
+    # existed. Null means "not synced yet", NOT "zero failed rows".
+    health_synced_at = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         ordering = ['-created_at']
 
     def __str__(self):
         filename = self.uploaded_file.name.split('/')[-1] if self.uploaded_file else f"File #{self.id}"
         return f"{filename} - {self.status}"
+
+
+# Populated straight from df_final when a file finishes processing (see
+# process_mis_mapping) — one row per MIS policy that didn't cleanly resolve
+# to a single payout rate. Exists so the Rate Master Health dashboard is a
+# normal indexed DB query instead of re-parsing every completed file's
+# processed_file Excel/CSV output on every page view.
+class MISFailedRow(models.Model):
+    STATUS_CHOICES = [
+        ("MULTIPLE_MATCHES", "⚠️ Multiple Matches"),
+        ("NO_MATCH", "❌ No Match"),
+        ("BAD_DATA", "Failed - Bad Data"),
+        ("OTHER", "Other"),
+    ]
+
+    mis_file = models.ForeignKey(MISFile, on_delete=models.CASCADE, related_name="failed_rows")
+    row_id = models.IntegerField()
+    status_key = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True)
+    mapping_status = models.CharField(max_length=50)
+    failure_reason = models.TextField()
+    # Candidate Rate Master group ids parsed out of failure_reason — only
+    # ⚠️ MULTIPLE MATCHES rows ever have any.
+    group_ids = models.JSONField(default=list, blank=True)
+    insurer = models.CharField(max_length=255, blank=True, null=True, db_index=True)
+    # Restricted to the MIS columns process_mis_mapping's RULE 1-6 elimination
+    # logic actually reads (see MATCHING_RULE_COLUMNS in mapping_engine.py) —
+    # not the ~100 other columns (customer address, agent, QC status, etc.)
+    # that have no bearing on why the row didn't map.
+    payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["mis_file", "row_id"], name="uniq_mis_failed_row"),
+        ]
+
+    def __str__(self):
+        return f"{self.mis_file_id}:{self.row_id} - {self.status_key}"
 
 
 class MappingConfiguration(models.Model):

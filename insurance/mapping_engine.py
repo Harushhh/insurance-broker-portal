@@ -7,7 +7,7 @@ from rapidfuzz import fuzz, process as rf_process
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from django.db import connection
-from .models import MISFile, RateMaster, RTOMaster, MakeModelMaster
+from .models import MISFile, RateMaster, RTOMaster, MakeModelMaster, MISFailedRow
 
 
 # ── Tunable thresholds ───────────────────────────────────────────────────────
@@ -465,6 +465,191 @@ def build_coverage_gap_summary(df_final, max_entries=25):
     ]
 
     return {'no_match': no_match_ranked, 'multiple_matches': multiple_ranked}
+
+
+# Raw 'Mapping Status' text (as written below) -> the short key MISFailedRow
+# and the Rate Master Health dashboard filter/display by.
+MIS_STATUS_KEYS = {
+    '⚠️ MULTIPLE MATCHES': 'MULTIPLE_MATCHES',
+    '❌ NO MATCH': 'NO_MATCH',
+    'FAILED - BAD DATA': 'BAD_DATA',
+}
+
+# The exact raw MIS columns RULE 1-6 above read from (every safe_get_col(...)
+# call feeding a _mis_* column, plus 'Policy: vehicle make' / 'Policy: model'
+# which together feed _mis_make_model) — kept in sync with that logic so a
+# failed row's "policy details" only ever shows fields a human could plausibly
+# need to fix a mapping failure, not the ~100 other MIS columns (customer
+# address, agent, QC status, etc.) that have no bearing on why it didn't map.
+MATCHING_RULE_COLUMNS = [
+    'Policy: insurance company',       # Rule 1
+    'Policy: vehproduct',               # Rule 2
+    'Policy: sub product',              # Rule 2
+    'Policy: fuel',                      # Rule 2
+    'Policy: vehicle class',            # Rule 2b
+    'Policy: cc cubic capacity',        # Rule 3 (CC, or GVW below for GCV 3W/4W)
+    'Policy: gvw gross vehicle weight', # Rule 3 (GCV 3W/4W only)
+    'Policy: seating capacity',         # Rule 3
+    'Policy: vehage',                   # Rule 3
+    'Policy: tariff rate',              # Rule 3
+    'Policy: inception date',           # Rule 4
+    'Policy: vehicle make',             # Rule 5a
+    'Policy: model',                    # Rule 5a
+    'Policy: rto no',                   # Rule 5b
+    'Policy: no claim bonus',           # Rule 6
+    'Policy: cpa',                      # Rule 6
+    'Policy: nil dep',                  # Rule 6
+]
+
+
+def _find_column(columns, target):
+    """Case/whitespace-tolerant lookup of a column name, same tolerance as safe_get_col."""
+    target_norm = target.strip().lower()
+    for c in columns:
+        if str(c).strip().lower() == target_norm:
+            return c
+    return None
+
+
+def _json_safe(val):
+    """numpy scalars (int64/float64/bool_ — what a pandas row actually hands
+    back for numeric columns) aren't JSON-serializable; native Python values
+    coming through unchanged."""
+    if hasattr(val, 'item'):
+        try:
+            return val.item()
+        except Exception:
+            pass
+    return val
+
+
+def _extract_failed_rows_from_df(df):
+    """
+    Pure extraction over an already-loaded DataFrame carrying 'Mapping
+    Status'/'Failure Reason' — df_final fresh out of process_mis_mapping, or
+    a processed_file re-read by extract_failed_mis_rows. Returns one dict per
+    row that isn't a clean ✅ MATCH (⚠️ MULTIPLE MATCHES, ❌ NO MATCH,
+    FAILED - BAD DATA — see the RULE 1-6 / BAD DATA blocks above). Never
+    touches or re-runs any matching logic.
+    """
+    if 'Mapping Status' not in df.columns:
+        return []
+
+    failed = df[df['Mapping Status'] != '✅ MATCH']
+    if failed.empty:
+        return []
+
+    insurer_col = _find_column(df.columns, 'Policy: insurance company')
+    payload_columns = [c for c in (_find_column(df.columns, target) for target in MATCHING_RULE_COLUMNS) if c]
+
+    rows = []
+    for _, row in failed.iterrows():
+        reason = str(row.get('Failure Reason') or '').strip()
+
+        # Only ⚠️ MULTIPLE MATCHES rows carry candidate Group IDs (embedded in
+        # the reason text itself — see the 'Matching Group IDs: ...' sentence
+        # built above). Truncated lists end in ' … (+N more)'; split that off
+        # before pulling digits out, or the "N" in "+N more" gets mistaken
+        # for a group id.
+        group_ids = []
+        m = _GROUP_IDS_PATTERN.search(reason)
+        if m:
+            head = m.group(1).split('…')[0]
+            group_ids = [int(tok) for tok in re.findall(r'\d+', head)]
+
+        payload = {}
+        for col in payload_columns:
+            val = row.get(col)
+            if pd.isna(val):
+                continue
+            # Duck-typed rather than isinstance(val, pd.Timestamp): a date
+            # column can come back as plain datetime.datetime/date instead of
+            # Timestamp depending on how the source file stored it (mixed-type
+            # 'object' columns after an Excel round-trip, in particular).
+            if hasattr(val, 'strftime'):
+                val = val.strftime('%d %b %Y')
+            else:
+                val = _json_safe(val)
+            payload[col] = val
+
+        insurer = row.get(insurer_col) if insurer_col else None
+        if pd.isna(insurer):
+            insurer = None
+        else:
+            insurer = _json_safe(insurer)
+
+        mapping_status = str(row.get('Mapping Status') or '').strip()
+        row_id = row.get('Original_Row_ID')
+
+        rows.append({
+            'row_id': int(row_id) if pd.notna(row_id) else None,
+            'mapping_status': mapping_status,
+            'status_key': MIS_STATUS_KEYS.get(mapping_status, 'OTHER'),
+            'failure_reason': reason,
+            'group_ids': group_ids,
+            'insurer': insurer,
+            'payload': payload,
+        })
+    return rows
+
+
+def extract_failed_mis_rows(mis_obj):
+    """
+    Re-reads a COMPLETED MISFile's processed_file and runs the same
+    extraction _extract_failed_rows_from_df does on df_final at process time.
+    Only needed for files that finished processing before MISFailedRow
+    existed — see sync_failed_rows_for_file. Purely read-only.
+    """
+    if not mis_obj.processed_file:
+        return []
+
+    file_ext = mis_obj.processed_file.name.split('.')[-1].lower()
+    with mis_obj.processed_file.open('rb') as f:
+        if file_ext == 'csv':
+            df = pd.read_csv(f)
+        else:
+            df = pd.read_excel(f)
+
+    return _extract_failed_rows_from_df(df)
+
+
+def _bulk_save_failed_rows(mis_file, rows):
+    MISFailedRow.objects.filter(mis_file=mis_file).delete()
+    MISFailedRow.objects.bulk_create([
+        MISFailedRow(
+            mis_file=mis_file,
+            # Original_Row_ID should always be a real int (assigned via
+            # range(len(df_mis)) at process time) — the -(i+1) fallback only
+            # exists for older processed files where it came back blank on
+            # re-read. Using the enumerate position (not a shared constant)
+            # keeps it unique per row even when several rows in the same
+            # file are missing it, so the (mis_file, row_id) constraint
+            # never collides.
+            row_id=r['row_id'] if r['row_id'] is not None else -(i + 1),
+            status_key=r['status_key'],
+            mapping_status=r['mapping_status'],
+            failure_reason=r['failure_reason'],
+            group_ids=r['group_ids'],
+            insurer=r['insurer'],
+            payload=r['payload'],
+        )
+        for i, r in enumerate(rows)
+    ])
+
+
+def sync_failed_rows_for_file(mis_file):
+    """
+    One-time backfill for a COMPLETED MISFile that finished processing
+    before MISFailedRow existed — reads its processed_file once and persists
+    the same rows process_mis_mapping now writes directly from df_final.
+    Idempotent: no-ops once health_synced_at is set.
+    """
+    if mis_file.health_synced_at:
+        return
+    rows = extract_failed_mis_rows(mis_file)
+    _bulk_save_failed_rows(mis_file, rows)
+    mis_file.health_synced_at = timezone.now()
+    mis_file.save(update_fields=['health_synced_at'])
 
 
 def process_mis_mapping(mis_file_id):
@@ -1206,6 +1391,20 @@ def process_mis_mapping(mis_file_id):
             print("Coverage gap summary failed to build (non-fatal):")
             print(traceback.format_exc())
             mis_obj.coverage_gaps = None
+
+        # Persist failed rows straight from the in-memory df_final — this is
+        # what lets the Rate Master Health dashboard be a normal indexed DB
+        # query instead of re-opening and re-parsing this file's Excel/CSV
+        # output on every page view. Non-fatal: a bug here must never turn an
+        # otherwise-successful run into FAILED and discard a good processed_file
+        # (sync_failed_rows_for_file can always backfill this later).
+        try:
+            failed_rows = _extract_failed_rows_from_df(df_final)
+            _bulk_save_failed_rows(mis_obj, failed_rows)
+            mis_obj.health_synced_at = timezone.now()
+        except Exception:
+            print("Failed to persist MIS failure rows (non-fatal):")
+            print(traceback.format_exc())
 
         mis_obj.save()
 
