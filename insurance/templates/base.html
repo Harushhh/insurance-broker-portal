@@ -328,6 +328,12 @@
                     </a>
                 </li>
 
+                <li class="nav-item">
+                    <a href="{% url 'my_tickets_dashboard' %}" class="nav-link {% if request.path == '/my-tickets/' %}active{% endif %}">
+                        <i class="bi bi-ticket-perforated-fill"></i> My Tickets
+                    </a>
+                </li>
+
                 {% if 'Can_View_Tickets' in nav_pages %}
                 <li class="nav-item">
                     <a href="{% url 'ticket_dashboard' %}" class="nav-link {% if '/tickets/' in request.path %}active{% endif %}">
