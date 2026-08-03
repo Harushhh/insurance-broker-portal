@@ -3270,6 +3270,20 @@ def lock_unlock_policy(request, rate_id):
         }
     )
 
+    # Object-level check: the get_or_create lookup above is keyed on
+    # (source_rate, vehicle_no, policy_holder_name) only — not locked_by — so
+    # without this, a second user submitting the same vehicle/holder combo
+    # would find and silently take over someone else's existing lock
+    # (every field below, including locked_by, gets unconditionally
+    # overwritten). ADMIN keeps the ability to reassign/fix any lock;
+    # everyone else can only touch a lock that's already theirs, or brand new.
+    is_admin = request.user.groups.filter(name="ADMIN").exists()
+    if not created and obj.locked_by_id and obj.locked_by_id != request.user.id and not is_admin:
+        return JsonResponse({
+            "success": False,
+            "message": "This vehicle/policy holder is already locked by another user.",
+        }, status=403)
+
     obj.product_name = rate_obj.product.name if rate_obj.product else ""
     obj.sub_product_name = rate_obj.sub_product.name if rate_obj.sub_product else ""
     obj.insurance_company = rate_obj.insurance_company
@@ -3294,12 +3308,19 @@ def lock_unlock_policy(request, rate_id):
 # LOCKED POLICY DASHBOARD
 # -------------------------
 def locked_policy_dashboard(request):
+    # Data-privacy scoping: everyone except ADMIN only ever sees their own
+    # locked policies — matches page_access_required's existing "ADMIN sees
+    # everything, per-page groups see only their own scope" convention.
+    is_admin = request.user.groups.filter(name="ADMIN").exists()
+
     qs = LockedPolicy.objects.select_related(
-        "source_rate", 
-        "source_rate__product", 
-        "source_rate__make_model_class", 
+        "source_rate",
+        "source_rate__product",
+        "source_rate__make_model_class",
         "locked_by"
     ).all()
+    if not is_admin:
+        qs = qs.filter(locked_by=request.user)
 
     vehicle_no = (request.GET.get("vehicle_no") or "").strip()
     policy_holder_name = (request.GET.get("policy_holder_name") or "").strip()
@@ -3315,8 +3336,13 @@ def locked_policy_dashboard(request):
     if locked_by_user:
         qs = qs.filter(locked_by__username__iexact=locked_by_user)
 
+    # Filter dropdown option lists must carry the same scoping as qs — for a
+    # non-admin, listing e.g. "root" as a possible Locked By value would leak
+    # other users' activity even though they can't open those records.
     all_locked = LockedPolicy.objects.select_related("locked_by").all()
-    
+    if not is_admin:
+        all_locked = all_locked.filter(locked_by=request.user)
+
     unique_vehicles = sorted(list(set(all_locked.exclude(vehicle_no__isnull=True).exclude(vehicle_no="").values_list("vehicle_no", flat=True))))
     unique_holders = sorted(list(set(all_locked.exclude(policy_holder_name__isnull=True).exclude(policy_holder_name="").values_list("policy_holder_name", flat=True))))
     unique_companies = sorted(list(set(all_locked.exclude(insurance_company__isnull=True).exclude(insurance_company="").values_list("insurance_company", flat=True))))
