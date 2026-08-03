@@ -3396,7 +3396,7 @@ def lock_unlock_policy(request, rate_id):
     obj.add_tnc = rate_obj.add_tnc
     obj.rto_code = request.POST.get("rto_code", "")
     obj.make_name = request.POST.get("make_names", "")
-    obj.fuel = request.POST.get("fuel", ""),
+    obj.fuel = request.POST.get("fuel", "")
     obj.cc = request.POST.get("cc", "")
     obj.sc = request.POST.get("sc", "")
     obj.mfg_year = request.POST.get("mfg_year", "")
@@ -3453,7 +3453,10 @@ def locked_policy_dashboard(request):
 
     records = list(qs.order_by("-created_at")[:300])
 
+    fuel_name_by_id = {str(f.id): f.name for f in FuelTypeMaster.objects.all()}
+
     for row in records:
+        row.display_fuel = fuel_name_by_id.get((row.fuel or "").strip(), row.fuel)
         if row.source_rate:
             mmc_name = row.source_rate.make_model_class.name.strip().upper() if row.source_rate.make_model_class else "NA"
             
