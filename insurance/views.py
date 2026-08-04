@@ -4141,10 +4141,15 @@ MOTOR_PAYOUT_PARAM_NAMES = set(TICKET_TO_MOTOR_PAYOUT_PARAMS.values())
 
 
 def _build_motor_payout_rates_url(ticket):
-    """_build_motor_payout_queryset accepts either a numeric id or the plain
-    text name for product/sub_product/fuel/make_model_class, so a ticket's
-    saved human-readable values can be passed straight through — no id
-    lookup needed.
+    """_build_motor_payout_queryset (the search/filter backend) accepts either
+    a numeric id or the plain text name for product/sub_product/fuel/
+    make_model_class, so it finds the right rows either way. But the
+    motor_payout_rates.html <select> dropdowns pick their "selected" option
+    by comparing against option value="{{ id }}" — a ticket's saved
+    human-readable name (e.g. "Private Car") never matches that, so the
+    dropdown silently falls back to "Select..." even though the search
+    itself worked. Resolve name -> id below so the destination page's
+    dropdowns actually show the right option, not just the right results.
 
     Only MOTOR tickets: Health/Life payloads reuse labels like "Product" and
     "Sub Product" for their own (non-vehicle) fields, so applying this
@@ -4166,6 +4171,43 @@ def _build_motor_payout_rates_url(ticket):
 
     if not params:
         return None
+
+    # Resolve the product's real name regardless of whether the ticket saved
+    # an id or a name for it — NA_MAKE_MODEL_MAP below is keyed by name, and
+    # older tickets may have already saved a raw id here (see the "already a
+    # valid param" branch above).
+    product_param = str(params.get("product") or "").strip()
+    if product_param.isdigit():
+        prod = ProductMaster.objects.filter(id=product_param).first()
+        resolved_product_name = prod.name if prod else ""
+    else:
+        resolved_product_name = product_param
+        if product_param:
+            prod = ProductMaster.objects.filter(name__iexact=product_param).first()
+            if prod:
+                params["product"] = prod.id
+
+    if params.get("sub_product") and not str(params["sub_product"]).isdigit():
+        sub_prod = SubProductMaster.objects.filter(name__iexact=str(params["sub_product"]).strip()).first()
+        if sub_prod:
+            params["sub_product"] = sub_prod.id
+
+    if params.get("fuel") and not str(params["fuel"]).isdigit():
+        fuel_obj = FuelTypeMaster.objects.filter(name__iexact=str(params["fuel"]).strip()).first()
+        if fuel_obj:
+            params["fuel"] = fuel_obj.id
+
+    # Make Model Class is the one exception: motor_payout_rates.html's JS
+    # swaps in string-valued options (value == class name, e.g. "Car")
+    # for products in NA_MAKE_MODEL_MAP instead of the usual database-id
+    # options, so for those products the saved name is already the correct
+    # value and must NOT be converted to an id.
+    if params.get("make_model_class") and not str(params["make_model_class"]).isdigit():
+        if resolved_product_name not in NA_MAKE_MODEL_MAP:
+            mmc = MakeModelClassMaster.objects.filter(name__iexact=str(params["make_model_class"]).strip()).first()
+            if mmc:
+                params["make_model_class"] = mmc.id
+
     return reverse("motor_payout_rates") + "?" + urlencode(params)
 
 
