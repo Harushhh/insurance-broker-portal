@@ -94,9 +94,6 @@ urlpatterns = [
 
     # Ticketing System
     path('tickets/', page_access_required("Can_View_Tickets")(views.ticket_dashboard), name='ticket_dashboard'),
-    # Plain login_required (not gated by Can_View_Tickets): every user can
-    # already raise a ticket, so every user can track their own here too.
-    path('my-tickets/', login_required(views.my_tickets_dashboard), name='my_tickets_dashboard'),
     # Left on plain login_required (not gated by Can_View_Tickets): also called
     # from policy_lock_checker.html as a standalone "raise an issue" action.
     path('api/create-ticket/', login_required(views.create_ticket_api), name='create_ticket_api'),

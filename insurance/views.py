@@ -646,7 +646,10 @@ def home_dashboard(request):
 
     recent_activity = qs.order_by('-created_at')[:5]
 
-    my_tickets_qs = SupportTicket.objects.filter(user=request.user).order_by('-created_at')
+    my_tickets_qs = SupportTicket.objects.filter(
+        user=request.user,
+        created_at__gte=timezone.now() - timedelta(hours=72)
+    ).order_by('-created_at')
     my_open_ticket_count = my_tickets_qs.exclude(status="CLOSED").count()
     my_tickets = my_tickets_qs[:20]
 
@@ -4166,12 +4169,12 @@ def _build_motor_payout_rates_url(ticket):
     return reverse("motor_payout_rates") + "?" + urlencode(params)
 
 
-# Keyed without hyphens ("FOLLOW-UP" -> FOLLOWUP) since Django template
-# variable lookups can't contain a "-" (`status_counts.FOLLOW-UP` is a
-# TemplateSyntaxError, not a lookup miss). Shared by ticket_dashboard (every
-# ticket) and my_tickets_dashboard (one user's own tickets) so the two
-# status-card/category-chip summaries can't drift apart.
-def _ticket_status_and_category_counts(qs):
+def ticket_dashboard(request):
+    qs = SupportTicket.objects.select_related('user').all()
+
+    # Keyed without hyphens ("FOLLOW-UP" -> FOLLOWUP) since Django template
+    # variable lookups can't contain a "-" (`status_counts.FOLLOW-UP` is a
+    # TemplateSyntaxError, not a lookup miss).
     raw_counts = {"OPEN": 0, "FOLLOW-UP": 0, "CLOSED": 0}
     for row in qs.values('status').annotate(n=Count('id')):
         if row['status'] in raw_counts:
@@ -4187,12 +4190,6 @@ def _ticket_status_and_category_counts(qs):
         if row['category'] in category_counts:
             category_counts[row['category']] = row['n']
 
-    return status_counts, category_counts
-
-
-def ticket_dashboard(request):
-    qs = SupportTicket.objects.select_related('user').all()
-    status_counts, category_counts = _ticket_status_and_category_counts(qs)
     total_tickets = qs.count()
 
     tickets = list(qs)
@@ -4200,32 +4197,6 @@ def ticket_dashboard(request):
         ticket.motor_payout_rates_url = _build_motor_payout_rates_url(ticket)
 
     return render(request, "ticket_dashboard.html", {
-        "tickets": tickets,
-        "status_counts": status_counts,
-        "category_counts": category_counts,
-        "total_tickets": total_tickets,
-    })
-
-
-def my_tickets_dashboard(request):
-    # Self-service ticket tracker — every authenticated user sees only the
-    # tickets they personally raised. Deliberately NOT wrapped in
-    # page_access_required("Can_View_Tickets"): that group gates the
-    # org-wide ticket_dashboard above, but any logged-in user can already
-    # raise a ticket (create_ticket_api is plain login_required too), so
-    # they should be able to check its status the same way — hence the
-    # `user=request.user` filter below, which is the actual security
-    # boundary for this view (there is no separate per-ticket detail URL
-    # to further restrict; everything is shown inline on this one page).
-    qs = SupportTicket.objects.filter(user=request.user).order_by('-created_at')
-    status_counts, category_counts = _ticket_status_and_category_counts(qs)
-    total_tickets = qs.count()
-
-    tickets = list(qs)
-    for ticket in tickets:
-        ticket.motor_payout_rates_url = _build_motor_payout_rates_url(ticket)
-
-    return render(request, "my_tickets_dashboard.html", {
         "tickets": tickets,
         "status_counts": status_counts,
         "category_counts": category_counts,
