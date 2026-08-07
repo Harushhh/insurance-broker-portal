@@ -7,7 +7,10 @@ from rapidfuzz import fuzz, process as rf_process
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from django.db import connection
-from .models import MISFile, RateMaster, RTOMaster, MakeModelMaster, MISFailedRow
+from .models import (
+    MISFile, RateMaster, RTOMaster, MakeModelMaster, MISFailedRow,
+    HealthRateMaster, PincodeMaster,
+)
 
 
 # ── Tunable thresholds ───────────────────────────────────────────────────────
@@ -16,6 +19,30 @@ INSURANCE_FUZZY_THRESHOLD = 55   # lowered from 60: handles typos in company nam
 CATEGORICAL_FUZZY_THRESHOLD = 75
 MAKE_MODEL_MIN_WORD_MATCH = 2     # Rule 5a: min words the MIS "make + model" string
                                   # must share with a MakeModelMaster cluster entry
+
+# Health plan names have no separate master table (unlike RTO/Make-Model) —
+# the MIS value is fuzzy-matched directly against the Health Grid row's own
+# comma-separated plan_names cluster, after normalizing '+' -> 'plus' and
+# stripping punctuation. 80 was picked by measuring real MIS/grid pairs from
+# the source config workbook: 'ASPIRE - GOLD +' vs 'Aspire Gold Plus' = 100,
+# 'Optima Secure' vs 'My: Optima Secure' = 89.7, 'Arogya Sanjeevani' vs
+# 'Arogya Sanjeevani Policy' = 82.9 (all correctly ABOVE 80 and meant to
+# match), while the genuinely ambiguous bare 'Optima' vs 'Optima Plus' /
+# 'Optima Restore' scored 70.6 / 60.0 (correctly BELOW 80 and meant to fail —
+# a bare "Optima" doesn't tell you which Optima variant was actually sold).
+HEALTH_PLAN_NAME_FUZZY_THRESHOLD = 80
+
+# Which HealthRateMaster rate column a computed policy tenure (in years,
+# from Policy: inception date -> Policy: expiry date) reads Porate from.
+# Mirrors HEALTH_POLICY_TERM_FIELD in views.py (health_payout_rates) — same
+# concept, keyed by int here since the tenure is computed, not a form choice.
+HEALTH_TENURE_RATE_COLUMNS = {
+    1: 'one_year_rate',
+    2: 'multi_year_2_rate',
+    3: 'multi_year_3_rate',
+    4: 'multi_year_4_rate',
+    5: 'multi_year_5_rate',
+}
 
 # Words that appear in almost every insurer name and carry zero discriminative value.
 # Stripping these before matching lets the unique identifying tokens (Magma, Liberty,
@@ -406,6 +433,102 @@ def normalize_rto_code(raw_value):
     return s[:4]
 
 
+def normalize_pincode(raw_value):
+    """
+    Normalizes a raw MIS 'Customer: pin code' value before the two-step
+    PincodeMaster lookup. A pincode column read through pandas/Excel often
+    comes back as a float when the column has any blank cells elsewhere
+    (400064 -> "400064.0"), which would silently fail an exact match against
+    PincodeMaster's plain-digit cluster entries — strip that trailing '.0'.
+    """
+    if pd.isna(raw_value):
+        return ''
+    s = str(raw_value).strip()
+    if not s or s.lower() == 'nan':
+        return ''
+    if s.endswith('.0'):
+        s = s[:-2]
+    return s
+
+
+_PLAN_NAME_PUNCT_PATTERN = re.compile(r'[^a-z0-9\s]')
+_PLAN_NAME_WS_PATTERN = re.compile(r'\s+')
+
+
+def _normalize_plan_name(text: str) -> str:
+    """'+' is a meaningful word in health plan names ('Gold+' == 'Gold Plus'),
+    so it's spelled out before punctuation is stripped, not just discarded
+    along with hyphens/colons/other formatting noise."""
+    s = str(text).strip().lower()
+    s = s.replace('+', ' plus')
+    s = _PLAN_NAME_PUNCT_PATTERN.sub(' ', s)
+    s = _PLAN_NAME_WS_PATTERN.sub(' ', s).strip()
+    return s
+
+
+def fuzzy_match_plan_name(search_term, cluster_string, threshold=HEALTH_PLAN_NAME_FUZZY_THRESHOLD):
+    """
+    Health equivalent of Rule 5a's fuzzy make/model match, but there's no
+    separate PlanMaster table to bridge MIS plan-name spelling against —
+    HealthRateMaster.plan_names is a comma-separated list living directly on
+    the grid row itself (e.g. 'Activate Booster,Arogya Sanjeevani Policy,...
+    Elevate,Family Shield,...'), so this matches the (normalized) MIS plan
+    name against each (normalized) item in that list using RapidFuzz's
+    token_sort_ratio, which is order-independent and tolerant of the
+    punctuation/spacing drift real MIS plan names have (see
+    HEALTH_PLAN_NAME_FUZZY_THRESHOLD for measured examples).
+    """
+    if not search_term or not cluster_string:
+        return False
+    norm_search = _normalize_plan_name(search_term)
+    if not norm_search:
+        return False
+    for item in str(cluster_string).split(','):
+        item = item.strip()
+        if not item:
+            continue
+        norm_item = _normalize_plan_name(item)
+        if norm_search == norm_item:
+            return True
+        if fuzz.token_sort_ratio(norm_search, norm_item) >= threshold:
+            return True
+    return False
+
+
+# The MIS and the Health Grid use different vocabulary for the same business
+# concept — a policy moved from one insurer to another without a break in
+# cover: the MIS calls it 'RollOver' (seen with case/spacing/separator drift
+# — 'Rollover', 'roll over', 'Roll-Over', 'Roll_Over'), the Health Grid calls
+# it 'Port' (or 'Portability'). Deliberately narrow: only these known
+# synonyms fold together. Every other business type ('Fresh', 'Renewal',
+# 'New', ...) isn't a key here, so it's returned unchanged by
+# _normalize_health_business_type and stays exact-match-strict against the
+# grid via check_categorical_match, same as before this rule existed.
+_HEALTH_BUSINESS_TYPE_SYNONYMS = {
+    'rollover': 'port',
+    'roll over': 'port',
+    'portability': 'port',
+    'port': 'port',
+}
+_BUSINESS_TYPE_SEPARATOR_PATTERN = re.compile(r'[\s_\-]+')
+
+
+def _normalize_health_business_type(value):
+    """
+    Canonicalizes Health business-type / Policy Type synonyms (see
+    _HEALTH_BUSINESS_TYPE_SYNONYMS) before the Rule H3 categorical match.
+    Separators (spaces/hyphens/underscores) are collapsed first so
+    'Roll-Over'/'Roll_Over'/'roll   over' all resolve to the same lookup key
+    as 'RollOver' — only then is the synonym map consulted, and only the
+    'port' family of spellings is affected. Always returns a string (a
+    missing/NaN value stringifies to 'nan', same as every sibling _mis_h_*
+    categorical column via .astype(str).str.strip().str.lower()), so this
+    is a drop-in replacement for that chain, not a special case.
+    """
+    key = _BUSINESS_TYPE_SEPARATOR_PATTERN.sub(' ', str(value).strip().lower()).strip()
+    return _HEALTH_BUSINESS_TYPE_SYNONYMS.get(key, key)
+
+
 _QUOTED_VALUE_PATTERN = re.compile(r"'([^']*)'")
 _FAILED_ON_PATTERN = re.compile(r"^Failed on:\s*([^—]+)—\s*(.*)$")
 _GROUP_IDS_PATTERN = re.compile(r"Matching Group IDs:\s*(.*)$")
@@ -499,6 +622,15 @@ MATCHING_RULE_COLUMNS = [
     'Policy: no claim bonus',           # Rule 6
     'Policy: cpa',                      # Rule 6
     'Policy: nil dep',                  # Rule 6
+    'Policy: product name',             # Rule H2 (Health)
+    'Policy: policy category',          # Rule H2 (Health)
+    'Policy Type',                      # Rule H2 (Health) — business_type
+    'Policy: plan name',                # Rule H3 (Health)
+    'Policy: deductible amount',        # Rule H4 (Health)
+    'Policy: sum assured',              # Rule H4 (Health)
+    'Customer: age',                    # Rule H4 (Health)
+    'Customer: pin code',               # Rule H5 (Health)
+    'Policy: expiry date',              # Rule H-tenure (Health)
 ]
 
 
@@ -652,6 +784,243 @@ def sync_failed_rows_for_file(mis_file):
     mis_file.save(update_fields=['health_synced_at'])
 
 
+def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
+    """
+    Health equivalent of the Motor RULE 1-6 chain inside process_mis_mapping,
+    matching a single MIS health row against HealthRateMaster instead of
+    RateMaster. Same progressive-narrowing-with-failed_on-tracking shape as
+    Motor, but over Health's own fields (see the 'mapping fields' sheet in
+    the source config workbook): insurer -> date window -> product name /
+    policy category / business type (categorical) -> plan name (fuzzy, no
+    master table) -> deductible / sum-insured / age (numeric ranges) ->
+    pincode zone (two-step PincodeMaster lookup — same mechanism as Motor's
+    RTOMaster lookup, just against a single pincode_zone value per grid row
+    instead of a comma cluster). Tenure (computed from inception/expiry
+    dates) doesn't filter candidate rows — every candidate row already
+    carries all 5 tenure columns — it only selects which one becomes Porate.
+    Returns a result dict shaped exactly like Motor's per-row result so both
+    feed the same df_extracted merge / payout_cols / coverage-gap machinery.
+    """
+    row_id = mis_row.get('Original_Row_ID')
+
+    def _no_match(reason):
+        return {
+            'Original_Row_ID': row_id,
+            'Mapping Status': '❌ NO MATCH',
+            'Failure Reason': reason,
+            'Displaygroupid': None,
+            'Potype': None, 'Porate': None, 'Poflatamount': None,
+            'Pitype': None, 'Pirate': None, 'Piflatamount': None,
+            'Addtnc': None,
+        }
+
+    # --- TENURE GUARD: must resolve to a supported 1-5 year bucket ---
+    # A real match on every other field is still useless without a rate
+    # column to read Porate from, so this is checked up front, the same way
+    # Motor's combined-CC/GVW bad-data guard runs before any elimination rule.
+    inception = mis_row['_mis_date']
+    expiry = mis_row['_mis_h_expiry']
+    tenure_years = None
+    if pd.notna(inception) and pd.notna(expiry):
+        days = (expiry - inception).days
+        if days > 0:
+            tenure_years = round(days / 365.25)
+
+    if tenure_years not in HEALTH_TENURE_RATE_COLUMNS:
+        computed = f"{tenure_years} year(s)" if tenure_years is not None else "an unparseable tenure"
+        return _no_match(
+            f"Failed on: Policy tenure — computed {computed} from Policy: inception date / "
+            f"Policy: expiry date, but the Health Grid only defines payout rates for 1-5 year tenures."
+        )
+    rate_col = HEALTH_TENURE_RATE_COLUMNS[tenure_years]
+
+    failed_on = []
+
+    # --- RULE H1: Insurance Company ---
+    val_ins_raw = mis_row['_mis_ins']
+    val_ins = mis_row['_mis_h_ins_mapped']
+    if pd.isna(val_ins) or not val_ins:
+        raw_display = '(blank)' if pd.isna(val_ins_raw) else val_ins_raw
+        current_grid = empty_grid
+        failed_on.append((
+            'Policy: insurance company',
+            f"Insurer '{raw_display}' did not fuzzy-match any active Health Rate Master insurer "
+            f"(threshold={INSURANCE_FUZZY_THRESHOLD})."
+        ))
+    else:
+        current_grid = grid_by_insurer.get(val_ins, empty_grid)
+        if current_grid.empty:
+            failed_on.append((
+                'Policy: insurance company',
+                f"Insurer resolved to '{val_ins}' but there are 0 active Health Rate Master rows for that insurer."
+            ))
+
+    # --- RULE H2: Date window (inception date within grid's From Date/to_date) ---
+    if not current_grid.empty:
+        if pd.isna(inception):
+            rule_mask = current_grid['from_date'].isna() & current_grid['to_date'].isna()
+            detail = (
+                "Inception date is blank/unparseable on this policy, and no remaining "
+                "candidate Health Grid row has an open (blank) date window."
+            )
+        else:
+            min_cond = current_grid['from_date'].isna() | (current_grid['from_date'] <= inception)
+            max_cond = current_grid['to_date'].isna() | (current_grid['to_date'] >= inception)
+            rule_mask = min_cond & max_cond
+            detail = (
+                f"Inception date {inception.date()} falls outside the active date window "
+                f"on every remaining candidate Health Grid row."
+            )
+        current_grid = current_grid[rule_mask]
+        if current_grid.empty:
+            failed_on.append(('Policy: inception date', detail))
+
+    # --- RULE H3: Categorical matches (product name / policy category / business type) ---
+    cat_rules = [
+        ('_mis_h_prodname', 'product_name', 'Policy: product name'),
+        ('_mis_h_category', 'policy_category', 'Policy: policy category'),
+        ('_mis_h_biztype', 'business_type', 'Policy Type'),
+    ]
+    for mis_col, grid_col, label in cat_rules:
+        if not current_grid.empty:
+            val = mis_row[mis_col]
+            rule_mask = current_grid[grid_col].apply(lambda g: check_categorical_match(val, g))
+            current_grid = current_grid[rule_mask]
+            if current_grid.empty:
+                failed_on.append((
+                    label,
+                    f"Value '{val}' did not match any remaining candidate Health Grid row's "
+                    f"{grid_col.replace('_', ' ')}."
+                ))
+
+    # --- RULE H4: Plan name — fuzzy match against the grid row's own plan_names cluster ---
+    if not current_grid.empty:
+        val_plan = mis_row['_mis_h_plan_raw']
+        if not val_plan or str(val_plan).strip().lower() == 'nan':
+            rule_mask = current_grid['plan_names'] == ''
+            detail = (
+                "Plan name is blank on this policy, and no remaining candidate Health "
+                "Grid row allows a blank plan list."
+            )
+        else:
+            rule_mask = current_grid['plan_names'].apply(lambda g: fuzzy_match_plan_name(val_plan, g))
+            detail = (
+                f"Plan name '{val_plan}' did not fuzzy-match any plan listed on the "
+                f"remaining candidate Health Grid rows."
+            )
+        current_grid = current_grid[rule_mask]
+        if current_grid.empty:
+            failed_on.append(('Policy: plan name', detail))
+
+    # --- RULE H5: Numeric ranges (deductible / sum insured / age) ---
+    range_rules = [
+        ('_mis_h_deductible', 'min_deductible', 'max_deductible', 'Policy: deductible amount'),
+        ('_mis_h_sum_assured', 'min_sum_insured', 'max_sum_insured', 'Policy: sum assured'),
+        ('_mis_h_age', 'min_age', 'max_age', 'Customer: age'),
+    ]
+    for mis_col, min_col, max_col, label in range_rules:
+        if not current_grid.empty:
+            val = mis_row[mis_col]
+            if pd.isna(val):
+                rule_mask = current_grid[min_col].isna() & current_grid[max_col].isna()
+                detail = (
+                    f"{label} is blank/unparseable on this policy, and no remaining "
+                    f"candidate Health Grid row has an open (blank) range."
+                )
+            else:
+                min_cond = current_grid[min_col].isna() | (current_grid[min_col] <= val)
+                max_cond = current_grid[max_col].isna() | (current_grid[max_col] >= val)
+                rule_mask = min_cond & max_cond
+                detail = (
+                    f"{label} value {val} falls outside the range configured on every "
+                    f"remaining candidate Health Grid row."
+                )
+            current_grid = current_grid[rule_mask]
+            if current_grid.empty:
+                failed_on.append((label, detail))
+
+    # --- RULE H6: Pincode zone — two-step PincodeMaster lookup ---
+    # Same resolve-then-check-membership shape as Motor's RTO rule (Rule 5b),
+    # except the grid side (HealthRateMaster.pincode_zone) holds one zone
+    # value per row rather than a comma cluster — check_resolved_cluster_match
+    # handles that identically either way (a 1-item list after split).
+    if not current_grid.empty:
+        val_pincode = normalize_pincode(mis_row['_mis_h_pincode_raw'])
+        if not val_pincode:
+            rule_mask = current_grid['pincode_zone'] == ''
+            detail = (
+                "Customer: pin code is blank on this policy, and no remaining candidate "
+                "Health Grid row allows a blank pincode zone."
+            )
+        else:
+            resolved_zone_names = resolve_pincode(val_pincode)
+            if not resolved_zone_names:
+                detail = (
+                    f"Pincode '{val_pincode}' was not found in any PincodeMaster cluster — "
+                    f"add it to PincodeMaster or check the MIS value."
+                )
+            else:
+                preview = ", ".join(sorted(resolved_zone_names)[:5])
+                detail = (
+                    f"Pincode '{val_pincode}' resolved to zone(s) [{preview}], but no remaining "
+                    f"candidate Health Grid row lists that zone."
+                )
+            rule_mask = current_grid['pincode_zone'].apply(
+                lambda g: check_resolved_cluster_match(resolved_zone_names, g)
+            )
+        current_grid = current_grid[rule_mask]
+        if current_grid.empty:
+            failed_on.append(('Customer: pin code', detail))
+
+    # --- FINAL RESOLUTION ---
+    # No group_id concept on HealthRateMaster — "each imported row already is
+    # one rate rule" (see the model docstring), so ambiguity is judged on
+    # distinct row ids directly, not a group_id/id fallback like Motor.
+    matched_grid = current_grid
+    distinct_ids = matched_grid['id'].unique().tolist() if not matched_grid.empty else []
+
+    if len(distinct_ids) == 1:
+        best_match = matched_grid.iloc[0]
+        return {
+            'Original_Row_ID': row_id,
+            'Mapping Status': '✅ MATCH',
+            'Failure Reason': 'Matched Successfully',
+            'Displaygroupid': best_match.get('id'),
+            'Potype': 'ON Net 1 Year',
+            'Porate': best_match.get(rate_col),
+            'Poflatamount': None,
+            'Pitype': 'ON Net 1 Year',
+            'Pirate': best_match.get('payin_rate'),
+            'Piflatamount': None,
+            'Addtnc': None,
+        }
+
+    if len(distinct_ids) > 1:
+        sorted_ids = sorted(int(i) for i in distinct_ids)
+        id_str = ', '.join(str(i) for i in sorted_ids[:10])
+        if len(sorted_ids) > 10:
+            id_str += f' … (+{len(sorted_ids) - 10} more)'
+        return {
+            'Original_Row_ID': row_id,
+            'Mapping Status': '⚠️ MULTIPLE MATCHES',
+            'Failure Reason': (
+                f"Multiple Health Rate Master rows matched ({len(sorted_ids)} rows). Please "
+                f"refine Health Rate Master so only one row applies. Matching Group IDs: {id_str}"
+            ),
+            'Displaygroupid': None,
+            'Potype': None, 'Porate': None, 'Poflatamount': None,
+            'Pitype': None, 'Pirate': None, 'Piflatamount': None,
+            'Addtnc': None,
+        }
+
+    if failed_on:
+        first_label, first_detail = failed_on[0]
+        reason = f"Failed on: {first_label} — {first_detail}"
+    else:
+        reason = "No rates found for criteria"
+    return _no_match(reason)
+
+
 def process_mis_mapping(mis_file_id):
     # Always forcefully wipe the thread's DB connection state to prevent inheritance locks
     connection.close()
@@ -746,6 +1115,33 @@ def process_mis_mapping(mis_file_id):
         df_mis['_mis_ncb'] = pd.to_numeric(safe_get_col(df_mis, 'Policy: no claim bonus'), errors='coerce')
         df_mis['_mis_cpa'] = pd.to_numeric(safe_get_col(df_mis, 'Policy: cpa'), errors='coerce')
         df_mis['_mis_zd'] = safe_get_col(df_mis, 'Policy: nil dep').astype(str).str.strip().str.upper()
+
+        # --- HEALTH PRE-COMPUTE ---
+        # Mirrors the Motor _mis_* block above, but for the fields Health
+        # matching needs (see _match_health_row). 'Policy: insurance company'
+        # and inception date are shared with Motor via _mis_ins/_mis_date —
+        # no need to recompute them under a separate name.
+        df_mis['_mis_h_is_health'] = safe_get_col(df_mis, 'Product').astype(str).str.strip().str.lower() == 'health'
+        df_mis['_mis_h_prodname'] = safe_get_col(df_mis, 'Policy: product name').astype(str).str.strip().str.lower()
+        df_mis['_mis_h_category'] = safe_get_col(df_mis, 'Policy: policy category').astype(str).str.strip().str.lower()
+        # .apply(_normalize_health_business_type) instead of the plain
+        # .str.strip().str.lower() every other _mis_h_* categorical column
+        # uses — folds MIS 'RollOver' onto the Health Grid's 'Port' spelling
+        # (see _HEALTH_BUSINESS_TYPE_SYNONYMS) while leaving every other
+        # business type untouched.
+        df_mis['_mis_h_biztype'] = safe_get_col(df_mis, 'Policy Type').apply(_normalize_health_business_type)
+        df_mis['_mis_h_plan_raw'] = safe_get_col(df_mis, 'Policy: plan name').fillna('').astype(str).str.strip()
+        df_mis['_mis_h_pincode_raw'] = safe_get_col(df_mis, 'Customer: pin code')
+        df_mis['_mis_h_expiry'] = pd.to_datetime(safe_get_col(df_mis, 'Policy: expiry date'), errors='coerce', dayfirst=True)
+
+        h_deductible_raw = safe_get_col(df_mis, 'Policy: deductible amount').astype(str).str.replace(r'[^0-9.]', '', regex=True)
+        df_mis['_mis_h_deductible'] = pd.to_numeric(h_deductible_raw, errors='coerce')
+
+        h_sum_assured_raw = safe_get_col(df_mis, 'Policy: sum assured').astype(str).str.replace(r'[^0-9.]', '', regex=True)
+        df_mis['_mis_h_sum_assured'] = pd.to_numeric(h_sum_assured_raw, errors='coerce')
+
+        h_age_raw = safe_get_col(df_mis, 'Customer: age').astype(str).str.replace(r'[^0-9.]', '', regex=True)
+        df_mis['_mis_h_age'] = pd.to_numeric(h_age_raw, errors='coerce')
 
         # --- CP PREMIUM# (reconciliation) ---
         # Computed straight from raw MIS fields, independent of Rate Master
@@ -884,6 +1280,79 @@ def process_mis_mapping(mis_file_id):
         grid_by_insurer = {name: sub_df for name, sub_df in df_grid.groupby('insurance_company')}
         _empty_grid = df_grid.iloc[0:0]
 
+        # 2b. FETCH HEALTH GRID DATA (only if this file actually has Health
+        # rows — skips the query entirely for pure-Motor uploads). Same
+        # two-phase shape as the Motor fetch above: find which insurers this
+        # file could match, fuzzy-map this file's insurers against just that
+        # list, then fetch full Health Grid rows only for insurers that could
+        # possibly match.
+        health_grid_columns = [
+            'id', 'insurance_company', 'product_name', 'policy_category', 'plan_names',
+            'business_type', 'min_deductible', 'max_deductible', 'min_sum_insured',
+            'max_sum_insured', 'min_age', 'max_age', 'pincode_zone', 'payin_rate',
+            'one_year_rate', 'multi_year_2_rate', 'multi_year_3_rate',
+            'multi_year_4_rate', 'multi_year_5_rate', 'from_date', 'to_date',
+        ]
+        has_health_rows = bool(df_mis['_mis_h_is_health'].any())
+
+        if has_health_rows:
+            distinct_health_insurers = list(
+                HealthRateMaster.objects.exclude(is_deleted="YES").filter(status="ACTIVE")
+                .values_list('insurance_company', flat=True).distinct()
+            )
+
+            raw_health_by_normalized = {}
+            for raw in distinct_health_insurers:
+                if raw and str(raw).strip():
+                    raw_health_by_normalized.setdefault(str(raw).strip().lower(), set()).add(raw)
+
+            fuzzy_health_ins_map = get_fuzzy_dict(
+                df_mis.loc[df_mis['_mis_h_is_health'], '_mis_ins'].unique(),
+                distinct_health_insurers,
+                threshold=INSURANCE_FUZZY_THRESHOLD
+            )
+            df_mis['_mis_h_ins_mapped'] = df_mis['_mis_ins'].map(fuzzy_health_ins_map)
+
+            relevant_health_insurers = set()
+            for normalized_name in {v for v in fuzzy_health_ins_map.values() if v}:
+                relevant_health_insurers.update(raw_health_by_normalized.get(normalized_name, set()))
+
+            health_qs = HealthRateMaster.objects.exclude(is_deleted="YES").filter(
+                status="ACTIVE", insurance_company__in=relevant_health_insurers
+            ).values(*health_grid_columns)
+            df_health_grid = pd.DataFrame.from_records(health_qs, columns=health_grid_columns)
+
+            for col in ['insurance_company', 'product_name', 'policy_category', 'pincode_zone']:
+                df_health_grid[col] = df_health_grid[col].fillna('').astype(str).str.strip().str.lower()
+            # business_type goes through the same RollOver/Port synonym fold as
+            # the MIS side (_mis_h_biztype) instead of the plain lowercase the
+            # other columns above get — see _normalize_health_business_type.
+            df_health_grid['business_type'] = df_health_grid['business_type'].fillna('').apply(_normalize_health_business_type)
+            # plan_names keeps its original casing — fuzzy_match_plan_name normalizes internally.
+            df_health_grid['plan_names'] = df_health_grid['plan_names'].fillna('').astype(str)
+
+            for col in ['min_deductible', 'max_deductible', 'min_sum_insured', 'max_sum_insured',
+                        'min_age', 'max_age', 'payin_rate', 'one_year_rate', 'multi_year_2_rate',
+                        'multi_year_3_rate', 'multi_year_4_rate', 'multi_year_5_rate']:
+                df_health_grid[col] = pd.to_numeric(df_health_grid[col], errors='coerce')
+            df_health_grid['from_date'] = pd.to_datetime(df_health_grid['from_date'], errors='coerce')
+            df_health_grid['to_date'] = pd.to_datetime(df_health_grid['to_date'], errors='coerce')
+
+            # PincodeMaster: Health's equivalent of RTOMaster — same
+            # build_master_lookup mechanism resolves a raw MIS pincode to the
+            # zone name(s) whose cluster contains it.
+            resolve_pincode = build_master_lookup(
+                PincodeMaster.objects.all(), 'pincode_zone', 'pincode_cluster'
+            )
+
+            health_grid_by_insurer = {name: sub_df for name, sub_df in df_health_grid.groupby('insurance_company')}
+            _empty_health_grid = df_health_grid.iloc[0:0]
+        else:
+            df_mis['_mis_h_ins_mapped'] = None
+            health_grid_by_insurer = {}
+            _empty_health_grid = pd.DataFrame(columns=health_grid_columns)
+            resolve_pincode = lambda _v: set()
+
         results = []
 
         # 4. ROW-BY-ROW PROCESSING
@@ -917,6 +1386,16 @@ def process_mis_mapping(mis_file_id):
                     'Pitype': None, 'Pirate': None, 'Piflatamount': None,
                     'Addtnc': None
                 })
+                continue
+
+            # --- HEALTH BRANCH ---
+            # Health rows (Product == 'health') are matched against
+            # HealthRateMaster via _match_health_row instead of the Motor
+            # RULE 1-6 chain below, which is completely untouched and keeps
+            # running exactly as before for every other row (motor, and any
+            # other Product value).
+            if mis_row['_mis_h_is_health']:
+                results.append(_match_health_row(mis_row, health_grid_by_insurer, _empty_health_grid, resolve_pincode))
                 continue
 
             failed_on = []
