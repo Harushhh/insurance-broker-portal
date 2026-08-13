@@ -1,0 +1,30 @@
+LIFE GRID -- LOSSLESS EXTRACTION AUDIT LOG
+Source: C:\Users\Harsj\harsh\grids\AUG26\Aug'26\Aug'26\BG\Life_Grid_Aug'26_V1.xlsx
+Generated: 2026-08-13T16:59:16.636347+00:00
+
+Sheet             Raw Rows  Processed Rows   Notes  Remarks Rows  Status
+------------------------------------------------------------------------
+TATA_AIA               496             417       3             0  OK
+Bajaj                   68              66       0             4  OK
+Shriram                 42              18      11             0  OK
+Digit                   82              37      26             0  OK
+HDFC                    47              39       6             0  OK
+Kotak                   37              35       0             7  OK
+India_First            252             289       2             0  OK
+Bharti_Axa             100              44      16             0  OK
+ABLI                    44              39       2             0  OK
+ICICI_Pru               75              72       1             0  OK
+AxisMax                 48              37       7             0  OK
+Ageas Federal           24              17       2             0  OK
+Generali(FGI)           74              50       5             0  OK
+PNB                     78              76       1            76  OK
+SUD                     31              16      11             0  OK
+Pramerica               97              66      16             0  OK
+
+TOTAL payout rows extracted: 1318
+TOTAL sheets processed: 16
+
+ANOMALIES / FLAGS FOR REVIEW (3):
+  - Sheet 'Bajaj': 66 row(s) have more than 5 distinct renewal-year columns in source -- all preserved in All_Renewal_Years_Raw, but only a representative value fits the fixed Renewal_Yr2..Yr6_Plus slots.
+  - Sheet 'Kotak': 35 row(s) have more than 5 distinct renewal-year columns in source -- all preserved in All_Renewal_Years_Raw, but only a representative value fits the fixed Renewal_Yr2..Yr6_Plus slots.
+  - Sheet 'India_First': 39 row(s) have more than 5 distinct renewal-year columns in source -- all preserved in All_Renewal_Years_Raw, but only a representative value fits the fixed Renewal_Yr2..Yr6_Plus slots.

@@ -1,0 +1,17 @@
+import { isAuthenticated } from "@/lib/admin-auth";
+import { loadGridData } from "@/lib/grid-data";
+import { AdminLogin } from "@/components/admin/admin-login";
+import { AdminUpload } from "@/components/admin/admin-upload";
+
+export const dynamic = "force-dynamic";
+
+export default async function UpdateGridPage() {
+  const authed = await isAuthenticated();
+
+  if (!authed) {
+    return <AdminLogin />;
+  }
+
+  const data = loadGridData();
+  return <AdminUpload meta={data.meta} />;
+}
