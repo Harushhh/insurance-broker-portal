@@ -18,6 +18,8 @@ import logging
 import os
 import re
 import hashlib
+import hmac
+import time
 import tempfile
 import threading
 import ast
@@ -91,7 +93,32 @@ PAGE_GROUPS = [
     "Can_View_Health_Payout_Rates",
     "Can_View_Special_Rates",
     "Can_Review_Special_Rates",
+    "Can_Manage_Life_Payout_Grid",
 ]
+
+
+def life_payout_grid_admin_redirect(request):
+    """
+    Entry point for the sidebar's "Update Payout Rates" link. There's no
+    password on the Life Payout Grid app -- instead we sign a short-lived
+    token (this user's username + a 2-minute expiry) with a secret shared
+    between the two apps, and hand it off in the URL. The Next.js app
+    verifies the signature and, if valid, trusts that this portal already
+    checked the Can_Manage_Life_Payout_Grid permission below.
+    """
+    secret = settings.LIFE_PAYOUT_GRID_AUTH_SECRET
+    if not secret:
+        return HttpResponse(
+            "LIFE_PAYOUT_GRID_AUTH_SECRET is not configured on this portal -- "
+            "the Life Payout Grid admin page can't be reached until it is.",
+            status=500,
+        )
+    expiry = int(time.time()) + 120
+    payload = f"{request.user.username}:{expiry}"
+    signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    token = f"{payload}.{signature}"
+    url = f"{settings.LIFE_PAYOUT_GRID_URL}/api/admin/portal-login?{urlencode({'token': token})}"
+    return redirect(url)
 
 # =========================================================
 # NA CONFIGURATION & HELPERS

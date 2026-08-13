@@ -5,30 +5,59 @@ import { cookies } from "next/headers";
 const COOKIE_NAME = "lpg_admin";
 const SESSION_HOURS = 8;
 
-function getSecret(): string {
-  return process.env.ADMIN_PASSWORD ?? "life-payout-grid-default";
+/**
+ * There is no password for this app. Access is granted entirely by the
+ * Django Insurance Portal: a user with the "Can_Manage_Life_Payout_Grid"
+ * permission clicks a sidebar link there, which signs a short-lived token
+ * with this same secret and redirects here with it. We only ever check
+ * that signature -- if you can produce a validly-signed token, the portal
+ * already decided you're allowed in.
+ */
+function getSecret(): string | null {
+  return process.env.LIFE_PAYOUT_GRID_AUTH_SECRET || null;
 }
 
-function sign(payload: string): string {
-  return crypto.createHmac("sha256", getSecret()).update(payload).digest("hex");
+function sign(secret: string, payload: string): string {
+  return crypto.createHmac("sha256", secret).update(payload).digest("hex");
 }
 
-export function checkPassword(password: string): boolean {
-  const expected = process.env.ADMIN_PASSWORD;
-  if (!expected) {
-    // No password configured for this environment -- refuse every login
-    // rather than falling back to a guessable default. Set ADMIN_PASSWORD
-    // (Railway env var in production, .env.local for local dev).
-    return false;
+function timingSafeEqualStr(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+/**
+ * Verifies a `username:expiryUnixSeconds.hexHmac` token minted by the
+ * Django portal. Returns the username on success so callers can log who
+ * signed in, or null if the token is missing, malformed, expired, or
+ * doesn't verify against the shared secret.
+ */
+export function verifyPortalToken(token: string | null | undefined): string | null {
+  const secret = getSecret();
+  if (!secret || !token) return null;
+
+  const lastDot = token.lastIndexOf(".");
+  if (lastDot === -1) return null;
+  const payload = token.slice(0, lastDot);
+  const sig = token.slice(lastDot + 1);
+  if (!timingSafeEqualStr(sig, sign(secret, payload))) return null;
+
+  const [username, expiryStr] = payload.split(":");
+  const expiry = Number(expiryStr);
+  if (!username || !Number.isFinite(expiry)) return null;
+  if (Date.now() > expiry * 1000) return null;
+
+  return username;
+}
+
+export async function createSession(username: string): Promise<void> {
+  const secret = getSecret();
+  if (!secret) {
+    throw new Error("LIFE_PAYOUT_GRID_AUTH_SECRET is not configured.");
   }
-  if (password.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(password), Buffer.from(expected));
-}
-
-export async function createSession(): Promise<void> {
   const expires = Date.now() + SESSION_HOURS * 60 * 60 * 1000;
-  const payload = `${expires}`;
-  const token = `${payload}.${sign(payload)}`;
+  const payload = `${username}:${expires}`;
+  const token = `${payload}.${sign(secret, payload)}`;
   const store = await cookies();
   store.set(COOKIE_NAME, token, {
     httpOnly: true,
@@ -43,13 +72,26 @@ export async function clearSession(): Promise<void> {
   store.delete(COOKIE_NAME);
 }
 
-export async function isAuthenticated(): Promise<boolean> {
+export async function getSessionUser(): Promise<string | null> {
+  const secret = getSecret();
   const store = await cookies();
   const token = store.get(COOKIE_NAME)?.value;
-  if (!token) return false;
-  const [payload, sig] = token.split(".");
-  if (!payload || !sig) return false;
-  if (sign(payload) !== sig) return false;
-  if (Date.now() > Number(payload)) return false;
-  return true;
+  if (!secret || !token) return null;
+
+  const lastDot = token.lastIndexOf(".");
+  if (lastDot === -1) return null;
+  const payload = token.slice(0, lastDot);
+  const sig = token.slice(lastDot + 1);
+  if (!timingSafeEqualStr(sig, sign(secret, payload))) return null;
+
+  const [username, expiryStr] = payload.split(":");
+  const expiry = Number(expiryStr);
+  if (!username || !Number.isFinite(expiry)) return null;
+  if (Date.now() > expiry) return null;
+
+  return username;
+}
+
+export async function isAuthenticated(): Promise<boolean> {
+  return (await getSessionUser()) !== null;
 }

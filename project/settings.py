@@ -45,6 +45,21 @@ else:
 # LIFE_PAYOUT_GRID_URL=https://life-payout-grid-production.up.railway.app
 LIFE_PAYOUT_GRID_URL = os.getenv("LIFE_PAYOUT_GRID_URL", "http://localhost:3000")
 
+# Shared secret used to sign the handoff token when a permitted user opens
+# the Life Payout Grid's admin page from this portal's sidebar (see
+# views.life_payout_grid_admin_redirect). Must be set to the *same* value
+# as LIFE_PAYOUT_GRID_AUTH_SECRET on the life-payout-grid Railway service --
+# that app trusts a token signed with this secret instead of a password of
+# its own. Set in this repo's .env for local dev (must match
+# life-payout-grid/.env.local); required as a real Railway env var in
+# production.
+LIFE_PAYOUT_GRID_AUTH_SECRET = os.getenv("LIFE_PAYOUT_GRID_AUTH_SECRET")
+if not LIFE_PAYOUT_GRID_AUTH_SECRET and not DEBUG:
+    raise RuntimeError(
+        "LIFE_PAYOUT_GRID_AUTH_SECRET environment variable is not set. "
+        "Refusing to start in production without it."
+    )
+
 # =========================================================
 # CSRF
 # =========================================================
