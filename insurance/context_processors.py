@@ -1,3 +1,5 @@
+from django.conf import settings
+
 from .views import PAGE_GROUPS
 
 
@@ -23,4 +25,5 @@ def sidebar_access(request):
     return {
         "nav_pages": nav_pages,
         "nav_can_access_control": in_admin_group or user.is_staff or user.is_superuser,
+        "life_payout_grid_url": settings.LIFE_PAYOUT_GRID_URL,
     }

@@ -1,0 +1,10 @@
+node_modules
+.next
+scripts/venv
+data/uploads/*
+!data/uploads/.gitkeep
+.env.local
+.git
+README.md
+AGENTS.md
+CLAUDE.md

@@ -5,7 +5,14 @@ import path from "path";
 import { isAuthenticated } from "@/lib/admin-auth";
 
 const PROJECT_ROOT = process.cwd();
-const PYTHON_PATH = path.join(PROJECT_ROOT, "scripts", "venv", "Scripts", "python.exe");
+// Local dev runs on Windows (venv/Scripts/python.exe); the Railway
+// container is Linux (venv/bin/python3, built by the Dockerfile). An
+// explicit PYTHON_PATH env var overrides both if needed.
+const PYTHON_PATH =
+  process.env.PYTHON_PATH ||
+  (process.platform === "win32"
+    ? path.join(PROJECT_ROOT, "scripts", "venv", "Scripts", "python.exe")
+    : path.join(PROJECT_ROOT, "scripts", "venv", "bin", "python3"));
 const PARSER_PATH = path.join(PROJECT_ROOT, "scripts", "extract_master.py");
 const DATA_PATH = path.join(PROJECT_ROOT, "data", "payout_data.json");
 const UPLOADS_DIR = path.join(PROJECT_ROOT, "data", "uploads");

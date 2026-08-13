@@ -14,7 +14,13 @@ function sign(payload: string): string {
 }
 
 export function checkPassword(password: string): boolean {
-  const expected = process.env.ADMIN_PASSWORD ?? "changeme";
+  const expected = process.env.ADMIN_PASSWORD;
+  if (!expected) {
+    // No password configured for this environment -- refuse every login
+    // rather than falling back to a guessable default. Set ADMIN_PASSWORD
+    // (Railway env var in production, .env.local for local dev).
+    return false;
+  }
   if (password.length !== expected.length) return false;
   return crypto.timingSafeEqual(Buffer.from(password), Buffer.from(expected));
 }

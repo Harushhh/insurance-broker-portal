@@ -39,6 +39,12 @@ else:
         "Refusing to start in production with an open host list."
     )
 
+# URL of the standalone Life Payout Grid app (life-payout-grid/), linked from
+# the sidebar. Defaults to the local Next.js dev server; set this in Railway
+# env vars once that service has a real URL, e.g.
+# LIFE_PAYOUT_GRID_URL=https://life-payout-grid-production.up.railway.app
+LIFE_PAYOUT_GRID_URL = os.getenv("LIFE_PAYOUT_GRID_URL", "http://localhost:3000")
+
 # =========================================================
 # CSRF
 # =========================================================
