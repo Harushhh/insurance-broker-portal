@@ -80,6 +80,7 @@ urlpatterns = [
     path("motor-payout-rates/", page_access_required("Can_View_Motor_Payout_Rates")(views.motor_payout_rates), name="motor_payout_rates"),
     path("motor-payout-rates/more/", page_access_required("Can_View_Motor_Payout_Rates")(views.motor_payout_rates_more), name="motor_payout_rates_more"),
     path("analysis/", page_access_required("Can_View_Analysis")(views.business_analysis), name="business_analysis"),
+    path("analysis/pivot-data/", page_access_required("Can_View_Analysis")(views.analysis_pivot_data), name="analysis_pivot_data"),
 
     # Admin-sensitive — staff only (or granted per-page below)
     path("audit-log/", page_access_required("Can_View_Audit_Log")(views.audit_logs), name="audit_logs"),

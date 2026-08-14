@@ -3557,6 +3557,20 @@ def month_label_for(code):
     return f"{MONTH_NAMES.get(code[:3], code[:3])} 20{code[3:]}"
 
 
+# Premium/tariff (PI) fields, not payout (PO) - what the policy is priced
+# at, not what the broker earns. pi_tp_2..pi_tp_5 are the year 2-5 legs
+# of a multi-year TP schedule; no upload has ever populated them, but
+# they're wired up now so they light up the moment that data arrives.
+RATE_FIELDS = {
+    "net": "pi_net_rate", "od": "pi_od_rate", "tp": "pi_tp_rate",
+    "tp2": "pi_tp_2", "tp3": "pi_tp_3", "tp4": "pi_tp_4", "tp5": "pi_tp_5",
+}
+RATE_FIELD_LABELS_PY = {
+    "net": "Net", "od": "OD", "tp": "TP",
+    "tp2": "TP2", "tp3": "TP3", "tp4": "TP4", "tp5": "TP5",
+}
+
+
 def _track_min_max(cell, prefix, value):
     if value is None:
         return
@@ -3566,7 +3580,7 @@ def _track_min_max(cell, prefix, value):
     cell[f"{prefix}_max"] = value if cur_max is None else max(cur_max, value)
 
 
-def business_analysis(request):
+def _build_rto_state_map():
     rto_state_map = {}
     for name, cluster in RTOMaster.objects.values_list("rto_name", "rto_cluster"):
         if not name or not cluster:
@@ -3579,7 +3593,10 @@ def business_analysis(request):
                 states.add(STATE_CODE_ALIASES.get(code, code))
         if states:
             rto_state_map[name.strip().upper()] = states
+    return rto_state_map
 
+
+def _filtered_rate_master_qs(request):
     qs = RateMaster.objects.filter(is_deleted="NO", status__in=["ACTIVE", "INACTIVE"])
 
     # Same date-range overlap filter used on the Rate Master Matrix
@@ -3587,7 +3604,6 @@ def business_analysis(request):
     # (from_date/to_date) covers the selected date, not an exact-match on
     # any single date field.
     date_range = (request.GET.get("date_range") or "").strip()
-    auto_loaded_today = request.GET.get("auto_loaded_today") or ""
     if date_range:
         dates = date_range.split(" - ")
         if len(dates) == 2:
@@ -3597,15 +3613,25 @@ def business_analysis(request):
                     (Q(from_date__lte=d_to) | Q(from_date__isnull=True)) &
                     (Q(to_date__gte=d_from) | Q(to_date__isnull=True))
                 )
+    return qs, date_range
 
-    # Premium/tariff (PI) fields, not payout (PO) - what the policy is priced
-    # at, not what the broker earns. pi_tp_2..pi_tp_5 are the year 2-5 legs
-    # of a multi-year TP schedule; no upload has ever populated them, but
-    # they're wired up now so they light up the moment that data arrives.
-    RATE_FIELDS = {
-        "net": "pi_net_rate", "od": "pi_od_rate", "tp": "pi_tp_rate",
-        "tp2": "pi_tp_2", "tp3": "pi_tp_3", "tp4": "pi_tp_4", "tp5": "pi_tp_5",
-    }
+
+def _row_states_and_months(rto_list, rto_state_map):
+    states, months = set(), set()
+    for token in (rto_list or "").split(","):
+        token = token.strip().upper()
+        if not token:
+            continue
+        if token in rto_state_map:
+            states |= rto_state_map[token]
+        months.add(month_bucket_for(token))
+    return states, months or {EVERGREEN}
+
+
+def business_analysis(request):
+    rto_state_map = _build_rto_state_map()
+    qs, date_range = _filtered_rate_master_qs(request)
+    auto_loaded_today = request.GET.get("auto_loaded_today") or ""
 
     def new_cell():
         cell = {"age_min": None, "age_max": None, "cc_min": None, "cc_max": None,
@@ -3630,18 +3656,9 @@ def business_analysis(request):
         if not rto_list:
             continue
 
-        states = set()
-        months = set()
-        for token in rto_list.split(","):
-            token = token.strip().upper()
-            if not token:
-                continue
-            if token in rto_state_map:
-                states |= rto_state_map[token]
-            months.add(month_bucket_for(token))
+        states, months = _row_states_and_months(rto_list, rto_state_map)
         if not states:
             continue
-        months = months or {EVERGREEN}
         months_seen |= months
 
         product = row["product__name"] or "Uncategorized"
@@ -3722,6 +3739,77 @@ def business_analysis(request):
         "date_range": date_range,
         "auto_loaded_today": auto_loaded_today,
     })
+
+
+def analysis_pivot_data(request):
+    rto_state_map = _build_rto_state_map()
+    qs, _ = _filtered_rate_master_qs(request)
+
+    # Pass 1: cheap query for the universe of *real* months in play, so an
+    # evergreen row (no month tag of its own) knows which months to fold
+    # into. Only needs the RTO text, not the full row.
+    real_months = set()
+    for rto_list in qs.values_list("new_rto_list", flat=True).iterator(chunk_size=5000):
+        if not rto_list:
+            continue
+        for token in rto_list.split(","):
+            token = token.strip().upper()
+            if token:
+                mo = month_bucket_for(token)
+                if mo != EVERGREEN:
+                    real_months.add(mo)
+
+    # Pass 2: accumulate into (product, sub_product, insurer, state, month,
+    # rate_type, is_evergreen) -> {sum, count} instead of emitting one flat
+    # row per matching RateMaster row. Many raw rows share the same pivot
+    # key (different vehicle-age/CC/NCB/etc. variants of the same
+    # insurer/state/month/rate_type) -- pre-summing collapses those here
+    # rather than shipping every one of them to the browser. This stays
+    # exactly as correct for the pivot table as the finest-grain values
+    # would be: the client's aggregator computes sum(sum) / sum(count)
+    # under any regrouping, which equals a true average of the raw values,
+    # never an average-of-averages. An evergreen row is folded into every
+    # real month in play instead of its own EVERGREEN bucket, tagged
+    # is_evergreen so it stays traceable rather than silently blended in.
+    agg = defaultdict(lambda: [0.0, 0])
+    for row in qs.values(
+        "product__name", "sub_product__name", "insurance_company", "new_rto_list",
+        *RATE_FIELDS.values(),
+    ).iterator(chunk_size=5000):
+        states, months = _row_states_and_months(row["new_rto_list"], rto_state_map)
+        if not states:
+            continue
+
+        product = row["product__name"] or "Uncategorized"
+        sub_product = row["sub_product__name"] or "Uncategorized"
+        insurer = row["insurance_company"]
+
+        for state in states:
+            for mo in months:
+                is_evergreen = mo == EVERGREEN
+                target_months = real_months if is_evergreen else {mo}
+                for target_mo in target_months:
+                    month_label = month_label_for(target_mo)
+                    for key, field in RATE_FIELDS.items():
+                        val = row[field]
+                        if val and val > 0:
+                            cell = agg[(
+                                product, sub_product, insurer, state,
+                                month_label, RATE_FIELD_LABELS_PY[key], is_evergreen,
+                            )]
+                            cell[0] += val
+                            cell[1] += 1
+
+    flat_rows = [
+        {
+            "product": p, "sub_product": sp, "insurer": ins, "state": st,
+            "month": mo, "rate_type": rt, "is_evergreen": eg,
+            "sum": round(total, 6), "count": n,
+        }
+        for (p, sp, ins, st, mo, rt, eg), (total, n) in agg.items()
+    ]
+
+    return JsonResponse(flat_rows, safe=False)
 
 # -------------------------
 # AUDIT TRAIL LOGS

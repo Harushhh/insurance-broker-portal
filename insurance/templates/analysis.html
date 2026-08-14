@@ -12,7 +12,10 @@
 {{ chart_data|json_script:"chart-data" }}
 
 <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
+<link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.css" />
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.js"></script>
 <script type="text/javascript" src="https://cdn.jsdelivr.net/momentjs/latest/moment.min.js"></script>
 <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
 
@@ -111,7 +114,13 @@
         </div>
     </div>
 
+    <div class="analysis-seg" role="tablist" aria-label="View" style="margin:0 24px 16px;">
+        <button type="button" id="tabHeatmap" role="tab" aria-pressed="true">Heatmap</button>
+        <button type="button" id="tabPivot" role="tab" aria-pressed="false">Pivot table</button>
+    </div>
+
     <div id="chartBody"></div>
+    <div id="pivotBody" style="padding:20px 24px;" hidden></div>
 </div>
 
 <div id="cellTooltip" class="cell-tooltip" hidden></div>
@@ -485,6 +494,82 @@
         }
         host.innerHTML = html;
     }
+
+    // ---- pivot table tab ----
+    let pivotLoaded = false;
+
+    // The server sends {sum, count} per cell instead of raw per-record
+    // values (see analysis_pivot_data) -- this aggregator rolls those up
+    // as sum(sum) / sum(count) under whatever grouping the user drags to,
+    // which is a true weighted average, never an average-of-averages.
+    function weightedAverageAggregator(){
+        return function(){
+            return {
+                sum: 0, count: 0,
+                push: function(record){
+                    this.sum += parseFloat(record.sum) || 0;
+                    this.count += parseInt(record.count, 10) || 0;
+                },
+                value: function(){ return this.count ? this.sum / this.count : null; },
+                format: function(x){ return (x === null || isNaN(x)) ? '—' : x.toFixed(2) + '%'; }
+            };
+        };
+    }
+
+    function setActiveTab(tab){
+        const isHeat = tab === 'heatmap';
+        document.getElementById('tabHeatmap').setAttribute('aria-pressed', String(isHeat));
+        document.getElementById('tabPivot').setAttribute('aria-pressed', String(!isHeat));
+        document.getElementById('chartBody').hidden = !isHeat;
+        document.getElementById('pivotBody').hidden = isHeat;
+        document.getElementById('productSelect').closest('.field').hidden = !isHeat;
+        document.getElementById('subProductSelect').closest('.field').hidden = !isHeat;
+        document.getElementById('stateSearch').closest('.field').hidden = !isHeat;
+        if(!isHeat) loadPivot();
+    }
+
+    function applyPivotHeatColors(){
+        const cells = document.querySelectorAll('#pivotBody td.pvtVal');
+        const vals = [];
+        cells.forEach(td => { const v = parseFloat(td.textContent); if(!isNaN(v)) vals.push(v); });
+        if(!vals.length) return;
+        const min = Math.min(...vals), max = Math.max(...vals);
+        cells.forEach(td => {
+            td.classList.remove('cell-b0','cell-b1','cell-b2','cell-b3','cell-b4','cell-b5','cell-nodata');
+            const v = parseFloat(td.textContent);
+            if(isNaN(v)){ td.classList.add('cell-nodata'); return; }
+            const bucket = (max === min) ? 3 : Math.max(0, Math.min(5, Math.floor((v - min) / (max - min) * 6)));
+            td.classList.add('cell-b' + bucket);
+        });
+    }
+
+    async function loadPivot(){
+        if(pivotLoaded) return;
+        pivotLoaded = true;
+        document.getElementById('pivotBody').innerHTML = '<div class="analysis-empty">Loading pivot data…</div>';
+        const params = new URLSearchParams();
+        const dr = document.getElementById('date_range').value;
+        if(dr) params.set('date_range', dr);
+        const url = '{% url "analysis_pivot_data" %}?' + params.toString();
+        const res = await fetch(url);
+        const rows = await res.json();
+        document.getElementById('pivotBody').innerHTML = '';
+        $('#pivotBody').pivotUI(rows, {
+            rows: ['insurer'],
+            cols: ['month'],
+            aggregators: {
+                'Weighted average': weightedAverageAggregator,
+                'Count': $.pivotUtilities.aggregators['Count']
+            },
+            aggregatorName: 'Weighted average',
+            rendererName: 'Table',
+            hiddenFromDragDrop: ['sum', 'count'],
+            onRefresh: applyPivotHeatColors
+        });
+    }
+
+    document.getElementById('tabHeatmap').addEventListener('click', () => setActiveTab('heatmap'));
+    document.getElementById('tabPivot').addEventListener('click', () => setActiveTab('pivot'));
 
     renderControls();
     renderStats();
