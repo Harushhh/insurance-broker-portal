@@ -105,9 +105,19 @@
         </div>
         <form method="GET" action="{% url 'business_analysis' %}" id="dateRangeForm" class="field">
             <input type="hidden" name="auto_loaded_today" id="auto_loaded_today" value="{{ auto_loaded_today|default_if_none:'' }}">
+            <input type="hidden" name="cc" id="ccHidden" value="{{ cc_filter|default_if_none:'' }}">
+            <input type="hidden" name="sc" id="scHidden" value="{{ sc_filter|default_if_none:'' }}">
             <label class="analysis-text-overline" for="date_range">Date</label>
             <input type="text" id="date_range" name="date_range" placeholder="Select date" value="{{ date_range|default_if_none:'' }}" autocomplete="off">
         </form>
+        <div class="field">
+            <label class="analysis-text-overline" for="ccInput">Engine CC</label>
+            <input type="number" id="ccInput" placeholder="e.g. 1500" min="0" value="{{ cc_filter|default_if_none:'' }}" autocomplete="off" style="min-width:120px;">
+        </div>
+        <div class="field">
+            <label class="analysis-text-overline" for="scInput">Seating capacity</label>
+            <input type="number" id="scInput" placeholder="e.g. 5" min="0" value="{{ sc_filter|default_if_none:'' }}" autocomplete="off" style="min-width:120px;">
+        </div>
         <div class="field" style="flex:1;">
             <label class="analysis-text-overline" for="stateSearch">Search state</label>
             <input type="text" id="stateSearch" placeholder="e.g. Maharashtra, GJ, Delhi" autocomplete="off">
@@ -550,6 +560,10 @@
         const params = new URLSearchParams();
         const dr = document.getElementById('date_range').value;
         if(dr) params.set('date_range', dr);
+        const cc = document.getElementById('ccInput').value;
+        if(cc) params.set('cc', cc);
+        const sc = document.getElementById('scInput').value;
+        if(sc) params.set('sc', sc);
         const url = '{% url "analysis_pivot_data" %}?' + params.toString();
         const res = await fetch(url);
         const rows = await res.json();
@@ -579,6 +593,14 @@
 
 <script>
     $(document).ready(function () {
+        // Chrome sometimes fails to paint a number input's server-rendered
+        // "value" attribute after a form-submit reload (autocomplete
+        // restore stomps it back to blank right after first paint), even
+        // though the value was received and applied correctly server-side.
+        // Re-asserting it via JS from the hidden field sidesteps that.
+        document.getElementById('ccInput').value = document.getElementById('ccHidden').value || '';
+        document.getElementById('scInput').value = document.getElementById('scHidden').value || '';
+
         $('#date_range').daterangepicker({
             autoUpdateInput: false,
             locale: { format: 'YYYY-MM-DD', cancelLabel: 'Clear' }
@@ -592,6 +614,21 @@
         $('#date_range').on('cancel.daterangepicker', function () {
             $(this).val('');
             document.getElementById('dateRangeForm').submit();
+        });
+
+        // CC / seating-capacity are plain number filters that need the raw
+        // per-row data to apply correctly, so (like the date range) they're
+        // resolved server-side and reload the page rather than filtering
+        // client-side against the already-merged heatmap cells.
+        function submitCcSc(){
+            document.getElementById('ccHidden').value = document.getElementById('ccInput').value.trim();
+            document.getElementById('scHidden').value = document.getElementById('scInput').value.trim();
+            document.getElementById('dateRangeForm').submit();
+        }
+        ['ccInput', 'scInput'].forEach(id => {
+            const el = document.getElementById(id);
+            el.addEventListener('change', submitCcSc);
+            el.addEventListener('keydown', e => { if(e.key === 'Enter'){ e.preventDefault(); submitCcSc(); } });
         });
 
         // Default to today on a genuinely fresh visit only. auto_loaded_today

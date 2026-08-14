@@ -3613,6 +3613,35 @@ def _filtered_rate_master_qs(request):
                     (Q(from_date__lte=d_to) | Q(from_date__isnull=True)) &
                     (Q(to_date__gte=d_from) | Q(to_date__isnull=True))
                 )
+
+    # Engine CC / seating-capacity filters: a row matches if the entered
+    # value falls inside its cc_min-cc_max (or sc_min-sc_max) band, treating
+    # a null bound as open-ended - same semantics as the quote simulator's
+    # CC/SC matching.
+    cc = (request.GET.get("cc") or "").strip()
+    if cc:
+        try:
+            cc_val = float(cc)
+        except ValueError:
+            cc_val = None
+        if cc_val is not None:
+            qs = qs.filter(
+                (Q(cc_min__lte=cc_val) | Q(cc_min__isnull=True)) &
+                (Q(cc_max__gte=cc_val) | Q(cc_max__isnull=True))
+            )
+
+    sc = (request.GET.get("sc") or "").strip()
+    if sc:
+        try:
+            sc_val = float(sc)
+        except ValueError:
+            sc_val = None
+        if sc_val is not None:
+            qs = qs.filter(
+                (Q(sc_min__lte=sc_val) | Q(sc_min__isnull=True)) &
+                (Q(sc_max__gte=sc_val) | Q(sc_max__isnull=True))
+            )
+
     return qs, date_range
 
 
@@ -3738,6 +3767,8 @@ def business_analysis(request):
         "chart_data": chart_data,
         "date_range": date_range,
         "auto_loaded_today": auto_loaded_today,
+        "cc_filter": request.GET.get("cc") or "",
+        "sc_filter": request.GET.get("sc") or "",
     })
 
 
