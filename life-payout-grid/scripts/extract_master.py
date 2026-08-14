@@ -739,39 +739,6 @@ MASTER_COLUMNS = [
 # matching the schema exactly as specified.
 APP_ONLY_COLUMNS = ["InsurerDisplay", "InsurerCode"]
 
-# Commission-scaling multipliers applied to the portal-facing JSON only.
-# The CSV/audit-log deliverable stays unscaled -- it exists to be checked
-# against the original Excel, so it has to keep matching that exactly.
-# This is what makes the JSON differ from the CSV in *values*, not just
-# shape; that's intentional, see apply_portal_scaling()'s docstring.
-BASE_YR1_MULTIPLIER = 0.75
-RENEWAL_MULTIPLIER = 0.50
-
-
-def apply_portal_scaling(records):
-    """Base_Payout_Yr1 x0.75, every Renewal_Yr* slot x0.50 -- e.g. a 64.0%
-    base extracted from the source sheet becomes 48.0% on the portal. Only
-    numeric values are scaled; text values (e.g. Kotak's "Only 7 Pay
-    -1.5%") pass through unchanged since there's no number to scale.
-    Row_Specific_Remarks and All_Renewal_Years_Raw are deliberately left
-    as the true source figures -- they're the audit trail, not the quoted
-    rate -- so a figure quoted from the clean columns and one read out of
-    the expanded "Full schedule" detail will legitimately differ; that's
-    expected, not a bug."""
-    scaled = []
-    for r in records:
-        r2 = dict(r)
-        base = r2.get("Base_Payout_Yr1")
-        if isinstance(base, (int, float)):
-            r2["Base_Payout_Yr1"] = round(base * BASE_YR1_MULTIPLIER, 6)
-        for slot in RENEWAL_SLOTS:
-            val = r2.get(slot)
-            if isinstance(val, (int, float)):
-                r2[slot] = round(val * RENEWAL_MULTIPLIER, 6)
-        scaled.append(r2)
-    return scaled
-
-
 def fail(error, warnings=None, sheet_errors=None):
     print(json.dumps({
         "ok": False, "error": error,
@@ -898,7 +865,6 @@ def main():
 
     resolved_source = source_label or input_path.split("\\")[-1].split("/")[-1]
     ordered_columns = ["Row_ID"] + MASTER_COLUMNS + APP_ONLY_COLUMNS
-    portal_records = apply_portal_scaling(all_records)
 
     with open(output_json_path, "w", encoding="utf-8") as f:
         json.dump(
@@ -906,17 +872,13 @@ def main():
                 "meta": {
                     "generatedAt": datetime.now(timezone.utc).isoformat(),
                     "sourceFile": resolved_source,
-                    "totalRows": len(portal_records),
+                    "totalRows": len(all_records),
                     "totalProducts": sum(s["productCount"] for s in insurer_summary),
                     "insurers": sorted(insurer_summary, key=lambda s: -s["rowCount"]),
                     "warnings": anomalies,
                     "sheetErrors": sheet_errors,
-                    "rateScaling": {
-                        "baseYr1Multiplier": BASE_YR1_MULTIPLIER,
-                        "renewalMultiplier": RENEWAL_MULTIPLIER,
-                    },
                 },
-                "rows": [{k: r.get(k) for k in ordered_columns} for r in portal_records],
+                "rows": [{k: r.get(k) for k in ordered_columns} for r in all_records],
             },
             f, indent=2, ensure_ascii=False,
         )
