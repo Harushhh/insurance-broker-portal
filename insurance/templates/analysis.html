@@ -538,6 +538,48 @@
         if(!isHeat) loadPivot();
     }
 
+    // pivottable.js's own filter-box positioning is unreliable on this page:
+    // it computes the box's top/left as a small offset relative to the
+    // *table cell* the clicked field's triangle sits in (a native-DOM quirk
+    // where <td> acts as an implicit offset anchor for statically-positioned
+    // descendants), then applies that offset to a box that CSS actually
+    // renders relative to the nearest `position:relative` ancestor — here,
+    // <main class="main-wrapper"> in base.html — landing it near the top of
+    // the page instead of near the field. Worse, when a field is dragged
+    // from the "unused" pool into Rows/Cols, only its trigger <li> moves —
+    // the filter box itself stays behind in the original "unused" cell — so
+    // even a CSS-only fix (e.g. position:relative on the axis cells) would
+    // anchor it to the wrong cell. Fixed by recalculating the box's position
+    // ourselves from the actual clicked trigger's live position, using the
+    // box's own (correctly resolved, since it has explicit position:absolute)
+    // offsetParent as the reference frame. Delegated on #pivotBody, which
+    // persists across pivotUI re-renders, and registered as a normal
+    // (bubble-phase) listener so it runs after pivottable's own click
+    // handler has already shown the box.
+    function fixPivotFilterBoxPosition(){
+        document.getElementById('pivotBody').addEventListener('click', function(e){
+            const triangle = e.target.closest('.pvtTriangle');
+            if(!triangle) return;
+            const attrSpan = triangle.closest('.pvtAttr');
+            const name = attrSpan.childNodes[0].textContent.trim();
+            const box = Array.from(document.querySelectorAll('.pvtFilterBox')).find(b => {
+                const h4span = b.querySelector('h4 span');
+                return h4span && h4span.textContent === name;
+            });
+            if(!box || getComputedStyle(box).display === 'none') return;
+            const triRect = triangle.getBoundingClientRect();
+            const cbEl = box.offsetParent || document.documentElement;
+            const cbRect = cbEl.getBoundingClientRect();
+            let top = triRect.bottom - cbRect.top + 4;
+            let left = triRect.left - cbRect.left;
+            const boxWidth = box.offsetWidth || 300;
+            const maxLeft = cbRect.width - boxWidth - 4;
+            if(left > maxLeft) left = Math.max(4, maxLeft);
+            box.style.top = top + 'px';
+            box.style.left = left + 'px';
+        });
+    }
+
     function applyPivotHeatColors(){
         const cells = document.querySelectorAll('#pivotBody td.pvtVal');
         const vals = [];
@@ -584,6 +626,7 @@
 
     document.getElementById('tabHeatmap').addEventListener('click', () => setActiveTab('heatmap'));
     document.getElementById('tabPivot').addEventListener('click', () => setActiveTab('pivot'));
+    fixPivotFilterBoxPosition();
 
     renderControls();
     renderStats();
