@@ -2195,6 +2195,47 @@ def _sync_unsynced_mis_files():
             logger.exception("Could not sync MIS failure rows for MISFile %s", mis_file.id)
 
 
+# The full set of PI (premium/tariff) rate fields on RateMaster — same
+# grouping used elsewhere for PI-side rate handling (see RATE_FIELDS et al).
+# pi_type says which of these should carry the rate; the rest must be 0/blank.
+PI_RATE_FIELDS = [
+    "pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5",
+    "pi_net_rate", "pi_flat_amount", "pi_vli",
+]
+PI_TYPE_RULES = [
+    ("On Net", ["pi_net_rate"]),
+    ("On OD", ["pi_od_rate"]),
+    ("On TP", ["pi_tp_rate"]),
+    ("On OD and TP", ["pi_od_rate", "pi_tp_rate"]),
+]
+PI_TYPE_RULES_MAP = dict(PI_TYPE_RULES)
+
+
+def _rate_master_pi_type_violations_qs(label):
+    """
+    RateMaster rows whose pi_type is `label` but that have a nonzero value in
+    a PI rate field other than the one(s) that pi_type says should hold the
+    rate. NULL/0 fields are "unset" and never violate — only a genuinely
+    populated field outside the allowed set counts as an error.
+    """
+    allowed_fields = PI_TYPE_RULES_MAP.get(label)
+    if allowed_fields is None:
+        return RateMaster.objects.none()
+    other_fields_q = Q()
+    for field in PI_RATE_FIELDS:
+        if field in allowed_fields:
+            continue
+        other_fields_q |= ~Q(**{field: 0})
+    return RateMaster.objects.filter(is_deleted="NO", pi_type=label).filter(other_fields_q)
+
+
+def _rate_master_pi_type_error_counts():
+    return [
+        {"label": label, "count": _rate_master_pi_type_violations_qs(label).count()}
+        for label, _ in PI_TYPE_RULES
+    ]
+
+
 def rate_master_health(request):
     _sync_unsynced_mis_files()
 
@@ -2251,6 +2292,34 @@ def rate_master_health(request):
 
     status_types = [c for c in MISFailedRow.STATUS_CHOICES if c[0] != "OTHER"]
 
+    pi_type_error_counts = _rate_master_pi_type_error_counts()
+
+    # Drill-down: clicking an Error Dashboard card lists the distinct Rate
+    # Master groups behind that rule's violating rows, so the user can jump
+    # straight to Fix Mapping instead of hunting through the full table.
+    pi_type_error = (request.GET.get("pi_type_error") or "").strip()
+    error_group_page_obj = None
+    error_group_elided_range = None
+    error_group_ungrouped_count = 0
+    if pi_type_error in PI_TYPE_RULES_MAP:
+        violations_qs = _rate_master_pi_type_violations_qs(pi_type_error)
+        error_group_ungrouped_count = violations_qs.filter(group_id__isnull=True).count()
+        grouped_qs = (
+            violations_qs.exclude(group_id__isnull=True)
+            .values("group_id", "insurance_company")
+            .annotate(row_count=Count("id"))
+            .order_by("-row_count", "group_id")
+        )
+        error_paginator = Paginator(grouped_qs, MIS_HEALTH_BATCH_SIZE)
+        try:
+            error_page_number = int(request.GET.get("err_page") or 1)
+        except ValueError:
+            error_page_number = 1
+        error_group_page_obj = error_paginator.get_page(error_page_number)
+        error_group_elided_range = list(
+            error_paginator.get_elided_page_range(error_group_page_obj.number, on_each_side=1, on_ends=1)
+        )
+
     return render(request, "rate_master_health.html", {
         "page_obj": page_obj,
         "elided_page_range": elided_page_range,
@@ -2259,6 +2328,12 @@ def rate_master_health(request):
         "status_types": status_types,
         "status_counts": status_counts,
         "insurer_list": insurer_list,
+        "pi_type_error_counts": pi_type_error_counts,
+        "pi_type_error_total": sum(r["count"] for r in pi_type_error_counts),
+        "selected_pi_type_error": pi_type_error if pi_type_error in PI_TYPE_RULES_MAP else "",
+        "error_group_page_obj": error_group_page_obj,
+        "error_group_elided_range": error_group_elided_range,
+        "error_group_ungrouped_count": error_group_ungrouped_count,
         "selected": {
             "failure_reason": status_key,
             "insurer": insurer,
