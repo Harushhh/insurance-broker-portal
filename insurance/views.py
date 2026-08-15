@@ -8,6 +8,7 @@ from django.http import HttpResponse, JsonResponse
 from django.db.models import Q, F, Count, Sum, Case, When, Value, CharField
 from django.core.mail import send_mail
 from django.core.paginator import Paginator
+from django.core.cache import cache
 from django.conf import settings
 from django.db import transaction
 from django import forms
@@ -528,6 +529,28 @@ class PincodeForm(forms.ModelForm):
         model = PincodeMaster
         fields = ["pincode_zone", "pincode_cluster"]
 
+# RTOMaster/MakeModelMaster back the new_rto_list/new_vehicle_makes multi-select
+# choices on RateForm, rebuilt on every GET and POST of the (frequently used)
+# Bulk Edit Rate Group page. Both tables are near-static reference data, so a
+# short cache avoids re-querying them on every request; invalidated explicitly
+# wherever these tables are written to (see api_upload_chunk) rather than
+# relying solely on the TTL, so new master rows show up immediately.
+RTO_MAKE_CHOICES_CACHE_KEY = "rate_form_rto_make_choices_v1"
+RTO_MAKE_CHOICES_CACHE_TTL = 600  # seconds
+
+
+def get_rto_and_make_choices():
+    cached = cache.get(RTO_MAKE_CHOICES_CACHE_KEY)
+    if cached is not None:
+        return cached
+    data = {
+        "rtos": list(RTOMaster.objects.values_list("rto_name", flat=True).order_by("rto_name")),
+        "makes": list(MakeModelMaster.objects.values_list("make_model_name", flat=True).order_by("make_model_name")),
+    }
+    cache.set(RTO_MAKE_CHOICES_CACHE_KEY, data, RTO_MAKE_CHOICES_CACHE_TTL)
+    return data
+
+
 class RateForm(forms.ModelForm):
     product = forms.ModelChoiceField(
         queryset=ProductMaster.objects.none(),
@@ -594,18 +617,16 @@ class RateForm(forms.ModelForm):
         self.fields["is_cpa"].queryset = YesNoNAMaster.objects.all()
         self.fields["is_zd"].queryset = YesNoNAMaster.objects.all()
 
-        companies = list(
-            RateMaster.objects.exclude(insurance_company__isnull=True)
-            .exclude(insurance_company__exact="")
-            .values_list("insurance_company", flat=True)
-            .distinct()
-            .order_by("insurance_company")
-        )
-        if self.instance and self.instance.insurance_company and self.instance.insurance_company not in companies:
-            companies.append(self.instance.insurance_company)
-        self.fields["insurance_company"].choices = [("", "---------")] + [(c, c) for c in companies]
+        # insurance_company/insurer_vertical are plain CharField/TextInput on
+        # this form (never declared as ChoiceField above), so `.choices` here
+        # was previously computed — via a DISTINCT scan of the ~100k-row
+        # RateMaster table, on every single GET and POST — and then silently
+        # discarded: TextInput ignores it for rendering, and CharField.clean()
+        # never consults it either. Intentionally not rebuilding it.
 
-        makes = list(MakeModelMaster.objects.values_list("make_model_name", flat=True).order_by("make_model_name"))
+        rto_make_choices = get_rto_and_make_choices()
+
+        makes = list(rto_make_choices["makes"])
         initial_makes = kwargs.get("initial", {}).get("new_vehicle_makes", [])
         instance_makes = [x.strip() for x in self.instance.new_vehicle_makes.split(",")] if self.instance and self.instance.new_vehicle_makes else []
         all_makes = set(instance_makes + initial_makes)
@@ -614,18 +635,7 @@ class RateForm(forms.ModelForm):
                 makes.append(m)
         self.fields["new_vehicle_makes"].choices = [(m, m) for m in makes]
 
-        verticals = list(
-            RateMaster.objects.exclude(insurer_vertical__isnull=True)
-            .exclude(insurer_vertical__exact="")
-            .values_list("insurer_vertical", flat=True)
-            .distinct()
-            .order_by("insurer_vertical")
-        )
-        if self.instance and self.instance.insurer_vertical and self.instance.insurer_vertical not in verticals:
-            verticals.append(self.instance.insurer_vertical)
-        self.fields["insurer_vertical"].choices = [("", "---------")] + [(v, v) for v in verticals]
-
-        rtos = list(RTOMaster.objects.values_list("rto_name", flat=True).order_by("rto_name"))
+        rtos = list(rto_make_choices["rtos"])
         initial_rtos = kwargs.get("initial", {}).get("new_rto_list", [])
         instance_rtos = [x.strip() for x in self.instance.new_rto_list.split(",")] if self.instance and self.instance.new_rto_list else []
         all_existing_rtos = set(instance_rtos + initial_rtos)
@@ -739,6 +749,7 @@ def api_upload_chunk(request):
                             defaults={"rto_cluster": rto_cluster or None}
                         )
                         inserted += 1
+                    cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
 
                 elif target_table == 'make_model_master':
                     for row in rows:
@@ -751,6 +762,7 @@ def api_upload_chunk(request):
                             defaults={"make_model_cluster": make_model_cluster or None}
                         )
                         inserted += 1
+                    cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
 
                 elif target_table == 'pincode_master':
                     for row in rows:
@@ -1992,7 +2004,19 @@ def edit_pincode(request, pk):
 # Edit Rate Form
 # -------------------------
 def edit_rate(request, group_id):
-    records = RateMaster.objects.filter(Q(group_id=group_id) | Q(id=group_id))
+    # group_id here is overloaded: it's either a real RateGroup id (edit the
+    # whole group), or — when a caller couldn't resolve a group (e.g. some
+    # "Fix Mapping" links on Rate Master Health) — a raw RateMaster.id for a
+    # single ungrouped row. These two id spaces are independent auto-increment
+    # sequences, so they collide: as of this writing 1,898 RateGroup ids also
+    # happen to equal the primary key of some unrelated RateMaster row
+    # belonging to a *different* group. Q(group_id=X) | Q(id=X) would match
+    # BOTH in that case and silently fold a stranger row into this edit/bulk
+    # update. Only fall back to the raw-id interpretation when no real group
+    # matches, so the two interpretations can never mix.
+    records = RateMaster.objects.filter(group_id=group_id)
+    if not records.exists():
+        records = RateMaster.objects.filter(id=group_id)
     if not records.exists():
         return HttpResponse("Record not found.", status=404)
 
@@ -2033,14 +2057,33 @@ def edit_rate(request, group_id):
         # the whole edit.
         form = RateForm(request.POST, instance=first_record, initial=initial_data)
         if form.is_valid():
-            update_data = {field: value for field, value in form.cleaned_data.items()}
-            records.update(**update_data)
-
-            AuditLog.objects.create(
-                user=request.user,
-                action="MANUAL EDIT",
-                details=f"Edited Group/Record ID {group_id} via form. Updated {record_count} rows."
-            )
+            # Only write fields the user actually changed from what the form
+            # showed them — not the full cleaned_data for every field on the
+            # model. This matters most for new_rto_list/new_vehicle_makes:
+            # their *displayed* value is the union of every record's own
+            # value across the whole group (see unique_rto_list/unique_makes_list
+            # above), which is correct for showing "what this group currently
+            # covers" but is NOT a value that's safe to blast onto every
+            # record — new_rto_list in particular is deliberately excluded
+            # from GROUP_FIELDS because individual records in a group
+            # routinely carry different single RTOs. Writing the full
+            # cleaned_data unconditionally (the old behavior) meant editing
+            # any single field — e.g. just a rate — silently overwrote every
+            # record's own RTO/vehicle-makes with that group-wide union,
+            # destroying the per-record distinction. form.changed_data is
+            # Django's built-in "differs from what was shown" check, so a
+            # field is only written when the user genuinely touched it.
+            update_data = {field: form.cleaned_data[field] for field in form.changed_data}
+            if update_data:
+                records.update(**update_data)
+                AuditLog.objects.create(
+                    user=request.user,
+                    action="MANUAL EDIT",
+                    details=(
+                        f"Edited Group/Record ID {group_id} via form. Updated {record_count} rows. "
+                        f"Changed fields: {', '.join(sorted(update_data.keys()))}."
+                    )
+                )
             return redirect("dashboard")
     else:
         form = RateForm(instance=first_record, initial=initial_data)
@@ -2101,8 +2144,16 @@ def bulk_update_rates(request):
             )
             return redirect("dashboard")
 
-        # 2. Fetch all exact records mapped to the selected rows
-        records = RateMaster.objects.filter(Q(group_id__in=group_ids) | Q(id__in=group_ids))
+        # 2. Fetch all exact records mapped to the selected rows.
+        # Same group_id/id ambiguity as edit_rate (see its comment): resolve
+        # each selected id against group_id first, and only treat it as a raw
+        # RateMaster.id if no group has that id, so a group id that happens to
+        # collide with an unrelated row's primary key can't pull that row in.
+        ids_matching_a_group = set(
+            RateMaster.objects.filter(group_id__in=group_ids).values_list("group_id", flat=True).distinct()
+        )
+        leftover_ids = [gid for gid in group_ids if gid not in ids_matching_a_group]
+        records = RateMaster.objects.filter(Q(group_id__in=group_ids) | Q(id__in=leftover_ids))
         record_count = records.count()
 
         # 3. Safely cast the incoming text value into the correct Python/Django Database Type
