@@ -102,6 +102,11 @@
     padding-left: 2px;
   }
 
+  .field-group label.required::after {
+    content: " *";
+    color: #ef4444;
+  }
+
   .field-group input[type="text"],
   .field-group input[type="date"],
   .field-group select {
@@ -467,17 +472,17 @@
       <div class="form-grid">
 
         <div class="field-group">
-          <label>Select Date</label>
+          <label class="required">Select Date</label>
           <input type="date" id="target_date_input" name="target_date" value="{{ selected.target_date }}">
         </div>
 
         <div class="field-group">
-          <label>Vehicle No.</label>
+          <label class="required">Vehicle No.</label>
           <input type="text" name="vehicle_no" value="{{ selected.vehicle_no }}" placeholder="e.g. MH01AB1234">
         </div>
 
         <div class="field-group">
-          <label>Product</label>
+          <label class="required">Product</label>
           <select name="product" class="smart-dropdown" data-placeholder="Select...">
             <option value="">Select...</option>
             {% for p in product_list %}
@@ -487,7 +492,7 @@
         </div>
 
         <div class="field-group">
-          <label>Sub Product</label>
+          <label class="required">Sub Product</label>
           <select name="sub_product" class="smart-dropdown" data-placeholder="Select...">
             <option value="">Select...</option>
             {% for sp in sub_product_list %}
@@ -497,7 +502,7 @@
         </div>
 
         <div class="field-group">
-          <label>Make Model Class</label>
+          <label class="required">Make Model Class</label>
           <select name="make_model_class" class="smart-dropdown" data-placeholder="Select...">
             <option value="">Select...</option>
             {% for mmc in make_model_class_list %}
@@ -507,7 +512,7 @@
         </div>
 
         <div class="field-group">
-          <label>Make Name (Code)</label>
+          <label class="required">Make Name (Code)</label>
           <select name="make_names" class="smart-dropdown" data-placeholder="Select...">
             <option value="" {% if not selected.make_names %}selected{% endif %}>Select...</option>
             {% for make in make_name_list %}
@@ -517,17 +522,17 @@
         </div>
 
         <div class="field-group">
-          <label>RTO Code</label>
+          <label class="required">RTO Code</label>
           <input type="text" name="rto_code" value="{{ selected.rto_code }}" placeholder="e.g. MH03">
         </div>
 
         <div class="field-group">
-          <label>CC / GVW</label>
+          <label class="required">CC / GVW</label>
           <input type="text" name="cc" value="{{ selected.cc }}" placeholder="e.g. 1197">
         </div>
 
         <div class="field-group">
-          <label>Fuel</label>
+          <label class="required">Fuel</label>
           <select name="fuel" class="smart-dropdown" data-placeholder="Select...">
             <option value="">Select...</option>
             {% for f in fuel_list %}
@@ -537,12 +542,12 @@
         </div>
 
         <div class="field-group" id="sc_field_group" style="display:none;">
-          <label>Exact SC</label>
+          <label class="required">Exact SC</label>
           <input type="text" name="sc" value="{{ selected.sc }}" placeholder="e.g. 4">
         </div>
 
         <div class="field-group">
-          <label>Manufacturing Year</label>
+          <label class="required">Manufacturing Year</label>
           <input type="text" name="mfg_year" value="{{ selected.mfg_year }}" placeholder="e.g. 2021">
         </div>
 
@@ -894,6 +899,52 @@
                 btn.innerHTML = "Lock Rate";
             });
         });
+    });
+
+    // --- 7. REQUIRE ALL SEARCH FIELDS BEFORE CHECKING ELIGIBILITY ---
+    // Custom check rather than native `required` -- TomSelect hides the
+    // underlying <select> (display:none), and browsers won't reliably show
+    // the native validation bubble on a hidden element, so a plain
+    // `required` attribute here would silently block submission with no
+    // visible feedback for those fields.
+    const subProductTs = document.querySelector('select[name="sub_product"]').tomselect;
+    const makeNamesTs = document.querySelector('select[name="make_names"]').tomselect;
+    const fuelTs = document.querySelector('select[name="fuel"]').tomselect;
+
+    document.getElementById('mainSearchForm').addEventListener('submit', function (e) {
+        const requiredFields = [
+            { el: dateInput, label: 'Select Date' },
+            { el: vehicleInput, label: 'Vehicle No.' },
+            { el: productTs, label: 'Product', isTomSelect: true },
+            { el: subProductTs, label: 'Sub Product', isTomSelect: true },
+            { el: classTs, label: 'Make Model Class', isTomSelect: true },
+            { el: makeNamesTs, label: 'Make Name (Code)', isTomSelect: true },
+            { el: rtoInput, label: 'RTO Code' },
+            { el: document.querySelector('input[name="cc"]'), label: 'CC / GVW' },
+            { el: fuelTs, label: 'Fuel', isTomSelect: true },
+            { el: document.querySelector('input[name="mfg_year"]'), label: 'Manufacturing Year' },
+        ];
+
+        if (!scInput.disabled) {
+            requiredFields.push({ el: scInput, label: 'Exact SC' });
+        }
+
+        const missing = requiredFields
+            .filter(f => {
+                const val = f.isTomSelect ? f.el.getValue() : f.el.value;
+                return !val || String(val).trim() === '';
+            })
+            .map(f => f.label);
+
+        if (missing.length > 0) {
+            e.preventDefault();
+            Swal.fire({
+                icon: 'warning',
+                title: 'Missing details',
+                html: 'Please fill in before checking eligibility:<br><b>' + missing.join(', ') + '</b>',
+                confirmButtonColor: '#2563eb'
+            });
+        }
     });
   });
 </script>
