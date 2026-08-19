@@ -599,11 +599,16 @@
 
   {% if has_searched %}
   <div class="table-card">
-    <div class="table-head">
+    <div class="table-head" style="display:flex; align-items:flex-start; justify-content:space-between; gap:14px; flex-wrap:wrap;">
       <div>
         <div class="table-title">Eligibility Results</div>
         <div class="table-sub">Only matching rate records are shown below.</div>
       </div>
+      {% if data %}
+      <button type="button" class="modern-btn btn-light" onclick="downloadResultsPdf()" id="downloadPdfBtn">
+        📄 Download PDF
+      </button>
+      {% endif %}
     </div>
 
     <div class="table-wrap-modern">
@@ -1052,6 +1057,238 @@
             alert('A network error occurred while submitting the ticket. Please try again.');
             console.error(error);
         }
+    }
+
+    // --- 8. DOWNLOAD ELIGIBILITY RESULTS AS PDF ---
+    // Reads straight from the already-rendered DOM (form fields + results
+    // table) so the export always matches exactly what's on screen. Drops
+    // the results table's last "Action" column since that's just the Lock
+    // Rate button, not data. Builds a real HTML/CSS document in a new
+    // window and hands it to the browser's own print engine (user picks
+    // "Save as PDF") rather than manually plotting shapes with a canvas
+    // PDF library -- CSS Grid, zebra striping, and print pagination are
+    // native browser features that are far more reliable this way.
+    const PDF_EXPORT_CSS = `
+      * { box-sizing: border-box; }
+      body {
+        font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: #0f172a;
+        margin: 24px;
+        font-size: 12px;
+      }
+      .pdf-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        padding-bottom: 16px;
+        margin-bottom: 24px;
+        border-bottom: 3px solid #1e3a8a;
+      }
+      .pdf-header-left { display: flex; align-items: center; gap: 14px; }
+      .pdf-logo-placeholder {
+        width: 52px;
+        height: 52px;
+        flex-shrink: 0;
+        border: 2px dashed #94a3b8;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 9px;
+        font-weight: 700;
+        color: #94a3b8;
+        text-transform: uppercase;
+        letter-spacing: .05em;
+      }
+      .pdf-title { font-size: 20px; font-weight: 800; color: #0f172a; }
+      .pdf-header-right { font-size: 11px; font-weight: 600; color: #64748b; white-space: nowrap; }
+
+      .section-title {
+        font-size: 11px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+        color: #1e3a8a;
+        margin: 0 0 12px;
+      }
+
+      .criteria-card {
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 10px;
+        padding: 18px 20px;
+        margin-bottom: 26px;
+      }
+      .criteria-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px 30px;
+      }
+      .criteria-cell { font-size: 12px; }
+      .criteria-label { font-weight: 700; color: #334155; }
+      .criteria-value { color: #0f172a; }
+
+      .results-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11px;
+      }
+      .results-table thead th {
+        background: #1e3a8a;
+        color: #ffffff;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .03em;
+        text-align: left;
+        padding: 10px 12px;
+      }
+      .results-table tbody td {
+        padding: 9px 12px;
+        border-bottom: 1px solid #e2e8f0;
+        text-align: left;
+      }
+      .results-table tbody tr:nth-child(even) { background: #f8fafc; }
+      .results-table tbody tr:nth-child(odd) { background: #ffffff; }
+      .results-table .align-center { text-align: center; }
+      .results-table .align-left { text-align: left; }
+      .results-table .wrap-cell {
+        white-space: normal;
+        word-break: break-word;
+        max-width: 180px;
+      }
+
+      @media print {
+        * {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
+        @page { size: A4; margin: 14mm; }
+        body { margin: 0; }
+        .results-table thead { display: table-header-group; }
+        .results-table tr { page-break-inside: avoid; }
+        .criteria-card { page-break-inside: avoid; }
+      }
+    `;
+
+    function escapeHtmlForPdf(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
+    function downloadResultsPdf() {
+        const table = document.querySelector('.table-modern');
+        if (!table) return;
+
+        const headers = Array.from(table.querySelectorAll('thead th'))
+            .map(th => th.textContent.trim())
+            .filter(h => h !== 'Action');
+
+        const rows = Array.from(table.querySelectorAll('tbody tr'))
+            .map(tr => Array.from(tr.querySelectorAll('td')).slice(0, -1).map(td => td.textContent.trim().replace(/\s+/g, ' ')))
+            .filter(row => row.length === headers.length);
+
+        if (!rows.length) {
+            Swal.fire('Nothing to export', 'There are no result rows to include in the PDF.', 'info');
+            return;
+        }
+
+        // TomSelect stores the option's DB id as the value -- look up its
+        // display text instead so the export reads e.g. "MISCD", not "7".
+        function tsLabel(fieldName) {
+            const el = document.querySelector('select[name="' + fieldName + '"]');
+            const ts = el && el.tomselect;
+            if (!ts) return '-';
+            const val = ts.getValue();
+            if (!val) return '-';
+            return (ts.options[val] && ts.options[val].text) || val;
+        }
+        function inputVal(fieldName) {
+            const el = document.querySelector('input[name="' + fieldName + '"]');
+            return (el && el.value.trim()) || '-';
+        }
+        function toggleVal(fieldName) {
+            const el = document.querySelector('input[name="' + fieldName + '"]:checked');
+            return (el && el.value) || '-';
+        }
+
+        const scInput = document.querySelector('#sc_field_group input[name="sc"]');
+
+        const criteria = [
+            ['Select Date', document.getElementById('target_date_input').value || '-'],
+            ['Vehicle No.', inputVal('vehicle_no')],
+            ['Product', tsLabel('product')],
+            ['Sub Product', tsLabel('sub_product')],
+            ['Make Model Class', tsLabel('make_model_class')],
+            ['Make Name (Code)', tsLabel('make_names')],
+            ['RTO Code', inputVal('rto_code')],
+            ['CC / GVW', inputVal('cc')],
+            ['Fuel', tsLabel('fuel')],
+            ['Manufacturing Year', inputVal('mfg_year')],
+            ['Zero Dep (ZD)', toggleVal('is_zd')],
+            ['CPA', toggleVal('is_cpa')],
+            ['NCB', toggleVal('is_ncb')],
+        ];
+        if (scInput && !scInput.disabled) {
+            criteria.push(['Exact SC', scInput.value.trim() || '-']);
+        }
+
+        const ALIGN_CENTER_COLS = ['Tariff Range', 'PO Rate', 'Rate Status'];
+        const WRAP_COLS = ['Add TNC'];
+
+        const criteriaHtml = criteria.map(([label, value]) =>
+            '<div class="criteria-cell"><span class="criteria-label">' + escapeHtmlForPdf(label) + ':</span> '
+            + '<span class="criteria-value">' + escapeHtmlForPdf(value) + '</span></div>'
+        ).join('');
+
+        const theadHtml = '<tr>' + headers.map(h => '<th>' + escapeHtmlForPdf(h) + '</th>').join('') + '</tr>';
+
+        const tbodyHtml = rows.map(row =>
+            '<tr>' + row.map((cell, i) => {
+                const h = headers[i];
+                let cls = '';
+                if (ALIGN_CENTER_COLS.includes(h)) cls += ' align-center';
+                if (h === 'Insurance Company') cls += ' align-left';
+                if (WRAP_COLS.includes(h)) cls += ' wrap-cell';
+                return '<td class="' + cls.trim() + '">' + escapeHtmlForPdf(cell) + '</td>';
+            }).join('') + '</tr>'
+        ).join('');
+
+        const printHtml = '<!doctype html><html><head><meta charset="utf-8">'
+            + '<title>Motor Points - Eligibility Results</title>'
+            + '<style>' + PDF_EXPORT_CSS + '</style></head><body>'
+            + '<div class="pdf-header">'
+            +   '<div class="pdf-header-left">'
+            +     '<div class="pdf-logo-placeholder">LOGO</div>'
+            +     '<div class="pdf-title">Motor Points - Eligibility Results</div>'
+            +   '</div>'
+            +   '<div class="pdf-header-right">Generated: ' + escapeHtmlForPdf(new Date().toLocaleString()) + '</div>'
+            + '</div>'
+            + '<div class="criteria-card">'
+            +   '<div class="section-title">Search Criteria</div>'
+            +   '<div class="criteria-grid">' + criteriaHtml + '</div>'
+            + '</div>'
+            + '<div class="section-title">Matching Rate Records</div>'
+            + '<table class="results-table"><thead>' + theadHtml + '</thead><tbody>' + tbodyHtml + '</tbody></table>'
+            + '</body></html>';
+
+        const printWindow = window.open('', '_blank', 'width=900,height=1000');
+        if (!printWindow) {
+            Swal.fire('Popup blocked', 'Please allow popups for this site, then click Download PDF again.', 'warning');
+            return;
+        }
+        printWindow.document.open();
+        printWindow.document.write(printHtml);
+        printWindow.document.close();
+        printWindow.onload = function () {
+            printWindow.focus();
+            printWindow.print();
+        };
     }
 </script>
 {% endblock %}
