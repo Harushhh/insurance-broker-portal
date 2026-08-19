@@ -3706,6 +3706,19 @@ RATE_FIELD_LABELS_PY = {
     "tp2": "TP2", "tp3": "TP3", "tp4": "TP4", "tp5": "TP5",
 }
 
+# Payout (PO) side of the same OD/TP/Net split — what the brokerage earns,
+# not what the policy is priced at. No po_tp_2..po_tp_5 or po_vli equivalent
+# exists on RateMaster, and po_flat_amount is deliberately excluded here for
+# the same reason pi_flat_amount is excluded from RATE_FIELDS above: it's a
+# fixed rupee amount, not a percentage rate, so averaging it in with OD/TP/Net
+# would be comparing incompatible units.
+PO_RATE_FIELDS = {
+    "net": "po_net_rate", "od": "po_od_rate", "tp": "po_tp_rate",
+}
+PO_RATE_FIELD_LABELS_PY = {
+    "net": "Net", "od": "OD", "tp": "TP",
+}
+
 
 def _track_min_max(cell, prefix, value):
     if value is None:
@@ -3974,6 +3987,77 @@ def analysis_pivot_data(request):
             "sum": round(total, 6), "count": n,
         }
         for (p, sp, ins, st, mo, rt, eg), (total, n) in agg.items()
+    ]
+
+    return JsonResponse(flat_rows, safe=False)
+
+
+def _row_months_only(rto_list):
+    """
+    Same month-bucket derivation _row_states_and_months uses, minus the state
+    resolution. analysis_payout_data doesn't break payout figures out by
+    state, so it has no reason to build/consult the RTO->state map — and
+    critically must NOT skip a row just because its RTO cluster doesn't
+    resolve to a recognised state (that's a gap in RTOMaster's cluster data,
+    unrelated to whether the row's payout figures are valid).
+    """
+    months = {month_bucket_for(token.strip().upper()) for token in (rto_list or "").split(",") if token.strip()}
+    return months or {EVERGREEN}
+
+
+def analysis_payout_data(request):
+    """
+    PO (payout/commission) feed for the Leaderboard and Commission Tracking
+    charts. Deliberately a separate endpoint from analysis_pivot_data, which
+    the existing heatmap and pivot table call and which stays untouched —
+    mirrors its filtering (_filtered_rate_master_qs) and month-bucket
+    derivation (grid/RTO naming, e.g. "MAGMA_APR26_...") so all three charts
+    stay in sync under the same page-level filters, but aggregates the po_*
+    fields instead of pi_*, and drops the state dimension neither new chart
+    needs.
+    """
+    qs, _ = _filtered_rate_master_qs(request)
+
+    real_months = set()
+    for rto_list in qs.values_list("new_rto_list", flat=True).iterator(chunk_size=5000):
+        for mo in _row_months_only(rto_list):
+            if mo != EVERGREEN:
+                real_months.add(mo)
+
+    # (product, sub_product, insurer, month, rate_type, is_evergreen) -> [sum, count],
+    # same sum/count-not-average shape as analysis_pivot_data so the client
+    # can compute a true weighted average under any regrouping.
+    agg = defaultdict(lambda: [0.0, 0])
+    for row in qs.values(
+        "product__name", "sub_product__name", "insurance_company", "new_rto_list",
+        *PO_RATE_FIELDS.values(),
+    ).iterator(chunk_size=5000):
+        product = row["product__name"] or "Uncategorized"
+        sub_product = row["sub_product__name"] or "Uncategorized"
+        insurer = row["insurance_company"]
+
+        for mo in _row_months_only(row["new_rto_list"]):
+            is_evergreen = mo == EVERGREEN
+            target_months = real_months if is_evergreen else {mo}
+            for target_mo in target_months:
+                month_label = month_label_for(target_mo)
+                for key, field in PO_RATE_FIELDS.items():
+                    val = row[field]
+                    if val and val > 0:
+                        cell = agg[(
+                            product, sub_product, insurer,
+                            month_label, PO_RATE_FIELD_LABELS_PY[key], is_evergreen,
+                        )]
+                        cell[0] += val
+                        cell[1] += 1
+
+    flat_rows = [
+        {
+            "product": p, "sub_product": sp, "insurer": ins,
+            "month": mo, "rate_type": rt, "is_evergreen": eg,
+            "sum": round(total, 6), "count": n,
+        }
+        for (p, sp, ins, mo, rt, eg), (total, n) in agg.items()
     ]
 
     return JsonResponse(flat_rows, safe=False)

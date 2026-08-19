@@ -81,6 +81,25 @@
     .cell-tooltip .tt-row:first-of-type { border-top:none; }
     .cell-tooltip .tt-lbl { color:#94a3b8; }
     .cell-tooltip .tt-val { font-weight:700; text-align:right; color:#f1f5f9; }
+
+    /* Leaderboard + Commission trend (PO/payout charts) */
+    .ins-chip { display:inline-flex; align-items:center; gap:6px; padding:6px 12px; border-radius:999px; border:1px solid #e2e8f0; background:#fff; font-size:12px; font-weight:700; color:#94a3b8; cursor:pointer; transition:all .15s ease; }
+    .ins-chip:hover { border-color:#cbd5e1; }
+    .ins-chip[aria-pressed="true"] { color:#334155; border-color:#cbd5e1; background:#f8fafc; }
+    .ins-chip .dot { width:8px; height:8px; border-radius:50%; flex:none; }
+    .chart-line { fill:none; stroke-width:2; stroke-linejoin:round; stroke-linecap:round; }
+    .chart-dot { stroke:#fff; stroke-width:2; }
+    .chart-grid { stroke:#e1e0d9; stroke-width:1; }
+    .chart-axis-text { fill:#898781; font-size:11px; }
+    .chart-crosshair { stroke:#c3c2b7; stroke-width:1; pointer-events:none; }
+    .chart-hit { cursor:crosshair; }
+    .commission-toolbar { display:flex; justify-content:flex-end; padding:16px 24px 0; }
+    .table-toggle-btn { background:transparent; border:none; color:#2563eb; font-size:12px; font-weight:700; cursor:pointer; padding:4px 8px; }
+    .table-toggle-btn:hover { text-decoration:underline; }
+    .commission-table { width:100%; border-collapse:collapse; font-size:12.5px; }
+    .commission-table th, .commission-table td { padding:8px 10px; border-bottom:1px solid #f1f5f9; text-align:right; white-space:nowrap; }
+    .commission-table th:first-child, .commission-table td:first-child { text-align:left; }
+    .commission-table thead th { color:#64748b; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
 </style>
 
 <div class="analysis-premium-card">
@@ -127,10 +146,53 @@
     <div class="analysis-seg" role="tablist" aria-label="View" style="margin:0 24px 16px;">
         <button type="button" id="tabHeatmap" role="tab" aria-pressed="true">Heatmap</button>
         <button type="button" id="tabPivot" role="tab" aria-pressed="false">Pivot table</button>
+        <button type="button" id="tabCommission" role="tab" aria-pressed="false">Commission trend</button>
     </div>
 
     <div id="chartBody"></div>
     <div id="pivotBody" style="padding:20px 24px;" hidden></div>
+    <div id="commissionBody" hidden>
+        <div class="analysis-filters" style="border-bottom:1px solid #e2e8f0;">
+            <div class="field">
+                <label class="analysis-text-overline" for="cmProductSelect">Product</label>
+                <select id="cmProductSelect"></select>
+            </div>
+            <div class="field">
+                <label class="analysis-text-overline">Rate type</label>
+                <div class="analysis-seg" id="cmRateTypeSeg" role="tablist" aria-label="Rate type"></div>
+            </div>
+            <div class="field" style="flex:1;">
+                <label class="analysis-text-overline">Insurers</label>
+                <div id="cmInsurerChips" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            </div>
+        </div>
+        <div class="commission-toolbar">
+            <button type="button" class="table-toggle-btn" id="cmTableToggle">View as table</button>
+        </div>
+        <div id="commissionChartHost"></div>
+    </div>
+</div>
+
+<div class="analysis-premium-card">
+    <div class="analysis-card-header">
+        <div>
+            <h3 style="margin:0; font-size:18px; color:#1e293b;">🏆 Payout Leaderboard</h3>
+            <p style="margin:4px 0 0; font-size:12px; color:#64748b; font-weight:600;">Which insurers pay the highest commission (PO), by product.</p>
+        </div>
+    </div>
+
+    <div class="analysis-filters">
+        <div class="field">
+            <label class="analysis-text-overline" for="lbProductSelect">Product</label>
+            <select id="lbProductSelect"></select>
+        </div>
+        <div class="field">
+            <label class="analysis-text-overline">Rate type</label>
+            <div class="analysis-seg" id="lbRateTypeSeg" role="tablist" aria-label="Rate type"></div>
+        </div>
+    </div>
+
+    <div id="leaderboardBody" style="padding:20px 24px;"></div>
 </div>
 
 <div id="cellTooltip" class="cell-tooltip" hidden></div>
@@ -207,6 +269,28 @@
         const a = fmtNum(range.min), b = fmtNum(range.max);
         if(hasMin && hasMax) return (range.min === range.max) ? (a + unit) : (a + unit + ' - ' + b + unit);
         return hasMax ? ('up to ' + b + unit) : (a + unit + '+');
+    }
+
+    // Shared by the Leaderboard and Commission trend charts below, which read
+    // from analysis_payout_data (PO/payout) instead of the chart_data blob
+    // (PI/premium) the heatmap above uses.
+    const MONTH_NAME_TO_NUM = { January:1, February:2, March:3, April:4, May:5, June:6, July:7, August:8, September:9, October:10, November:11, December:12 };
+    function monthSortKey(label){
+        const parts = String(label).split(' ');
+        if(parts.length !== 2) return 999999; // "No specific month" or unrecognised - sorts last
+        const num = MONTH_NAME_TO_NUM[parts[0]];
+        const year = parseInt(parts[1], 10);
+        return (!num || isNaN(year)) ? 999999 : year * 12 + num;
+    }
+    function niceAxisMax(max){
+        if(!max || max <= 0) return 10;
+        const magnitude = Math.pow(10, Math.floor(Math.log10(max)));
+        const residual = max / magnitude;
+        const niceResidual = residual <= 1 ? 1 : residual <= 2 ? 2 : residual <= 5 ? 5 : 10;
+        return niceResidual * magnitude;
+    }
+    function poProductsList(rows){
+        return [...new Set(rows.map(r => r.product))].sort();
     }
 
     // Spans whichever of Net/OD/TP/TP2-5 exist for the cell - the widest
@@ -528,14 +612,19 @@
 
     function setActiveTab(tab){
         const isHeat = tab === 'heatmap';
+        const isPivot = tab === 'pivot';
+        const isCommission = tab === 'commission';
         document.getElementById('tabHeatmap').setAttribute('aria-pressed', String(isHeat));
-        document.getElementById('tabPivot').setAttribute('aria-pressed', String(!isHeat));
+        document.getElementById('tabPivot').setAttribute('aria-pressed', String(isPivot));
+        document.getElementById('tabCommission').setAttribute('aria-pressed', String(isCommission));
         document.getElementById('chartBody').hidden = !isHeat;
-        document.getElementById('pivotBody').hidden = isHeat;
+        document.getElementById('pivotBody').hidden = !isPivot;
+        document.getElementById('commissionBody').hidden = !isCommission;
         document.getElementById('productSelect').closest('.field').hidden = !isHeat;
         document.getElementById('subProductSelect').closest('.field').hidden = !isHeat;
         document.getElementById('stateSearch').closest('.field').hidden = !isHeat;
-        if(!isHeat) loadPivot();
+        if(isPivot) loadPivot();
+        if(isCommission) ensureCommissionTab();
     }
 
     // pivottable.js's own filter-box positioning is unreliable on this page:
@@ -624,13 +713,378 @@
         });
     }
 
+    // ---- payout (PO) data: shared by the Leaderboard card and the
+    // Commission trend tab. Same filters (date range / CC / SC) as the pivot
+    // table above, fetched once and cached -- the Leaderboard needs it
+    // immediately (it's always visible, not tab-gated), and the Commission
+    // tab reuses the same cached rows instead of fetching again.
+    let poDataPromise = null;
+    let PO_ROWS = [];
+    function loadPayoutData(){
+        if(poDataPromise) return poDataPromise;
+        const params = new URLSearchParams();
+        const dr = document.getElementById('date_range').value;
+        if(dr) params.set('date_range', dr);
+        const cc = document.getElementById('ccInput').value;
+        if(cc) params.set('cc', cc);
+        const sc = document.getElementById('scInput').value;
+        if(sc) params.set('sc', sc);
+        const url = '{% url "analysis_payout_data" %}?' + params.toString();
+        poDataPromise = fetch(url).then(r => r.json());
+        return poDataPromise;
+    }
+
+    const RATE_TYPE_ORDER = ['OD', 'TP', 'Net'];
+    // Picks whichever available rate type has the most underlying rows for
+    // this product, so the default view always opens on data rather than an
+    // arbitrarily-first, possibly-empty rate type.
+    function pickDefaultRateType(rows, product, available){
+        let best = available[0], bestN = -1;
+        available.forEach(t => {
+            const n = rows.filter(r => r.product === product && r.rate_type === t)
+                .reduce((a, r) => a + r.count, 0);
+            if(n > bestN){ bestN = n; best = t; }
+        });
+        return best;
+    }
+
+    // ---- Leaderboard ----
+    let lbState = { product: '', rateType: '' };
+
+    async function initLeaderboard(){
+        const host = document.getElementById('leaderboardBody');
+        host.innerHTML = '<div class="analysis-empty">Loading payout data…</div>';
+        let rows;
+        try {
+            rows = await loadPayoutData();
+            PO_ROWS = rows;
+        } catch(e) {
+            host.innerHTML = '<div class="analysis-empty">Could not load payout data.</div>';
+            return;
+        }
+        if(!rows.length){
+            host.innerHTML = '<div class="analysis-empty">No payout (PO) data on file yet.</div>';
+            return;
+        }
+        renderLeaderboardControls(rows);
+    }
+
+    function renderLeaderboardControls(rows){
+        const products = poProductsList(rows);
+        if(!products.includes(lbState.product)) lbState.product = products[0] || '';
+
+        const sel = document.getElementById('lbProductSelect');
+        sel.innerHTML = products.map(p => `<option value="${esc(p)}"${p===lbState.product?' selected':''}>${esc(p)}</option>`).join('');
+        sel.onchange = () => {
+            lbState.product = sel.value;
+            renderLeaderboardRateTypeSeg(rows);
+        };
+
+        renderLeaderboardRateTypeSeg(rows);
+    }
+
+    function renderLeaderboardRateTypeSeg(rows){
+        const available = RATE_TYPE_ORDER.filter(t =>
+            rows.some(r => r.product === lbState.product && r.rate_type === t));
+        if(!available.includes(lbState.rateType)){
+            lbState.rateType = pickDefaultRateType(rows, lbState.product, available);
+        }
+        const seg = document.getElementById('lbRateTypeSeg');
+        seg.innerHTML = available.map(t =>
+            `<button type="button" data-rt="${esc(t)}" aria-pressed="${t===lbState.rateType}">${esc(t)}</button>`).join('');
+        seg.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                lbState.rateType = btn.dataset.rt;
+                seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b===btn)));
+                renderLeaderboard(rows);
+            });
+        });
+        renderLeaderboard(rows);
+    }
+
+    function renderLeaderboard(rows){
+        const host = document.getElementById('leaderboardBody');
+        const matching = rows.filter(r => r.product === lbState.product && r.rate_type === lbState.rateType);
+
+        const byInsurer = new Map();
+        matching.forEach(r => {
+            if(!byInsurer.has(r.insurer)) byInsurer.set(r.insurer, [0, 0]);
+            const cell = byInsurer.get(r.insurer);
+            cell[0] += r.sum; cell[1] += r.count;
+        });
+
+        const entries = insMeta
+            .map(m => {
+                const cell = byInsurer.get(m.full);
+                return (cell && cell[1]) ? { m, avg: cell[0]/cell[1], n: cell[1] } : null;
+            })
+            .filter(Boolean)
+            .sort((a, b) => b.avg - a.avg);
+
+        if(!entries.length){
+            host.innerHTML = `<div class="analysis-empty">No payout (PO) data on file for ${esc(lbState.product)} / ${esc(lbState.rateType)}.</div>`;
+            return;
+        }
+
+        const max = entries[0].avg;
+        let html = '';
+        entries.forEach(e => {
+            const pct = max ? Math.max(6, (e.avg/max)*100) : 0;
+            html += `<div class="dd-bar-row">
+                <span class="lbl"><span class="dot" style="background:var(${e.m.colorVar})"></span>${esc(e.m.short)}</span>
+                <span class="dd-track" title="${esc(e.m.short)} &middot; ${e.n} rate cards"><span class="dd-fill" style="width:${pct}%;background:var(${e.m.colorVar})"></span></span>
+                <span class="val">${fmtPct(e.avg)}</span>
+            </div>`;
+        });
+        host.innerHTML = html;
+    }
+
+    // ---- Commission trend tab ----
+    let cmState = { product: '', rateType: '', insurers: null, tableView: false };
+    let commissionInited = false;
+
+    async function ensureCommissionTab(){
+        if(commissionInited) return;
+        commissionInited = true;
+        document.getElementById('commissionChartHost').innerHTML = '<div class="analysis-empty">Loading payout data…</div>';
+        let rows;
+        try {
+            rows = await loadPayoutData();
+            PO_ROWS = rows;
+        } catch(e) {
+            document.getElementById('commissionChartHost').innerHTML = '<div class="analysis-empty">Could not load payout data.</div>';
+            return;
+        }
+        if(!rows.length){
+            document.getElementById('commissionChartHost').innerHTML = '<div class="analysis-empty">No payout (PO) data on file yet.</div>';
+            return;
+        }
+        if(cmState.insurers === null) cmState.insurers = new Set(insMeta.map(m => m.full));
+        renderCommissionControls(rows);
+        document.getElementById('cmTableToggle').addEventListener('click', () => {
+            cmState.tableView = !cmState.tableView;
+            document.getElementById('cmTableToggle').textContent = cmState.tableView ? 'View as chart' : 'View as table';
+            renderCommissionChart(rows);
+        });
+    }
+
+    function renderCommissionControls(rows){
+        const products = poProductsList(rows);
+        if(!products.includes(cmState.product)) cmState.product = products[0] || '';
+
+        const sel = document.getElementById('cmProductSelect');
+        sel.innerHTML = products.map(p => `<option value="${esc(p)}"${p===cmState.product?' selected':''}>${esc(p)}</option>`).join('');
+        sel.onchange = () => {
+            cmState.product = sel.value;
+            renderCommissionRateTypeSeg(rows);
+        };
+
+        // Insurers with zero data anywhere for the page just render an empty
+        // line later (filtered out in computeCommissionSeries) rather than
+        // pruning the chip list itself -- keeps the full roster visible and
+        // consistent with the heatmap's legend above, which does the same.
+        const chipHost = document.getElementById('cmInsurerChips');
+        chipHost.innerHTML = insMeta.map(m =>
+            `<button type="button" class="ins-chip" data-ins="${esc(m.full)}" aria-pressed="${cmState.insurers.has(m.full)}"><span class="dot" style="background:var(${m.colorVar})"></span>${esc(m.short)}</button>`
+        ).join('');
+        chipHost.querySelectorAll('.ins-chip').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const ins = btn.dataset.ins;
+                if(cmState.insurers.has(ins)) cmState.insurers.delete(ins); else cmState.insurers.add(ins);
+                btn.setAttribute('aria-pressed', String(cmState.insurers.has(ins)));
+                renderCommissionChart(rows);
+            });
+        });
+
+        renderCommissionRateTypeSeg(rows);
+    }
+
+    function renderCommissionRateTypeSeg(rows){
+        const available = RATE_TYPE_ORDER.filter(t =>
+            rows.some(r => r.product === cmState.product && r.rate_type === t));
+        if(!available.includes(cmState.rateType)){
+            cmState.rateType = pickDefaultRateType(rows, cmState.product, available);
+        }
+        const seg = document.getElementById('cmRateTypeSeg');
+        seg.innerHTML = available.map(t =>
+            `<button type="button" data-rt="${esc(t)}" aria-pressed="${t===cmState.rateType}">${esc(t)}</button>`).join('');
+        seg.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                cmState.rateType = btn.dataset.rt;
+                seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b===btn)));
+                renderCommissionChart(rows);
+            });
+        });
+        renderCommissionChart(rows);
+    }
+
+    function computeCommissionSeries(rows){
+        const filtered = rows.filter(r => r.product === cmState.product && r.rate_type === cmState.rateType);
+        const months = [...new Set(filtered.map(r => r.month))].sort((a, b) => monthSortKey(a) - monthSortKey(b));
+
+        const series = insMeta
+            .filter(m => cmState.insurers.has(m.full))
+            .map(m => {
+                const byMonth = new Map();
+                filtered.filter(r => r.insurer === m.full).forEach(r => {
+                    if(!byMonth.has(r.month)) byMonth.set(r.month, [0, 0]);
+                    const c = byMonth.get(r.month);
+                    c[0] += r.sum; c[1] += r.count;
+                });
+                const points = months.map(mo => {
+                    const c = byMonth.get(mo);
+                    return (c && c[1]) ? c[0]/c[1] : null;
+                });
+                return { m, points };
+            })
+            .filter(s => s.points.some(v => v !== null));
+
+        return { months, series };
+    }
+
+    function renderCommissionChart(rows){
+        const host = document.getElementById('commissionChartHost');
+        const { months, series } = computeCommissionSeries(rows);
+
+        if(!months.length || !series.length){
+            const reason = cmState.insurers.size === 0 ? ' (no insurers selected)' : '';
+            host.innerHTML = `<div class="analysis-empty">No payout (PO) data on file for ${esc(cmState.product)} / ${esc(cmState.rateType)}${reason}.</div>`;
+            return;
+        }
+        if(cmState.tableView){
+            host.innerHTML = buildCommissionTable(months, series);
+            return;
+        }
+        host.innerHTML = buildCommissionSvg(months, series);
+        wireCommissionHover(host, months, series);
+    }
+
+    function buildCommissionSvg(months, series){
+        const W = 900, H = 340;
+        const marginL = 46, marginR = 16, marginT = 16, marginB = 44;
+        const plotW = W - marginL - marginR;
+        const plotH = H - marginT - marginB;
+
+        const allVals = series.flatMap(s => s.points.filter(v => v !== null));
+        const axisMax = niceAxisMax((allVals.length ? Math.max(...allVals) : 10) * 1.1);
+        const ticks = 4;
+
+        const xFor = i => marginL + (months.length === 1 ? plotW/2 : (i/(months.length-1)) * plotW);
+        const yFor = v => marginT + plotH - (v/axisMax) * plotH;
+
+        let defs = '';
+        for(let t=0; t<=ticks; t++){
+            const v = (axisMax/ticks)*t;
+            const y = yFor(v);
+            defs += `<line class="chart-grid" x1="${marginL}" y1="${y.toFixed(1)}" x2="${W-marginR}" y2="${y.toFixed(1)}"></line>`;
+            defs += `<text class="chart-axis-text" x="${marginL-8}" y="${(y+4).toFixed(1)}" text-anchor="end">${v.toFixed(0)}%</text>`;
+        }
+
+        let xLabels = '';
+        months.forEach((mo, i) => {
+            xLabels += `<text class="chart-axis-text" x="${xFor(i).toFixed(1)}" y="${H-marginB+20}" text-anchor="middle">${esc(mo)}</text>`;
+        });
+
+        let lines = '';
+        series.forEach(s => {
+            let segment = [];
+            const flush = () => {
+                if(segment.length > 1){
+                    const d = segment.map((p, idx) => (idx===0?'M':'L') + p.x.toFixed(1) + ',' + p.y.toFixed(1)).join(' ');
+                    lines += `<path class="chart-line" d="${d}" style="stroke:var(${s.m.colorVar})"></path>`;
+                }
+                segment = [];
+            };
+            s.points.forEach((v, i) => {
+                if(v === null){ flush(); return; }
+                segment.push({ x: xFor(i), y: yFor(v) });
+            });
+            flush();
+            s.points.forEach((v, i) => {
+                if(v === null) return;
+                lines += `<circle class="chart-dot" cx="${xFor(i).toFixed(1)}" cy="${yFor(v).toFixed(1)}" r="4" style="fill:var(${s.m.colorVar})"></circle>`;
+            });
+        });
+
+        const colW = months.length > 1 ? plotW/(months.length-1) : plotW;
+        let hitCols = '';
+        months.forEach((mo, i) => {
+            const cx = xFor(i);
+            const hitX = Math.max(marginL, cx - colW/2);
+            const hitW = Math.min(colW, (W-marginR)-hitX);
+            hitCols += `<rect class="chart-hit" data-idx="${i}" data-cx="${cx.toFixed(1)}" x="${hitX.toFixed(1)}" y="${marginT}" width="${hitW.toFixed(1)}" height="${plotH}" fill="transparent"></rect>`;
+        });
+
+        const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Payout rate trend by month" style="width:100%;height:auto;display:block;">
+            ${defs}${xLabels}${lines}
+            <line class="chart-crosshair" x1="0" y1="${marginT}" x2="0" y2="${marginT+plotH}" hidden></line>
+            ${hitCols}
+        </svg>`;
+
+        const legend = `<div class="analysis-legend"><div class="analysis-legend-ins">${
+            series.map(s => `<span class="analysis-legend-item"><span class="dot" style="background:var(${s.m.colorVar})"></span>${esc(s.m.short)}</span>`).join('')
+        }</div></div>`;
+
+        return `<div style="padding:20px 24px;">${svg}</div>${legend}`;
+    }
+
+    function wireCommissionHover(host, months, series){
+        const svg = host.querySelector('svg');
+        if(!svg) return;
+        const crosshair = svg.querySelector('.chart-crosshair');
+
+        function showAt(rect, clientX, clientY){
+            const idx = parseInt(rect.dataset.idx, 10);
+            const cx = rect.dataset.cx;
+            crosshair.setAttribute('x1', cx);
+            crosshair.setAttribute('x2', cx);
+            crosshair.hidden = false;
+
+            const mo = months[idx];
+            let html = `<div class="tt-title">${esc(mo)}</div>`;
+            const present = series
+                .map(s => ({ s, v: s.points[idx] }))
+                .filter(p => p.v !== null)
+                .sort((a, b) => b.v - a.v);
+            if(!present.length){
+                html += tooltipRow('Rate', 'No data');
+            } else {
+                present.forEach(p => { html += tooltipRow(p.s.m.short, fmtPct(p.v)); });
+            }
+            tooltipEl.innerHTML = html;
+            tooltipEl.hidden = false;
+            positionTooltip(clientX, clientY);
+        }
+
+        svg.querySelectorAll('.chart-hit').forEach(rect => {
+            rect.addEventListener('pointermove', e => showAt(rect, e.clientX, e.clientY));
+            rect.addEventListener('pointerenter', e => showAt(rect, e.clientX, e.clientY));
+            rect.addEventListener('pointerleave', () => { crosshair.hidden = true; tooltipEl.hidden = true; });
+        });
+    }
+
+    function buildCommissionTable(months, series){
+        let html = '<div style="padding:0 24px 20px;"><div class="analysis-table-scroll"><table class="commission-table"><thead><tr><th>Insurer</th>';
+        months.forEach(mo => { html += `<th>${esc(mo)}</th>`; });
+        html += '</tr></thead><tbody>';
+        series.forEach(s => {
+            html += `<tr><td><span class="dot" style="background:var(${s.m.colorVar});display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;"></span>${esc(s.m.short)}</td>`;
+            s.points.forEach(v => { html += `<td>${v===null ? '&mdash;' : fmtPct(v)}</td>`; });
+            html += '</tr>';
+        });
+        html += '</tbody></table></div></div>';
+        return html;
+    }
+
     document.getElementById('tabHeatmap').addEventListener('click', () => setActiveTab('heatmap'));
     document.getElementById('tabPivot').addEventListener('click', () => setActiveTab('pivot'));
+    document.getElementById('tabCommission').addEventListener('click', () => setActiveTab('commission'));
     fixPivotFilterBoxPosition();
 
     renderControls();
     renderStats();
     renderBody();
+    initLeaderboard();
 })();
 </script>
 
