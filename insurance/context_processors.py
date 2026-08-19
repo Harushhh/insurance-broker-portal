@@ -23,4 +23,7 @@ def sidebar_access(request):
     return {
         "nav_pages": nav_pages,
         "nav_can_access_control": in_admin_group or user.is_staff or user.is_superuser,
+        # No ADMIN bypass here, unlike everything else above -- mirrors
+        # super_admin_required in urls.py, which is equally strict.
+        "nav_is_super_admin": user.groups.filter(name="SUPER_ADMIN").exists(),
     }

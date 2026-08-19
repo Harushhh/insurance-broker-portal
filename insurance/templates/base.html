@@ -479,7 +479,7 @@
                     </a>
                 </li>
 
-                {% if 'Can_View_Analysis' in nav_pages or 'Can_View_Grid_Management' in nav_pages or nav_can_access_control or 'Can_View_Audit_Log' in nav_pages or 'Can_Manage_Life_Payout_Grid' in nav_pages %}
+                {% if 'Can_View_Analysis' in nav_pages or 'Can_View_Grid_Management' in nav_pages or nav_can_access_control or 'Can_View_Audit_Log' in nav_pages or nav_is_super_admin %}
                 <li class="nav-title">Administration</li>
                 {% endif %}
                 {% if 'Can_View_Analysis' in nav_pages %}
@@ -503,7 +503,7 @@
                     </a>
                 </li>
                 {% endif %}
-                {% if 'Can_Manage_Life_Payout_Grid' in nav_pages %}
+                {% if nav_is_super_admin %}
                 <li class="nav-item">
                     <a href="{% url 'life_payout_grid_admin_redirect' %}" target="_blank" rel="noopener" class="nav-link">
                         <i class="bi bi-arrow-repeat"></i> Update Payout Rates

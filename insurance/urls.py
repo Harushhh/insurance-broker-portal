@@ -28,6 +28,25 @@ def staff_required(view_func):
     return _wrapped
 
 
+def super_admin_required(view_func):
+    """
+    Requires login AND membership in SUPER_ADMIN specifically -- unlike
+    page_access_required, being in ADMIN (the "Make Admin" bulk-access
+    group) does NOT get you in here. Reserved for the single most
+    sensitive action in the app: minting a Life Payout Grid admin token,
+    which grants the ability to overwrite the live commission grid.
+    SUPER_ADMIN is deliberately not offered as a Page Permissions checkbox
+    on /user-management/ -- grant it via Django's own /admin/ site instead.
+    """
+    @login_required
+    @wraps(view_func)
+    def _wrapped(request, *args, **kwargs):
+        if not request.user.groups.filter(name="SUPER_ADMIN").exists():
+            raise PermissionDenied("You don't have access to this page.")
+        return view_func(request, *args, **kwargs)
+    return _wrapped
+
+
 def page_access_required(group_name):
     """
     Requires login AND (in the ADMIN group or in the named per-page group).
@@ -89,7 +108,7 @@ urlpatterns = [
     path("user-management/", staff_required(views.user_management), name="user_management"),
     path("grid-management/", page_access_required("Can_View_Grid_Management")(views.grid_management), name="grid_management"),
     path("life-payout-grid/", login_required(views.life_payout_grid_redirect), name="life_payout_grid_redirect"),
-    path("life-payout-grid/admin/", page_access_required("Can_Manage_Life_Payout_Grid")(views.life_payout_grid_admin_redirect), name="life_payout_grid_admin_redirect"),
+    path("life-payout-grid/admin/", super_admin_required(views.life_payout_grid_admin_redirect), name="life_payout_grid_admin_redirect"),
 
     # Special Rate Requests
     path("special-rates/", page_access_required("Can_View_Special_Rates")(views.special_rate_requests), name="special_rate_requests"),

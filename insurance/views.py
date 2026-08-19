@@ -94,7 +94,6 @@ PAGE_GROUPS = [
     "Can_View_Health_Payout_Rates",
     "Can_View_Special_Rates",
     "Can_Review_Special_Rates",
-    "Can_Manage_Life_Payout_Grid",
 ]
 
 
@@ -128,7 +127,7 @@ def life_payout_grid_redirect(request):
 
 
 def life_payout_grid_admin_redirect(request):
-    """Entry point for the sidebar's "Update Payout Rates" link -- requires Can_Manage_Life_Payout_Grid (page_access_required in urls.py)."""
+    """Entry point for the sidebar's "Update Payout Rates" link -- requires SUPER_ADMIN specifically (super_admin_required in urls.py), not just ADMIN."""
     return _life_payout_grid_handoff(request, "admin")
 
 # =========================================================
@@ -1620,6 +1619,9 @@ HIERARCHY_FIELD_LABELS = [
 
 def user_management(request):
     Group.objects.get_or_create(name="ADMIN")
+    # Deliberately not offered as a checkbox below -- grant it via Django's
+    # own /admin/ site. See super_admin_required in urls.py.
+    Group.objects.get_or_create(name="SUPER_ADMIN")
     for group_name in PAGE_GROUPS:
         Group.objects.get_or_create(name=group_name)
 
