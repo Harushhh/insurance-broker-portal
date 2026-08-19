@@ -113,3 +113,19 @@ export async function isAdminAuthenticated(): Promise<boolean> {
   const session = await getSession();
   return session?.role === "admin";
 }
+
+/**
+ * Where to send an unauthenticated (or wrong-role) visitor instead of
+ * showing them a static "access denied" screen. Both portal paths are
+ * login_required/page_access_required on the Django side, so this bounces
+ * a visitor with a live Django session straight back in with a fresh
+ * token, and one without gets Django's normal login-then-redirect-back
+ * flow -- no separate login here, so there's nothing else this app could
+ * offer instead. Returns null if INSURANCE_PORTAL_URL isn't configured.
+ */
+export function portalRedirectUrl(kind: "viewer" | "admin"): string | null {
+  const base = process.env.INSURANCE_PORTAL_URL;
+  if (!base) return null;
+  const path = kind === "admin" ? "/life-payout-grid/admin/" : "/life-payout-grid/";
+  return `${base.replace(/\/$/, "")}${path}`;
+}
