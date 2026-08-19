@@ -120,6 +120,7 @@
                                         {% elif page == 'Can_View_Health_Payout_Rates' %} 🧮 Health Quote Simulator
                                         {% elif page == 'Can_View_Special_Rates' %} ⭐ Special Rate Requests
                                         {% elif page == 'Can_Review_Special_Rates' %} 📝 Special Rates Review
+                                        {% elif page == 'Can_View_Life_Payout_Grid' %} 💹 Life Payout Grid
                                         {% else %} {{ page }} {% endif %}
                                     </span>
                                 {% empty %}
@@ -261,6 +262,7 @@
                     {% elif pg == 'Can_View_Health_Payout_Rates' %} 🧮 Health Quote Simulator
                     {% elif pg == 'Can_View_Special_Rates' %} ⭐ Special Rate Requests
                     {% elif pg == 'Can_Review_Special_Rates' %} 📝 Special Rates Review
+                    {% elif pg == 'Can_View_Life_Payout_Grid' %} 💹 Life Payout Grid
                     {% else %} {{ pg }} {% endif %}
                 </label>
                 {% endfor %}
@@ -275,6 +277,10 @@
 
                 <button type="button" class="btn" onclick="grantAccessAndSubmit()" style="background:#0d9488; color:white; border:none; width:100%;">
                     🔓 Grant Full Access
+                </button>
+
+                <button type="button" class="btn" onclick="grantLifePayoutGridOnlyAndSubmit()" style="background:#ea580c; color:white; border:none; width:100%;">
+                    💹 Grant Life Payout Grid Only
                 </button>
 
                 <button type="button" class="btn" onclick="removeAccessAndSubmit()" style="background:#f59e0b; color:white; border:none; width:100%;">
@@ -362,6 +368,16 @@
         if (confirm("Grant this user access to every dashboard page? This does not make them a Full Admin.")) {
             let checks = document.querySelectorAll('.perm-check');
             checks.forEach(c => c.checked = true);
+
+            document.getElementById('edit_action_input').value = 'update_user_access';
+            document.getElementById('editUserForm').submit();
+        }
+    }
+
+    function grantLifePayoutGridOnlyAndSubmit() {
+        if (confirm("Grant this user access to ONLY the Life Payout Grid, removing every other page permission they currently have? They won't be able to view any other dashboard.")) {
+            let checks = document.querySelectorAll('.perm-check');
+            checks.forEach(c => c.checked = (c.value === 'Can_View_Life_Payout_Grid'));
 
             document.getElementById('edit_action_input').value = 'update_user_access';
             document.getElementById('editUserForm').submit();

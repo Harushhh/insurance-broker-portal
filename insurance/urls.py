@@ -107,7 +107,7 @@ urlpatterns = [
     path("audit-log/export/", page_access_required("Can_View_Audit_Log")(views.export_audit_log_xlsx), name="export_audit_log_xlsx"),
     path("user-management/", staff_required(views.user_management), name="user_management"),
     path("grid-management/", page_access_required("Can_View_Grid_Management")(views.grid_management), name="grid_management"),
-    path("life-payout-grid/", login_required(views.life_payout_grid_redirect), name="life_payout_grid_redirect"),
+    path("life-payout-grid/", page_access_required("Can_View_Life_Payout_Grid")(views.life_payout_grid_redirect), name="life_payout_grid_redirect"),
     path("life-payout-grid/admin/", super_admin_required(views.life_payout_grid_admin_redirect), name="life_payout_grid_admin_redirect"),
 
     # Special Rate Requests

@@ -94,6 +94,7 @@ PAGE_GROUPS = [
     "Can_View_Health_Payout_Rates",
     "Can_View_Special_Rates",
     "Can_Review_Special_Rates",
+    "Can_View_Life_Payout_Grid",
 ]
 
 
@@ -122,7 +123,7 @@ def _life_payout_grid_handoff(request, role):
 
 
 def life_payout_grid_redirect(request):
-    """Entry point for the sidebar's "Life Payout Grid" link -- any logged-in portal user (login_required in urls.py)."""
+    """Entry point for the sidebar's "Life Payout Grid" link -- requires Can_View_Life_Payout_Grid (page_access_required in urls.py, so ADMIN also gets in)."""
     return _life_payout_grid_handoff(request, "viewer")
 
 
