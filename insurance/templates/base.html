@@ -474,19 +474,12 @@
                 </li>
                 {% endif %}
                 <li class="nav-item">
-                    <a href="{{ life_payout_grid_url }}" target="_blank" rel="noopener" class="nav-link">
+                    <a href="{% url 'life_payout_grid_redirect' %}" target="_blank" rel="noopener" class="nav-link">
                         <i class="bi bi-percent"></i> Life Payout Grid
                     </a>
                 </li>
-                {% if 'Can_Manage_Life_Payout_Grid' in nav_pages %}
-                <li class="nav-item">
-                    <a href="{% url 'life_payout_grid_admin_redirect' %}" target="_blank" rel="noopener" class="nav-link">
-                        <i class="bi bi-arrow-repeat"></i> Update Payout Rates
-                    </a>
-                </li>
-                {% endif %}
 
-                {% if 'Can_View_Analysis' in nav_pages or 'Can_View_Grid_Management' in nav_pages or nav_can_access_control or 'Can_View_Audit_Log' in nav_pages %}
+                {% if 'Can_View_Analysis' in nav_pages or 'Can_View_Grid_Management' in nav_pages or nav_can_access_control or 'Can_View_Audit_Log' in nav_pages or 'Can_Manage_Life_Payout_Grid' in nav_pages %}
                 <li class="nav-title">Administration</li>
                 {% endif %}
                 {% if 'Can_View_Analysis' in nav_pages %}
@@ -507,6 +500,13 @@
                 <li class="nav-item">
                     <a href="{% url 'user_management' %}" class="nav-link {% if request.path == '/user-management/' %}active{% endif %}">
                         <i class="bi bi-people-fill"></i> Access Control
+                    </a>
+                </li>
+                {% endif %}
+                {% if 'Can_Manage_Life_Payout_Grid' in nav_pages %}
+                <li class="nav-item">
+                    <a href="{% url 'life_payout_grid_admin_redirect' %}" target="_blank" rel="noopener" class="nav-link">
+                        <i class="bi bi-arrow-repeat"></i> Update Payout Rates
                     </a>
                 </li>
                 {% endif %}

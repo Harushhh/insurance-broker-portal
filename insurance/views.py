@@ -98,28 +98,38 @@ PAGE_GROUPS = [
 ]
 
 
-def life_payout_grid_admin_redirect(request):
+def _life_payout_grid_handoff(request, role):
     """
-    Entry point for the sidebar's "Update Payout Rates" link. There's no
-    password on the Life Payout Grid app -- instead we sign a short-lived
-    token (this user's username + a 2-minute expiry) with a secret shared
-    between the two apps, and hand it off in the URL. The Next.js app
-    verifies the signature and, if valid, trusts that this portal already
-    checked the Can_Manage_Life_Payout_Grid permission below.
+    There's no password on the Life Payout Grid app -- instead we sign a
+    short-lived token (this user's username + role + a 2-minute expiry)
+    with a secret shared between the two apps, and hand it off in the URL.
+    The Next.js app verifies the signature and, if valid, trusts the
+    embedded role, since this portal already checked the relevant
+    permission before minting it (see the two callers below).
     """
     secret = settings.LIFE_PAYOUT_GRID_AUTH_SECRET
     if not secret:
         return HttpResponse(
             "LIFE_PAYOUT_GRID_AUTH_SECRET is not configured on this portal -- "
-            "the Life Payout Grid admin page can't be reached until it is.",
+            "the Life Payout Grid app can't be reached until it is.",
             status=500,
         )
     expiry = int(time.time()) + 120
-    payload = f"{request.user.username}:{expiry}"
+    payload = f"{request.user.username}:{expiry}:{role}"
     signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
     token = f"{payload}.{signature}"
     url = f"{settings.LIFE_PAYOUT_GRID_URL}/api/admin/portal-login?{urlencode({'token': token})}"
     return redirect(url)
+
+
+def life_payout_grid_redirect(request):
+    """Entry point for the sidebar's "Life Payout Grid" link -- any logged-in portal user (login_required in urls.py)."""
+    return _life_payout_grid_handoff(request, "viewer")
+
+
+def life_payout_grid_admin_redirect(request):
+    """Entry point for the sidebar's "Update Payout Rates" link -- requires Can_Manage_Life_Payout_Grid (page_access_required in urls.py)."""
+    return _life_payout_grid_handoff(request, "admin")
 
 # =========================================================
 # NA CONFIGURATION & HELPERS

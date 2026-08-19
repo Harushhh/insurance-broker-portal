@@ -1,14 +1,14 @@
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isAdminAuthenticated } from "@/lib/admin-auth";
 import { loadGridData } from "@/lib/grid-data";
-import { PortalAccessOnly } from "@/components/admin/portal-access-only";
+import { PortalAccessOnly } from "@/components/portal-access-only";
 import { AdminUpload } from "@/components/admin/admin-upload";
 
 export const dynamic = "force-dynamic";
 
 export default async function UpdateGridPage() {
-  const authed = await isAuthenticated();
+  const authed = await isAdminAuthenticated();
   if (!authed) {
-    return <PortalAccessOnly />;
+    return <PortalAccessOnly variant="admin" />;
   }
 
   const data = loadGridData();

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { execFile } from "child_process";
 import fs from "fs/promises";
 import path from "path";
-import { isAuthenticated } from "@/lib/admin-auth";
+import { isAdminAuthenticated } from "@/lib/admin-auth";
 
 const PROJECT_ROOT = process.cwd();
 // Local dev runs on Windows (venv/Scripts/python.exe); the Railway
@@ -40,7 +40,7 @@ function runParser(inputPath: string, outputPath: string, sourceLabel: string) {
 }
 
 export async function POST(request: NextRequest) {
-  if (!(await isAuthenticated())) {
+  if (!(await isAdminAuthenticated())) {
     return NextResponse.json({ ok: false, error: "Not authenticated." }, { status: 401 });
   }
 
