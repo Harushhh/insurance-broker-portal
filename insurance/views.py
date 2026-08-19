@@ -1742,7 +1742,11 @@ def user_management(request):
             "designation": profile.designation if profile else "",
             "is_superuser": u.is_superuser,
             "is_admin": u.groups.filter(name="ADMIN").exists(),
-            "pages": list(u.groups.values_list("name", flat=True)),
+            # Filtered to PAGE_GROUPS -- otherwise this leaks any group the
+            # user happens to belong to, including ones that no longer mean
+            # anything (like the retired Can_Manage_Life_Payout_Grid) or
+            # aren't meant to show here at all (ADMIN, SUPER_ADMIN).
+            "pages": list(u.groups.filter(name__in=PAGE_GROUPS).values_list("name", flat=True)),
             "user_id_code": profile.user_id_code if profile else "",
         }
         for field in HIERARCHY_FIELDS:
