@@ -1716,7 +1716,18 @@ def process_mis_mapping(mis_file_id):
                         best_match.get('pi_tp_rate'), best_match.get('pi_net_rate')
                     ),
                     'Piflatamount': best_match.get('pi_flat_amount'),
-                    'Addtnc': best_match.get('add_tnc')
+                    'Addtnc': best_match.get('add_tnc'),
+                    # Raw OD/TP rate pair, kept alongside the consolidated
+                    # Porate/Pirate above specifically for the 'On OD and TP'
+                    # split payout/payin calculation further down (see
+                    # _split_rate_cols) — Porate/Pirate collapse OD+TP into
+                    # one summed percentage, which is only correct when
+                    # applied to a single premium base, not to OD/TP's two
+                    # distinct bases (Total OD vs TP Premium).
+                    '_po_od_rate': best_match.get('po_od_rate'),
+                    '_po_tp_rate': best_match.get('po_tp_rate'),
+                    '_pi_od_rate': best_match.get('pi_od_rate'),
+                    '_pi_tp_rate': best_match.get('pi_tp_rate'),
                 })
 
             elif len(distinct_keys) > 1:
@@ -1788,7 +1799,15 @@ def process_mis_mapping(mis_file_id):
             if p_col not in df_final.columns:
                 df_final[p_col] = None
 
-        df_final.loc[df_final['Mapping Status'] != "✅ MATCH", payout_cols] = None
+        # Internal-only (never added to generated_cols, so never reaches the
+        # exported file) — the raw OD/TP rate pair set alongside Porate/Pirate
+        # above, for the 'On OD and TP' split Pay-out/Pay-in Amt calculation.
+        split_rate_cols = ['_po_od_rate', '_po_tp_rate', '_pi_od_rate', '_pi_tp_rate']
+        for s_col in split_rate_cols:
+            if s_col not in df_final.columns:
+                df_final[s_col] = None
+
+        df_final.loc[df_final['Mapping Status'] != "✅ MATCH", payout_cols + split_rate_cols] = None
 
         # cp premium# is computed from raw MIS fields only (see pre-compute
         # section above) and applies to every row regardless of Mapping
@@ -1833,6 +1852,35 @@ def process_mis_mapping(mis_file_id):
         reconciliation_cols = ['Pay-in Amt', 'Pay-out Amt', 'Margin Rate', 'Margin Amt']
         df_final['Pay-in Amt'] = (df_final['Pirate'] / 100) * df_final['cp premium#']
         df_final['Pay-out Amt'] = (df_final['Porate'] / 100) * df_final['cp premium#']
+
+        # --- SPLIT OD/TP OVERRIDE — Potype/Pitype == 'On OD and TP' ---
+        # Porate/Pirate collapse the OD+TP rate pair into one summed number
+        # (consolidated_rate) and the general path above multiplies that one
+        # number against one premium base (cp premium#). That's wrong for
+        # this type: OD and TP are genuinely two separate calculations, each
+        # against its own premium base — Total OD for the OD leg, TP Premium
+        # for the TP leg — not one combined rate times one base. Potype and
+        # Pitype are independent columns (a rate group's payout and payin
+        # sides can carry different types), so the override is applied to
+        # Pay-out Amt and Pay-in Amt independently, each keyed off its own
+        # type column and its own OD/TP rate pair (_po_od_rate/_po_tp_rate
+        # and _pi_od_rate/_pi_tp_rate, set alongside Porate/Pirate above).
+        # Missing OD/TP rate defaults to 0, mirroring consolidated_rate's own
+        # convention for this same rate_type.
+        _po_split_mask = df_final['Potype'] == 'On OD and TP'
+        _pi_split_mask = df_final['Pitype'] == 'On OD and TP'
+
+        _split_po_amt = (
+            _pi_ov_total_od * (df_final['_po_od_rate'].fillna(0) / 100)
+            + _pi_ov_tp_premium * (df_final['_po_tp_rate'].fillna(0) / 100)
+        )
+        _split_pi_amt = (
+            _pi_ov_total_od * (df_final['_pi_od_rate'].fillna(0) / 100)
+            + _pi_ov_tp_premium * (df_final['_pi_tp_rate'].fillna(0) / 100)
+        )
+        df_final.loc[_po_split_mask, 'Pay-out Amt'] = _split_po_amt[_po_split_mask]
+        df_final.loc[_pi_split_mask, 'Pay-in Amt'] = _split_pi_amt[_pi_split_mask]
+
         df_final['Margin Rate'] = df_final['Pirate'] - df_final['Porate']
         df_final['Margin Amt'] = df_final['Pay-in Amt'] - df_final['Pay-out Amt']
 
