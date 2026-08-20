@@ -185,6 +185,25 @@ def consolidated_rate(rate_type, od_rate, tp_rate, net_rate):
     return None
 
 
+def _format_number(n) -> str:
+    """12.0 -> '12', 12.5 -> '12.5' — used by format_od_tp_rate so a whole-
+    number rate doesn't show a pointless trailing '.0' in the 'OD+TP' string."""
+    n = float(n) if pd.notna(n) else 0.0
+    return str(int(n)) if n == int(n) else str(n)
+
+
+def format_od_tp_rate(od_rate, tp_rate) -> str:
+    """
+    Human-readable 'OD+TP' display for an 'On OD and TP' Porate/Pirate cell,
+    e.g. od_rate=13, tp_rate=8 -> '13+8'. Used only to reformat the already-
+    computed Porate/Pirate export column after every numeric calculation
+    that depends on it (Margin Rate, and Pay-out/Pay-in Amt's split
+    calculation) has already run against the real numeric OD/TP rates —
+    this never feeds back into arithmetic itself.
+    """
+    return f"{_format_number(od_rate)}+{_format_number(tp_rate)}"
+
+
 def check_categorical_match(val, grid_val):
     """
     Smart matching for categorical fields (Fuel, Class, Product) to handle typos safely.
@@ -1883,6 +1902,18 @@ def process_mis_mapping(mis_file_id):
 
         df_final['Margin Rate'] = df_final['Pirate'] - df_final['Porate']
         df_final['Margin Amt'] = df_final['Pay-in Amt'] - df_final['Pay-out Amt']
+
+        # --- DISPLAY FORMAT — Porate/Pirate as 'OD+TP' for On OD and TP rows ---
+        # Runs last, after Margin Rate/Margin Amt above have already used the
+        # real numeric OD+TP sum — this only reformats the exported Porate/
+        # Pirate cell so a reviewer sees the two rates that were combined
+        # (e.g. '13+8') instead of just their opaque sum ('21').
+        df_final.loc[_po_split_mask, 'Porate'] = df_final.loc[_po_split_mask].apply(
+            lambda r: format_od_tp_rate(r['_po_od_rate'], r['_po_tp_rate']), axis=1
+        )
+        df_final.loc[_pi_split_mask, 'Pirate'] = df_final.loc[_pi_split_mask].apply(
+            lambda r: format_od_tp_rate(r['_pi_od_rate'], r['_pi_tp_rate']), axis=1
+        )
 
         generated_cols = ['Mapping Status', 'Failure Reason'] + payout_cols + ['cp premium#'] + reconciliation_cols
         original_cols = [c for c in mis_cols]
