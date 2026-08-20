@@ -1907,7 +1907,13 @@ def process_mis_mapping(mis_file_id):
         # Runs last, after Margin Rate/Margin Amt above have already used the
         # real numeric OD+TP sum — this only reformats the exported Porate/
         # Pirate cell so a reviewer sees the two rates that were combined
-        # (e.g. '13+8') instead of just their opaque sum ('21').
+        # (e.g. '13+8') instead of just their opaque sum ('21'). Porate/Pirate
+        # are float64 columns (every non-split row is a plain number) — cast
+        # to object first, or pandas raises ("Invalid value ... for dtype
+        # 'float64'") instead of upcasting when a string is set via .loc.
+        df_final['Porate'] = df_final['Porate'].astype(object)
+        df_final['Pirate'] = df_final['Pirate'].astype(object)
+
         df_final.loc[_po_split_mask, 'Porate'] = df_final.loc[_po_split_mask].apply(
             lambda r: format_od_tp_rate(r['_po_od_rate'], r['_po_tp_rate']), axis=1
         )
