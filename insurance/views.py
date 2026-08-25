@@ -158,6 +158,13 @@ RATE_CHECKER_TABS = [
     ("Can_View_Life_Payout_Grid", "life_payout_grid_redirect"),
 ]
 
+# The single "Rate Checker" checkbox in the /user-management/ Page
+# Permissions grid stands in for these three real page-access groups (see
+# user_management() below). It shows checked only when a user already holds
+# all three -- so saving without deliberately re-checking it revokes a
+# partial subset rather than silently granting the rest.
+RATE_CHECKER_GROUPS = {group_name for group_name, _ in RATE_CHECKER_TABS}
+
 
 def rate_checker_entry(request):
     """
@@ -1892,7 +1899,10 @@ def user_management(request):
             for pg in PAGE_GROUPS:
                 u.groups.remove(Group.objects.get(name=pg))
 
-            selected_pages = request.POST.getlist(f"pages_{user_id}")
+            selected_pages = set(request.POST.getlist(f"pages_{user_id}"))
+            if "Rate_Checker" in selected_pages:
+                selected_pages.discard("Rate_Checker")
+                selected_pages |= RATE_CHECKER_GROUPS
             for pg in selected_pages:
                 u.groups.add(Group.objects.get(name=pg))
 

@@ -237,7 +237,12 @@
 
             <label class="modal-label">Page Permissions</label>
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; background:#f8fafc; padding:15px; border-radius:8px; border:1px solid var(--border); margin-bottom:20px;">
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; padding:4px 0;">
+                    <input type="checkbox" name="pages_EDIT" value="Rate_Checker" class="perm-check">
+                    🧮 Rate Checker
+                </label>
                 {% for pg in page_groups %}
+                {% if pg != 'Can_View_Policy_Locker' and pg != 'Can_View_Health_Payout_Rates' and pg != 'Can_View_Life_Payout_Grid' %}
                 <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; padding:4px 0;">
                     <input type="checkbox" name="pages_EDIT" value="{{ pg }}" class="perm-check">
                     {% if pg == 'Can_View_Dashboard' %} 📊 Dashboard
@@ -249,7 +254,6 @@
                     {% elif pg == 'Can_View_Audit_Log' %} 🕵️‍♂️ Audit Log
                     {% elif pg == 'Can_View_Grid_Management' %} 📁 Grid Management
                     {% elif pg == 'Can_View_Tickets' %} 🎫 Support Tickets
-                    {% elif pg == 'Can_View_Policy_Locker' %} 🔒 Policy Locker
                     {% elif pg == 'Can_View_Locked_Policies' %} 📜 Locked Policies Log
                     {% elif pg == 'Can_View_Motor_Points_Logs' %} 📋 Motor Points Logs
                     {% elif pg == 'Can_View_AI_Rulebook' %} 🧠 AI Rulebook
@@ -259,12 +263,11 @@
                     {% elif pg == 'Can_View_Rate_Master_Health' %} 🩺 Rate Master Health
                     {% elif pg == 'Can_View_Health_Rate_Master' %} ❤️ Health Rate Master
                     {% elif pg == 'Can_View_Pincode_Dashboard' %} 📍 Pincode Dashboard
-                    {% elif pg == 'Can_View_Health_Payout_Rates' %} 🧮 Health Quote Simulator
                     {% elif pg == 'Can_View_Special_Rates' %} ⭐ Special Rate Requests
                     {% elif pg == 'Can_Review_Special_Rates' %} 📝 Special Rates Review
-                    {% elif pg == 'Can_View_Life_Payout_Grid' %} 💹 Life Payout Grid
                     {% else %} {{ pg }} {% endif %}
                 </label>
+                {% endif %}
                 {% endfor %}
             </div>
 
@@ -279,8 +282,8 @@
                     🔓 Grant Full Access
                 </button>
 
-                <button type="button" class="btn" onclick="grantLifePayoutGridOnlyAndSubmit()" style="background:#ea580c; color:white; border:none; width:100%;">
-                    💹 Grant Life Payout Grid Only
+                <button type="button" class="btn" onclick="grantRateCheckerOnlyAndSubmit()" style="background:#ea580c; color:white; border:none; width:100%;">
+                    🧮 Grant Rate Checker Only
                 </button>
 
                 <button type="button" class="btn" onclick="removeAccessAndSubmit()" style="background:#f59e0b; color:white; border:none; width:100%;">
@@ -305,6 +308,8 @@
 {{ hierarchy_field_labels|json_script:"hierarchy-field-names" }}
 <script>
     const USERS_DATA = JSON.parse(document.getElementById('users-data').textContent);
+    // Mirrors RATE_CHECKER_GROUPS in insurance/views.py.
+    const RATE_CHECKER_GROUPS = ['Can_View_Policy_Locker', 'Can_View_Health_Payout_Rates', 'Can_View_Life_Payout_Grid'];
 
     function openModal(id) { document.getElementById(id).style.display = 'flex'; }
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }
@@ -334,7 +339,9 @@
 
         checks.forEach(c => {
             c.setAttribute('name', 'pages_' + id);
-            c.checked = activePages.includes(c.value);
+            c.checked = c.value === 'Rate_Checker'
+                ? RATE_CHECKER_GROUPS.every(g => activePages.includes(g))
+                : activePages.includes(c.value);
         });
 
         openModal('editUserModal');
@@ -374,10 +381,10 @@
         }
     }
 
-    function grantLifePayoutGridOnlyAndSubmit() {
-        if (confirm("Grant this user access to ONLY the Life Payout Grid, removing every other page permission they currently have? They won't be able to view any other dashboard.")) {
+    function grantRateCheckerOnlyAndSubmit() {
+        if (confirm("Grant this user access to ONLY the Rate Checker (Motor/Health/Life rate lookup), removing every other page permission they currently have? They won't be able to view any other dashboard.")) {
             let checks = document.querySelectorAll('.perm-check');
-            checks.forEach(c => c.checked = (c.value === 'Can_View_Life_Payout_Grid'));
+            checks.forEach(c => c.checked = (c.value === 'Rate_Checker'));
 
             document.getElementById('edit_action_input').value = 'update_user_access';
             document.getElementById('editUserForm').submit();
