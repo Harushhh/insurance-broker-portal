@@ -1058,6 +1058,57 @@ def dashboard(request):
     is_ncb = (request.GET.get("is_ncb") or "").strip()
     is_cpa = (request.GET.get("is_cpa") or "").strip()
 
+    has_filter = any([
+        q, status_filter, is_deleted_filter, created_date, date_range,
+        insurance_company, product, fuel, sub_product, make_model_class,
+        rto_code, make_model_code, age_range, cc_range, sc_range,
+        is_zd, is_ncb, is_cpa,
+    ])
+
+    if not has_filter:
+        # No filter selected yet -- skip the expensive full-table query/scan
+        # entirely and just render the filter form with an empty result set.
+        return render(request, "dashboard.html", {
+            "data": [],
+            "page_obj": None,
+            "elided_page_range": [],
+            "field_names": [],
+            "total": 0,
+            "active_count": 0,
+            "inactive_count": 0,
+            "insurance_company_list": RateMaster.objects.exclude(insurance_company="").values_list(
+                "insurance_company", flat=True
+            ).distinct().order_by("insurance_company"),
+            "product_list": ProductMaster.objects.all().order_by("name"),
+            "fuel_list": FuelTypeMaster.objects.all().order_by("name"),
+            "sub_product_list": SubProductMaster.objects.all().order_by("name"),
+            "make_model_class_list": get_dynamic_make_model_class_list(product),
+            "yes_no_na_list": YesNoNAMaster.objects.all().order_by("code"),
+            "make_class_mapping_json": json.dumps(NA_MAKE_MODEL_MAP),
+            "all_make_classes_json": json.dumps(list(MakeModelClassMaster.objects.exclude(name__iexact="NA").values('id', 'name'))),
+            "selected": {
+                "q": q,
+                "status": status_filter,
+                "is_deleted": is_deleted_filter,
+                "created_date": created_date,
+                "insurance_company": insurance_company,
+                "product": product,
+                "fuel": fuel,
+                "sub_product": sub_product,
+                "make_model_class": make_model_class,
+                "date_range": date_range,
+                "rto_code": rto_code,
+                "make_model_code": make_model_code,
+                "age_range": age_range,
+                "cc_range": cc_range,
+                "sc_range": sc_range,
+                "is_zd": is_zd,
+                "is_ncb": is_ncb,
+                "is_cpa": is_cpa,
+            },
+            "no_filter_selected": True,
+        })
+
     if q:
         group_ids = [int(gid.strip()) for gid in q.split(",") if gid.strip().isdigit()]
         if group_ids:
