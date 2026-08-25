@@ -1,0 +1,59 @@
+{% comment %}
+Shared pill tab bar for the "Rate Checker" sidebar entry point.
+Included at the top of policy_lock_checker.html and health_payout_rates.html
+so switching between Motor/Health/Life is a normal page nav, not a
+separate view -- each of those two pages keeps its own URL/permission/
+logic exactly as before. Life Payout Grid is a separate cross-origin app
+(see insurance/views.py:_life_payout_grid_handoff), so its tab is a plain
+link, not a same-page render -- it navigates away like any other link.
+{% endcomment %}
+<div class="rc-tabs">
+    {% if 'Can_View_Policy_Locker' in nav_pages %}
+    <a href="{% url 'policy_lock_checker' %}"
+       class="rc-tab {% if request.resolver_match.url_name == 'policy_lock_checker' %}active{% endif %}">
+        <i class="bi bi-car-front-fill"></i> Motor
+    </a>
+    {% endif %}
+    {% if 'Can_View_Health_Payout_Rates' in nav_pages %}
+    <a href="{% url 'health_payout_rates' %}"
+       class="rc-tab {% if request.resolver_match.url_name == 'health_payout_rates' %}active{% endif %}">
+        <i class="bi bi-heart-pulse-fill"></i> Health
+    </a>
+    {% endif %}
+    {% if 'Can_View_Life_Payout_Grid' in nav_pages %}
+    <a href="{% url 'life_payout_grid_redirect' %}" class="rc-tab">
+        <i class="bi bi-percent"></i> Life
+    </a>
+    {% endif %}
+</div>
+<style>
+    .rc-tabs {
+        display: inline-flex;
+        gap: 4px;
+        background: #f1f5f9;
+        padding: 6px;
+        border-radius: 999px;
+        margin-bottom: 20px;
+    }
+    .rc-tab {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 20px;
+        border-radius: 999px;
+        font-weight: 600;
+        font-size: 14px;
+        color: #64748b;
+        text-decoration: none;
+        transition: color .15s ease, background-color .15s ease, box-shadow .15s ease;
+    }
+    .rc-tab:hover {
+        color: #0f172a;
+        text-decoration: none;
+    }
+    .rc-tab.active {
+        background: #2563eb;
+        color: #fff;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, .3);
+    }
+</style>

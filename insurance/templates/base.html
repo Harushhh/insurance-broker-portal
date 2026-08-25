@@ -360,17 +360,10 @@
                     </a>
                 </li>
                 {% endif %}
-                {% if 'Can_View_Health_Payout_Rates' in nav_pages %}
+                {% if 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Health_Payout_Rates' in nav_pages or 'Can_View_Life_Payout_Grid' in nav_pages %}
                 <li class="nav-item">
-                    <a href="{% url 'health_payout_rates' %}" class="nav-link {% if request.path == '/health-payout-rates/' %}active{% endif %}">
-                        <i class="bi bi-calculator"></i> Health Quote Simulator
-                    </a>
-                </li>
-                {% endif %}
-                {% if 'Can_View_Policy_Locker' in nav_pages %}
-                <li class="nav-item">
-                    <a href="{% url 'policy_lock_checker' %}" class="nav-link {% if request.path == '/policy-lock-checker/' %}active{% endif %}">
-                        <i class="bi bi-lock-fill"></i> Motor Policy Locker
+                    <a href="{% url 'rate_checker' %}" class="nav-link {% if request.resolver_match.url_name == 'policy_lock_checker' or request.resolver_match.url_name == 'health_payout_rates' or request.resolver_match.url_name == 'rate_checker' %}active{% endif %}">
+                        <i class="bi bi-calculator-fill"></i> Rate Checker
                     </a>
                 </li>
                 {% endif %}
@@ -473,14 +466,6 @@
                     </a>
                 </li>
                 {% endif %}
-                {% if 'Can_View_Life_Payout_Grid' in nav_pages %}
-                <li class="nav-item">
-                    <a href="{% url 'life_payout_grid_redirect' %}" target="_blank" rel="noopener" class="nav-link">
-                        <i class="bi bi-percent"></i> Life Payout Grid
-                    </a>
-                </li>
-                {% endif %}
-
                 {% if 'Can_View_Analysis' in nav_pages or 'Can_View_Grid_Management' in nav_pages or nav_can_access_control or 'Can_View_Audit_Log' in nav_pages or nav_is_super_admin %}
                 <li class="nav-title">Administration</li>
                 {% endif %}

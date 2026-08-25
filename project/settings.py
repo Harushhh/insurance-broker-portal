@@ -60,6 +60,19 @@ if not LIFE_PAYOUT_GRID_AUTH_SECRET and not DEBUG:
         "Refusing to start in production without it."
     )
 
+# Signs the short-lived ticket used to hand an already-logged-in user off
+# from an external partner portal (e.g. ArhamSecure's partner portal) into
+# this app without a second login -- see insurance/sso.py and
+# views.IssueSSOTicketAPIView / views.sso_consume_view. Unlike
+# LIFE_PAYOUT_GRID_AUTH_SECRET this is not shared with another app's env --
+# only this app ever signs or verifies it.
+PARTNER_SSO_TICKET_SECRET = os.getenv("PARTNER_SSO_TICKET_SECRET")
+if not PARTNER_SSO_TICKET_SECRET and not DEBUG:
+    raise RuntimeError(
+        "PARTNER_SSO_TICKET_SECRET environment variable is not set. "
+        "Refusing to start in production without it."
+    )
+
 # =========================================================
 # CSRF
 # =========================================================

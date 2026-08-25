@@ -1,5 +1,7 @@
 from django.contrib import messages
+from django.contrib.auth import login as auth_login
 from django.contrib.auth.models import User, Group
+from django.core.exceptions import PermissionDenied
 from django.utils import timezone
 from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
@@ -34,9 +36,13 @@ from openpyxl import Workbook
 
 # --- DRF & SWAGGER IMPORTS ---
 from rest_framework import generics
+from rest_framework.views import APIView
+from rest_framework.response import Response
 from rest_framework_api_key.permissions import HasAPIKey
 from .serializers import RateMasterSerializer
 # -----------------------------
+
+from . import sso
 
 from .models import (
     RTOMaster, MakeModelMaster, PincodeMaster, RateMaster, YesNoNAMaster,
@@ -130,6 +136,178 @@ def life_payout_grid_redirect(request):
 def life_payout_grid_admin_redirect(request):
     """Entry point for the sidebar's "Update Payout Rates" link -- requires SUPER_ADMIN specifically (super_admin_required in urls.py), not just ADMIN."""
     return _life_payout_grid_handoff(request, "admin")
+
+
+# =========================================================
+# RATE CHECKER (unified Motor / Health / Life entry point)
+# Sidebar link consolidating what used to be three separate items --
+# Motor Policy Locker, Health Quote Simulator, Life Payout Grid -- behind
+# one "Rate Checker" entry. The underlying pages, URLs, and permissions
+# (Can_View_Policy_Locker / Can_View_Health_Payout_Rates /
+# Can_View_Life_Payout_Grid) are unchanged; this is just a landing view
+# that sends the user to whichever one they can access, plus a shared tab
+# bar (insurance/templates/partials/rate_checker_tabs.html) included at the
+# top of policy_lock_checker.html / health_payout_rates.html for switching
+# between them. Life stays a plain link to the existing cross-origin
+# handoff (_life_payout_grid_handoff above) -- it's a separate app on a
+# different domain, so it can't be rendered inline the way Motor/Health can.
+# =========================================================
+RATE_CHECKER_TABS = [
+    ("Can_View_Policy_Locker", "policy_lock_checker"),
+    ("Can_View_Health_Payout_Rates", "health_payout_rates"),
+    ("Can_View_Life_Payout_Grid", "life_payout_grid_redirect"),
+]
+
+
+def rate_checker_entry(request):
+    """
+    Entry point for the sidebar's "Rate Checker" link -- redirects to
+    whichever of Motor/Health/Life the user can access, in that priority
+    order. Wrapped with plain login_required in urls.py (like home_dashboard);
+    not page_access_required, since that only checks a single group and this
+    is an any-of-three check, so it raises PermissionDenied itself instead --
+    same style as staff_required/super_admin_required.
+    """
+    is_admin = request.user.groups.filter(name="ADMIN").exists()
+    for group_name, url_name in RATE_CHECKER_TABS:
+        if is_admin or request.user.groups.filter(name=group_name).exists():
+            return redirect(url_name)
+    raise PermissionDenied("You don't have access to any Rate Checker tool.")
+
+
+# =========================================================
+# INBOUND PARTNER PORTAL SSO HANDOFF
+# The inbound mirror of the outbound handoff above: lets an
+# already-authenticated user on an external partner portal (e.g.
+# ArhamSecure's partner.arhamsecure.com) land here already logged in,
+# scoped to a fixed subset of pages. See insurance/sso.py for the ticket
+# signing/verification logic.
+# =========================================================
+
+# Pages an ArhamSecure-partner-portal handoff is allowed to grant -- exactly
+# the three pages unified under "Rate Checker" (see RATE_CHECKER_TABS
+# above), never ADMIN/SUPER_ADMIN or anything outside this set. If a second
+# partner ever needs a different set, split this into a per-partner mapping
+# instead of widening this one.
+PARTNER_ARHAMSECURE_ALLOWED_GROUPS = {
+    "Can_View_Policy_Locker",
+    "Can_View_Health_Payout_Rates",
+    "Can_View_Life_Payout_Grid",
+}
+
+# requested_pages may name this bundle instead of listing the 3 groups
+# individually -- expanded to its members in IssueSSOTicketAPIView.post
+# before the allow-list intersection below, so the partner only ever needs
+# to ask for "Rate_Checker" once access to the unified page is wanted.
+SSO_SCOPE_BUNDLES = {
+    "Rate_Checker": PARTNER_ARHAMSECURE_ALLOWED_GROUPS,
+}
+
+# landing_page value the partner may request -> URL name to redirect to.
+# Deliberately a fixed allow-list, never a raw URL/path taken from the
+# request -- an open redirect here would defeat the point of scoping access.
+SSO_ALLOWED_LANDING_PAGES = {
+    "rate_checker": "rate_checker",
+    "policy_lock_checker": "policy_lock_checker",
+    "health_payout_rates": "health_payout_rates",
+}
+
+
+class IssueSSOTicketAPIView(APIView):
+    """
+    Server-to-server endpoint for the partner portal's backend: authenticated
+    with a rest_framework_api_key key (never called from a browser), it
+    JIT-provisions/updates the target user and mints a short-lived,
+    single-use ticket for the browser-redirect leg (see sso_consume_view).
+    """
+    permission_classes = [HasAPIKey]
+
+    def post(self, request):
+        if not settings.PARTNER_SSO_TICKET_SECRET:
+            return Response(
+                {"error": "PARTNER_SSO_TICKET_SECRET is not configured on this portal."},
+                status=500,
+            )
+        email = (request.data.get("email") or "").strip().lower()
+        if not email:
+            return Response({"error": "email is required"}, status=400)
+        full_name = (request.data.get("full_name") or "").strip()
+        requested_pages = set(request.data.get("requested_pages") or [])
+        landing_page = request.data.get("landing_page") or "rate_checker"
+
+        # Expand any bundle name (e.g. "Rate_Checker") into its member
+        # groups before clamping -- this is purely a convenience for the
+        # caller, the allow-list intersection right after is what actually
+        # decides the grant either way.
+        for bundle_name, member_groups in SSO_SCOPE_BUNDLES.items():
+            if bundle_name in requested_pages:
+                requested_pages |= member_groups
+
+        # Server-side clamp: this app decides the actual grant, it never
+        # trusts the caller's requested list wholesale.
+        granted = sorted(requested_pages & PARTNER_ARHAMSECURE_ALLOWED_GROUPS)
+
+        user, created = User.objects.get_or_create(
+            username=email,
+            defaults={"email": email},
+        )
+        if created:
+            # No usable password -- this account can only ever be entered
+            # via a freshly minted ticket, never the normal login form, so
+            # it adds no credential-stuffing / password-guessing surface.
+            user.set_unusable_password()
+            if full_name:
+                first, _, last = full_name.partition(" ")
+                user.first_name, user.last_name = first, last
+            user.is_active = True
+            user.save()
+            UserProfile.objects.get_or_create(user=user)
+        elif not user.is_active:
+            # An existing but deactivated account (e.g. an internal signup
+            # pending approval) must not be silently reactivated by a
+            # partner handoff.
+            return Response({"error": "account is not active"}, status=403)
+
+        user.groups.set(Group.objects.filter(name__in=granted))
+
+        jti = secrets.token_urlsafe(16)
+        ticket = sso.mint_ticket(user, landing_page, jti)
+        AuditLog.objects.create(
+            user=user,
+            action="sso_ticket_issued",
+            details=f"partner=arhamsecure pages={granted} landing={landing_page}",
+        )
+        logger.info("SSO ticket issued for %s, pages=%s", email, granted)
+
+        redirect_url = f"{request.build_absolute_uri('/sso/consume/')}?{urlencode({'ticket': ticket})}"
+        return Response({"redirect_url": redirect_url})
+
+
+def sso_consume_view(request):
+    """
+    Public landing endpoint for the partner-portal redirect. Deliberately
+    NOT wrapped in login_required -- that's the entire point of this route.
+    A missing/expired/replayed/invalid ticket just falls back to the normal
+    login page, same as any other unauthenticated visitor.
+    """
+    result = sso.verify_and_consume_ticket(request.GET.get("ticket", ""))
+    if not result:
+        logger.warning(
+            "Rejected SSO ticket from %s",
+            request.META.get("HTTP_X_FORWARDED_FOR", request.META.get("REMOTE_ADDR", "unknown")),
+        )
+        return redirect("login")
+
+    user, landing_page = result
+    auth_login(request, user)
+    # Rotate the session key, same as a normal password login
+    # (ThrottledLoginView.form_valid in auth_views.py), to prevent session
+    # fixation.
+    request.session.cycle_key()
+    AuditLog.objects.create(user=user, action="sso_ticket_consumed", details=f"landing={landing_page}")
+    logger.info("SSO login consumed for %s", user.username)
+
+    return redirect(SSO_ALLOWED_LANDING_PAGES.get(landing_page, "home"))
 
 # =========================================================
 # NA CONFIGURATION & HELPERS

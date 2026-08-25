@@ -130,6 +130,11 @@ urlpatterns = [
     path('configurator/edit/<int:pk>/', page_access_required("Can_View_AI_Rulebook")(views.edit_field), name='edit_field'),
     path('configurator/delete/<int:pk>/', page_access_required("Can_View_AI_Rulebook")(views.delete_field), name='delete_field'),
 
+    # Rate Checker -- unified Motor/Health/Life entry point (see
+    # views.RATE_CHECKER_TABS). Any-of-three check, so it's plain
+    # login_required rather than page_access_required (single group only).
+    path("rate-checker/", login_required(views.rate_checker_entry), name="rate_checker"),
+
     # Policy Lock System
     path("policy-lock-checker/", page_access_required("Can_View_Policy_Locker")(views.policy_lock_checker), name="policy_lock_checker"),
     path("lock-unlock-policy/<int:rate_id>/", page_access_required("Can_View_Policy_Locker")(views.lock_unlock_policy), name="lock_unlock_policy"),
@@ -198,6 +203,13 @@ urlpatterns = [
     # REST API ENDPOINTS
     # ==========================================
     path('api/v1/export-rates/', page_access_required("Can_View_Dashboard")(views.ExportRatesAPIView.as_view()), name='api-export-rates'),
+
+    # Inbound partner-portal SSO handoff (see insurance/sso.py). Both routes
+    # are intentionally public/unauthenticated -- issue-ticket is gated by
+    # its own HasAPIKey permission instead of a session, and consume is the
+    # landing page a not-yet-logged-in browser is redirected to.
+    path("api/sso/issue-ticket/", views.IssueSSOTicketAPIView.as_view(), name="sso_issue_ticket"),
+    path("sso/consume/", views.sso_consume_view, name="sso_consume"),
 
     # Catch-all — must stay last. Any unmatched route redirects to login.
     path("<path:unused>/", lambda request, unused: redirect("login"), name="catch_all"),
