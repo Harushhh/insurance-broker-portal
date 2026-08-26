@@ -4361,7 +4361,15 @@ def analysis_payout_data(request):
 # AUDIT TRAIL LOGS
 # -------------------------
 def _filtered_audit_logs(request):
-    qs = AuditLog.objects.select_related("user").order_by("-timestamp")
+    # This page is scoped to MANUAL EDIT only (compliance record for manual
+    # edits/bulk updates) - MOTOR_POINTS_SEARCH and other action types have
+    # their own dedicated views and are never shown here. Also bounded to the
+    # last 7 days to match the retention window enforced by
+    # cleanup_manual_edit_logs (insurance/tasks.py).
+    retention_cutoff = timezone.now() - timedelta(days=7)
+    qs = AuditLog.objects.filter(
+        action="MANUAL EDIT", timestamp__gte=retention_cutoff
+    ).select_related("user").order_by("-timestamp")
 
     user_id = (request.GET.get("user") or "").strip()
     action = (request.GET.get("action") or "").strip()
@@ -4387,9 +4395,11 @@ def audit_logs(request):
     # column ineffective at the SQL level (timestamp isn't in the SELECT, so
     # "DISTINCT action" ends up including every differently-timestamped
     # row) - dedupe in Python instead of relying on DB-level DISTINCT here.
-    user_ids = set(AuditLog.objects.exclude(user__isnull=True).values_list("user_id", flat=True))
+    # Scoped to MANUAL EDIT to match _filtered_audit_logs's base filter.
+    manual_edit_qs = AuditLog.objects.filter(action="MANUAL EDIT")
+    user_ids = set(manual_edit_qs.exclude(user__isnull=True).values_list("user_id", flat=True))
     user_choices = User.objects.filter(id__in=user_ids).order_by("username")
-    action_choices = sorted(set(AuditLog.objects.exclude(action="").values_list("action", flat=True)))
+    action_choices = sorted(set(manual_edit_qs.values_list("action", flat=True)))
 
     return render(request, "audit_log.html", {
         "logs": qs[:200],
