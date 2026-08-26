@@ -270,35 +270,67 @@
     <div class="panel-title">📋 Filter search logs</div>
     <form method="get">
       <div class="form-grid">
-        <div class="field-group">
-          <label>Vehicle No.</label>
-          <select name="vehicle_no" class="smart-dropdown" data-placeholder="Search vehicle no.">
-            <option value="">Search vehicle no.</option>
-            {% for v in unique_vehicles %}
-              <option value="{{ v }}" {% if selected.vehicle_no == v %}selected{% endif %}>{{ v }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        
-        <div class="field-group">
-          <label>Policy Holder Name</label>
-          <select name="policy_holder_name" class="smart-dropdown" data-placeholder="Search holder name">
-            <option value="">Search holder name</option>
-            {% for holder in unique_holders %}
-              <option value="{{ holder }}" {% if selected.policy_holder_name == holder %}selected{% endif %}>{{ holder }}</option>
-            {% endfor %}
-          </select>
-        </div>
+        {% if selected.type == 'health' %}
+          <div class="field-group">
+            <label>Product</label>
+            <select name="product_name" class="smart-dropdown" data-placeholder="Search product">
+              <option value="">Search product</option>
+              {% for p in unique_health_products %}
+                <option value="{{ p }}" {% if selected.product_name == p %}selected{% endif %}>{{ p }}</option>
+              {% endfor %}
+            </select>
+          </div>
 
-        <div class="field-group">
-          <label>Make-Model Name</label>
-          <select name="insurance_company" class="smart-dropdown" data-placeholder="Search Make-Model...">
-            <option value="">Search Make-Model...</option>
-            {% for make in unique_companies %}
-              <option value="{{ make }}" {% if selected.insurance_company == make %}selected{% endif %}>{{ make }}</option>
-            {% endfor %}
-          </select>
-        </div>
+          <div class="field-group">
+            <label>Sub Product</label>
+            <select name="business_type" class="smart-dropdown" data-placeholder="Search sub product">
+              <option value="">Search sub product</option>
+              {% for sp in unique_health_sub_products %}
+                <option value="{{ sp }}" {% if selected.business_type == sp %}selected{% endif %}>{{ sp }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label>Plan Type</label>
+            <select name="policy_category" class="smart-dropdown" data-placeholder="Search plan type">
+              <option value="">Search plan type</option>
+              {% for pt in unique_health_plan_types %}
+                <option value="{{ pt }}" {% if selected.policy_category == pt %}selected{% endif %}>{{ pt }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        {% else %}
+          <div class="field-group">
+            <label>Vehicle No.</label>
+            <select name="vehicle_no" class="smart-dropdown" data-placeholder="Search vehicle no.">
+              <option value="">Search vehicle no.</option>
+              {% for v in unique_vehicles %}
+                <option value="{{ v }}" {% if selected.vehicle_no == v %}selected{% endif %}>{{ v }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label>Policy Holder Name</label>
+            <select name="policy_holder_name" class="smart-dropdown" data-placeholder="Search holder name">
+              <option value="">Search holder name</option>
+              {% for holder in unique_holders %}
+                <option value="{{ holder }}" {% if selected.policy_holder_name == holder %}selected{% endif %}>{{ holder }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="field-group">
+            <label>Make-Model Name</label>
+            <select name="insurance_company" class="smart-dropdown" data-placeholder="Search Make-Model...">
+              <option value="">Search Make-Model...</option>
+              {% for make in unique_companies %}
+                <option value="{{ make }}" {% if selected.insurance_company == make %}selected{% endif %}>{{ make }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        {% endif %}
 
         <div class="field-group">
           <label>User</label>

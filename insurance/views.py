@@ -4570,6 +4570,13 @@ def points_audit_logs(request):
     policy_holder_name_filter = (request.GET.get("policy_holder_name") or "").strip()
     insurance_company_filter = (request.GET.get("insurance_company") or "").strip()
     username_filter = (request.GET.get("username") or "").strip()
+    # Health-tab equivalents of the three Motor-only fields above (Vehicle
+    # No./Policy Holder/Make-Model Name don't apply to Health searches) --
+    # same field names the Health Points Checker itself submits, so they
+    # match what's actually stored in a HEALTH_POINTS_SEARCH log's details.
+    product_name_filter = (request.GET.get("product_name") or "").strip()
+    business_type_filter = (request.GET.get("business_type") or "").strip()
+    policy_category_filter = (request.GET.get("policy_category") or "").strip()
 
     if vehicle_no_filter:
         qs = qs.filter(details__icontains=vehicle_no_filter)
@@ -4579,6 +4586,12 @@ def points_audit_logs(request):
         qs = qs.filter(details__icontains=insurance_company_filter)
     if username_filter:
         qs = qs.filter(user__username__icontains=username_filter)
+    if product_name_filter:
+        qs = qs.filter(details__icontains=product_name_filter)
+    if business_type_filter:
+        qs = qs.filter(details__icontains=business_type_filter)
+    if policy_category_filter:
+        qs = qs.filter(details__icontains=policy_category_filter)
 
     logs = qs[:500]
 
@@ -4589,15 +4602,18 @@ def points_audit_logs(request):
     unique_holders = set()
     unique_companies = set()
     unique_users = set()
+    unique_health_products = set()
+    unique_health_sub_products = set()
+    unique_health_plan_types = set()
 
     for log in all_logs_for_dropdowns:
         if log.user and log.user.username:
             unique_users.add(log.user.username)
-        
+
         try:
             clean_str = log.details.replace("Eligibility Check Parameters: ", "")
             params_dict = ast.literal_eval(clean_str)
-            
+
             flat_params = {}
             if isinstance(params_dict, dict):
                 for k, v in params_dict.items():
@@ -4605,13 +4621,19 @@ def points_audit_logs(request):
                         flat_params[k] = str(v[0]).strip()
                     else:
                         flat_params[k] = str(v).strip()
-            
+
             if flat_params.get("vehicle_no"):
                 unique_vehicles.add(flat_params["vehicle_no"])
             if flat_params.get("policy_holder_name"):
                 unique_holders.add(flat_params["policy_holder_name"])
             if flat_params.get("make_names"):
                 unique_companies.add(flat_params["make_names"])
+            if flat_params.get("product_name"):
+                unique_health_products.add(flat_params["product_name"])
+            if flat_params.get("business_type"):
+                unique_health_sub_products.add(flat_params["business_type"])
+            if flat_params.get("policy_category"):
+                unique_health_plan_types.add(flat_params["policy_category"])
         except:
             pass
 
@@ -4667,12 +4689,18 @@ def points_audit_logs(request):
         "unique_holders": sorted(list(unique_holders)),
         "unique_companies": sorted(list(unique_companies)),
         "unique_users": sorted(list(unique_users)),
+        "unique_health_products": sorted(list(unique_health_products)),
+        "unique_health_sub_products": sorted(list(unique_health_sub_products)),
+        "unique_health_plan_types": sorted(list(unique_health_plan_types)),
         "filter_base_qs": filter_base_qs,
         "selected": {
             "vehicle_no": vehicle_no_filter,
             "policy_holder_name": policy_holder_name_filter,
             "insurance_company": insurance_company_filter,
             "username": username_filter,
+            "product_name": product_name_filter,
+            "business_type": business_type_filter,
+            "policy_category": policy_category_filter,
             "type": type_filter,
         }
     })
