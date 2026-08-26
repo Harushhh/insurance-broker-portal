@@ -15,16 +15,21 @@ def cleanup_motor_points_search_logs():
     return deleted_count
 
 
+# Keep in sync with SECURITY_AUDIT_LOG_ACTIONS in insurance/views.py - the
+# set of action types shown on the Security Audit & History Log page.
+SECURITY_AUDIT_LOG_ACTIONS = ["MANUAL EDIT", "BULK UPDATE", "HEALTH RATE EDIT", "HEALTH BULK UPDATE"]
+
+
 @shared_task
-def cleanup_manual_edit_logs():
-    """Delete MANUAL EDIT audit logs older than the 7-day retention window."""
+def cleanup_security_audit_logs():
+    """Delete Security Audit Log entries older than the 7-day retention window."""
     from datetime import timedelta
     from django.utils import timezone
     from .models import AuditLog
 
     cutoff = timezone.now() - timedelta(days=7)
     deleted_count, _ = AuditLog.objects.filter(
-        action="MANUAL EDIT", timestamp__lt=cutoff
+        action__in=SECURITY_AUDIT_LOG_ACTIONS, timestamp__lt=cutoff
     ).delete()
     return deleted_count
 

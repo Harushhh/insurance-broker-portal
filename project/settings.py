@@ -268,8 +268,8 @@ CELERY_BEAT_SCHEDULE = {
         "task": "insurance.tasks.cleanup_motor_points_search_logs",
         "schedule": crontab(hour=2, minute=0),
     },
-    "cleanup-manual-edit-logs": {
-        "task": "insurance.tasks.cleanup_manual_edit_logs",
+    "cleanup-security-audit-logs": {
+        "task": "insurance.tasks.cleanup_security_audit_logs",
         "schedule": crontab(hour=2, minute=15),
     },
 }
