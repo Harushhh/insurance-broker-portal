@@ -3372,6 +3372,9 @@ def _collect_motor_payout_rows(qs, matching_rto_names, matching_make_groups, rto
 def motor_payout_rates(request):
     has_searched = bool(request.GET)
 
+    if has_searched:
+        _log_motor_points_search(request)
+
     today_str = datetime.today().strftime("%Y-%m-%d")
     target_date = (request.GET.get("target_date") or today_str).strip()
 
@@ -3471,6 +3474,24 @@ def motor_payout_rates_more(request):
         "next_offset": skip + len(results),
     })
 
+def _log_motor_points_search(request):
+    """Record a MOTOR_POINTS_SEARCH audit log entry from the current request's
+    GET params. Shared by every "Check Eligibility" search page (Rate Checker,
+    Motor Payout Rates Checker, ...) so they all feed the same
+    /motor-points-logs/ audit trail in the same format."""
+    flat_params = {}
+    for key in request.GET.keys():
+        val = request.GET.get(key, "").strip()
+        if val and key != "csrfmiddlewaretoken":
+            flat_params[key] = val
+
+    if flat_params:
+        AuditLog.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            action="MOTOR_POINTS_SEARCH",
+            details=str(flat_params)
+        )
+
 # -------------------------
 # POLICY LOCK CHECKER
 # -------------------------
@@ -3483,18 +3504,7 @@ def _run_policy_lock_checker_search(request):
     has_searched = bool(request.GET)
 
     if has_searched:
-        flat_params = {}
-        for key in request.GET.keys():
-            val = request.GET.get(key, "").strip()
-            if val and key != "csrfmiddlewaretoken":
-                flat_params[key] = val
-        
-        if flat_params:
-            AuditLog.objects.create(
-                user=request.user if request.user.is_authenticated else None,
-                action="MOTOR_POINTS_SEARCH",
-                details=str(flat_params)
-            )
+        _log_motor_points_search(request)
 
     qs = RateMaster.objects.select_related(
         "product", "sub_product", "policy_type", "fuel_type",
