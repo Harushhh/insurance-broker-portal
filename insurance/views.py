@@ -4624,25 +4624,21 @@ class PolicyLockCheckerAPIView(APIView):
         results, has_searched, selected = _run_policy_lock_checker_search(request)
 
         def serialize_row(row):
+            # Mirrors the "Eligibility Results" table in policy_lock_checker.html
+            # (see the {% for row in data %} block there) so the API's numbers
+            # render exactly like the web page's, string-for-string.
+            if row.po_type == "On OD and TP":
+                po_rate = f"{row.po_od_rate or 0}+{row.po_tp_rate or 0}%"
+            else:
+                po_rate = f"{row.po_rate or 0}%"
+
             return {
                 "group_id": row.display_group_id,
                 "insurance_company": row.insurance_company,
-                "product": row.product.name if row.product else None,
-                "sub_product": row.sub_product.name if row.sub_product else None,
-                "make_model_class": row.display_make_model_class,
-                "fuel_type": row.fuel_type.name if row.fuel_type else None,
-                "tariff_min": row.tariff_min,
-                "tariff_max": row.tariff_max,
+                "tariff_range": f"{row.tariff_min or 0}-{row.tariff_max or 0}",
                 "po_type": row.po_type,
-                "po_od_rate": row.po_od_rate,
-                "po_tp_rate": row.po_tp_rate,
-                "po_net_rate": row.po_net_rate,
-                "po_flat_amount": row.po_flat_amount,
-                "effective_rate": row.effective_rate,
-                "status": row.status,
-                "lock_status": row.lock_status,
-                "from_date": row.from_date,
-                "to_date": row.to_date,
+                "po_rate": po_rate,
+                "add_tnc": row.add_tnc or "-",
             }
 
         return Response({
