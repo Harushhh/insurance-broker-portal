@@ -1,16 +1,21 @@
 from celery import shared_task
 
 
+# Keep in sync with POINTS_SEARCH_ACTIONS in insurance/views.py - the set of
+# action types shown on the unified Points Search Logs page.
+POINTS_SEARCH_ACTIONS = ["MOTOR_POINTS_SEARCH", "HEALTH_POINTS_SEARCH"]
+
+
 @shared_task
-def cleanup_motor_points_search_logs():
-    """Delete MOTOR_POINTS_SEARCH audit logs older than the 7-day retention window."""
+def cleanup_points_search_logs():
+    """Delete Motor/Health Points Search audit logs older than the 7-day retention window."""
     from datetime import timedelta
     from django.utils import timezone
     from .models import AuditLog
 
     cutoff = timezone.now() - timedelta(days=7)
     deleted_count, _ = AuditLog.objects.filter(
-        action="MOTOR_POINTS_SEARCH", timestamp__lt=cutoff
+        action__in=POINTS_SEARCH_ACTIONS, timestamp__lt=cutoff
     ).delete()
     return deleted_count
 

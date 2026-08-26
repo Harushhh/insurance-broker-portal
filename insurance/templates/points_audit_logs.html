@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Motor Points Search Logs{% endblock %}
+{% block title %}Points Search Logs{% endblock %}
 
 {% block content %}
 <style>
@@ -37,6 +37,39 @@
     margin-top: 8px;
     line-height: 1.5;
     max-width: 820px;
+  }
+
+  /* TYPE TOGGLE (Motor / Health quick filter) */
+  .type-toggle {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .type-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 20px;
+    border-radius: 999px;
+    border: 1px solid #d7e0ea;
+    background: #fff;
+    color: #475569;
+    font-weight: 800;
+    font-size: 13px;
+    text-decoration: none;
+    transition: all .15s ease;
+  }
+
+  .type-pill:hover {
+    border-color: #93c5fd;
+    color: #1d4ed8;
+  }
+
+  .type-pill.active {
+    background: linear-gradient(135deg,#2563eb,#0ea5e9);
+    border-color: transparent;
+    color: #fff;
   }
 
   /* SEARCH PANEL STYLES */
@@ -220,11 +253,17 @@
 <div class="page-card">
   <div class="hero-head">
     <div>
-      <h1 class="hero-title">Motor Points Search Logs</h1>
+      <h1 class="hero-title">Points Search Logs</h1>
       <div class="hero-sub">
-        A complete audit trail of every time a user clicked "Check Eligibility" on the Motor Points page.
+        A complete audit trail of every time a user clicked "Check Eligibility" on the Motor Points or Health Points page.
       </div>
     </div>
+  </div>
+
+  <div class="type-toggle">
+    <a href="?{{ filter_base_qs }}type=" class="type-pill {% if not selected.type %}active{% endif %}">All</a>
+    <a href="?{{ filter_base_qs }}type=motor" class="type-pill {% if selected.type == 'motor' %}active{% endif %}">🚗 Motor</a>
+    <a href="?{{ filter_base_qs }}type=health" class="type-pill {% if selected.type == 'health' %}active{% endif %}">❤️ Health</a>
   </div>
 
   <div class="search-panel">
@@ -271,9 +310,10 @@
           </select>
         </div>
       </div>
+      <input type="hidden" name="type" value="{{ selected.type }}">
       <div class="button-row">
         <button type="submit" class="modern-btn btn-primary">Apply Filters</button>
-        <a href="{% url 'motor_points_audit_logs' %}" class="modern-btn btn-light">Clear</a>
+        <a href="{% url 'points_audit_logs' %}{% if selected.type %}?type={{ selected.type }}{% endif %}" class="modern-btn btn-light">Clear</a>
       </div>
     </form>
   </div>
@@ -312,28 +352,50 @@
             <td>{{ log.params.policy_holder_name|default:"-" }}</td>
             
             <td>
-              {% if log.params.product %}
-                <span class="text-muted">P:</span> {{ log.params.product }}<br>
+              {% if log.action == 'HEALTH_POINTS_SEARCH' %}
+                {% if log.params.product_name %}
+                  <span class="text-muted">P:</span> {{ log.params.product_name }}<br>
+                {% endif %}
+                {% if log.params.business_type %}
+                  <span class="text-muted">S:</span> {{ log.params.business_type }}
+                {% endif %}
+                {% if not log.params.product_name and not log.params.business_type %}-{% endif %}
+              {% else %}
+                {% if log.params.product %}
+                  <span class="text-muted">P:</span> {{ log.params.product }}<br>
+                {% endif %}
+                {% if log.params.sub_product %}
+                  <span class="text-muted">S:</span> {{ log.params.sub_product }}
+                {% endif %}
+                {% if not log.params.product and not log.params.sub_product %}-{% endif %}
               {% endif %}
-              {% if log.params.sub_product %}
-                <span class="text-muted">S:</span> {{ log.params.sub_product }}
-              {% endif %}
-              {% if not log.params.product and not log.params.sub_product %}-{% endif %}
             </td>
 
             <td style="white-space: normal;">
-              {% if log.params.make_names %}<b>Make:</b> {{ log.params.make_names }}<br>{% endif %}
-              {% if log.params.make_model_class %}<b>Class:</b> {{ log.params.make_model_class }}<br>{% endif %}
-              
-              {% if log.params.rto_code %}<b>RTO:</b> {{ log.params.rto_code }} &nbsp;|&nbsp; {% endif %}
-              {% if log.params.mfg_year %}<b>Year:</b> {{ log.params.mfg_year }} &nbsp;|&nbsp; {% endif %}
-              {% if log.params.fuel %}<b>Fuel:</b> {{ log.params.fuel }}<br>{% endif %}
-              
-              {% if log.params.cc %}<b>CC:</b> {{ log.params.cc }} &nbsp;|&nbsp; {% endif %}
-              {% if log.params.sc %}<b>SC:</b> {{ log.params.sc }}{% endif %}
-              
-              {% if not log.params.make_names and not log.params.make_model_class and not log.params.rto_code and not log.params.mfg_year and not log.params.cc %}
-                -
+              {% if log.action == 'HEALTH_POINTS_SEARCH' %}
+                {% if log.params.policy_category %}<b>Plan Type:</b> {{ log.params.policy_category }}<br>{% endif %}
+                {% if log.params.sum_insured %}<b>Sum Assured:</b> {{ log.params.sum_insured }}<br>{% endif %}
+                {% if log.params.age %}<b>Age:</b> {{ log.params.age }} &nbsp;|&nbsp; {% endif %}
+                {% if log.params.pincode %}<b>Pincode:</b> {{ log.params.pincode }} &nbsp;|&nbsp; {% endif %}
+                {% if log.params.policy_term %}<b>Policy Term:</b> {{ log.params.policy_term }} Yr{% endif %}
+
+                {% if not log.params.policy_category and not log.params.sum_insured and not log.params.age and not log.params.pincode and not log.params.policy_term %}
+                  -
+                {% endif %}
+              {% else %}
+                {% if log.params.make_names %}<b>Make:</b> {{ log.params.make_names }}<br>{% endif %}
+                {% if log.params.make_model_class %}<b>Class:</b> {{ log.params.make_model_class }}<br>{% endif %}
+
+                {% if log.params.rto_code %}<b>RTO:</b> {{ log.params.rto_code }} &nbsp;|&nbsp; {% endif %}
+                {% if log.params.mfg_year %}<b>Year:</b> {{ log.params.mfg_year }} &nbsp;|&nbsp; {% endif %}
+                {% if log.params.fuel %}<b>Fuel:</b> {{ log.params.fuel }}<br>{% endif %}
+
+                {% if log.params.cc %}<b>CC:</b> {{ log.params.cc }} &nbsp;|&nbsp; {% endif %}
+                {% if log.params.sc %}<b>SC:</b> {{ log.params.sc }}{% endif %}
+
+                {% if not log.params.make_names and not log.params.make_model_class and not log.params.rto_code and not log.params.mfg_year and not log.params.cc %}
+                  -
+                {% endif %}
               {% endif %}
             </td>
 

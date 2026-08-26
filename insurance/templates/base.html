@@ -376,8 +376,8 @@
                 {% endif %}
                 {% if 'Can_View_Motor_Points_Logs' in nav_pages %}
                 <li class="nav-item">
-                    <a href="{% url 'motor_points_audit_logs' %}" class="nav-link {% if request.path == '/motor-points-logs/' %}active{% endif %}">
-                        <i class="bi bi-journal-text"></i> Motor Points Logs
+                    <a href="{% url 'points_audit_logs' %}" class="nav-link {% if request.path == '/points-logs/' %}active{% endif %}">
+                        <i class="bi bi-journal-text"></i> Points Logs
                     </a>
                 </li>
                 {% endif %}

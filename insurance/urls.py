@@ -186,7 +186,11 @@ urlpatterns = [
         name="password_reset_complete"
     ),
 
-    path('motor-points-logs/', page_access_required("Can_View_Motor_Points_Logs")(views.motor_points_audit_logs), name='motor_points_audit_logs'),
+    # Permission group is still named Can_View_Motor_Points_Logs (unchanged)
+    # even though the page itself now covers both Motor and Health search
+    # logs -- renaming the group would silently drop access for every user
+    # it's already assigned to (see insurance/migrations/0021_seed_page_access_groups.py).
+    path('points-logs/', page_access_required("Can_View_Motor_Points_Logs")(views.points_audit_logs), name='points_audit_logs'),
 
     # ==========================================
     # AUTOMATED MIS PAYOUT CALCULATION ROUTES

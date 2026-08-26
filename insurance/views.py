@@ -3096,6 +3096,9 @@ def _run_health_payout_search(request):
     """
     has_searched = bool(request.GET)
 
+    if has_searched:
+        _log_health_points_search(request)
+
     today_str = datetime.today().strftime("%Y-%m-%d")
     target_date = (request.GET.get("target_date") or today_str).strip()
     policy_term = (request.GET.get("policy_term") or "1").strip()
@@ -3478,7 +3481,7 @@ def _log_motor_points_search(request):
     """Record a MOTOR_POINTS_SEARCH audit log entry from the current request's
     GET params. Shared by every "Check Eligibility" search page (Rate Checker,
     Motor Payout Rates Checker, ...) so they all feed the same
-    /motor-points-logs/ audit trail in the same format."""
+    /points-logs/ audit trail in the same format."""
     flat_params = {}
     for key in request.GET.keys():
         val = request.GET.get(key, "").strip()
@@ -3489,6 +3492,29 @@ def _log_motor_points_search(request):
         AuditLog.objects.create(
             user=request.user if request.user.is_authenticated else None,
             action="MOTOR_POINTS_SEARCH",
+            details=str(flat_params)
+        )
+
+
+def _log_health_points_search(request):
+    """Record a HEALTH_POINTS_SEARCH audit log entry from the current
+    request's GET params, so the Health Points Checker feeds the same
+    /points-logs/ audit trail as the Motor search pages. Unlike
+    _log_motor_points_search, Insurer (insurance_company) is a multi-select
+    field on this form, so it's read with getlist() and joined rather than
+    losing every value but the last."""
+    flat_params = {}
+    for key in request.GET.keys():
+        if key == "csrfmiddlewaretoken":
+            continue
+        values = [v.strip() for v in request.GET.getlist(key) if v and v.strip()]
+        if values:
+            flat_params[key] = ", ".join(values)
+
+    if flat_params:
+        AuditLog.objects.create(
+            user=request.user if request.user.is_authenticated else None,
+            action="HEALTH_POINTS_SEARCH",
             details=str(flat_params)
         )
 
@@ -4513,12 +4539,31 @@ def grid_management(request):
     return render(request, "grid_management.html", {"documents": documents})
 
 # -------------------------
-# MOTOR POINTS AUDIT LOGS
+# POINTS AUDIT LOGS (Motor + Health "Check Eligibility" search trail)
 # -------------------------
-def motor_points_audit_logs(request):
+# Kept in sync with POINTS_SEARCH_ACTIONS in insurance/tasks.py (the 7-day
+# purge job).
+POINTS_SEARCH_ACTIONS = ["MOTOR_POINTS_SEARCH", "HEALTH_POINTS_SEARCH"]
+
+def points_audit_logs(request):
     retention_cutoff = timezone.now() - timedelta(days=7)
+
+    type_filter = (request.GET.get("type") or "").strip().lower()
+    action_filter = {
+        "motor": ["MOTOR_POINTS_SEARCH"],
+        "health": ["HEALTH_POINTS_SEARCH"],
+    }.get(type_filter, POINTS_SEARCH_ACTIONS)
+
+    # Other active filters (vehicle_no, username, ...), preserved when a
+    # Motor/Health/All toggle link is clicked so switching type doesn't
+    # silently drop them. Trailing "&" so the template can just append
+    # "type=...", even when this is empty.
+    _qs_without_type = request.GET.copy()
+    _qs_without_type.pop("type", None)
+    filter_base_qs = _qs_without_type.urlencode() + "&" if _qs_without_type else ""
+
     qs = AuditLog.objects.filter(
-        action="MOTOR_POINTS_SEARCH", timestamp__gte=retention_cutoff
+        action__in=action_filter, timestamp__gte=retention_cutoff
     ).select_related("user").order_by("-timestamp")
 
     vehicle_no_filter = (request.GET.get("vehicle_no") or "").strip()
@@ -4536,9 +4581,9 @@ def motor_points_audit_logs(request):
         qs = qs.filter(user__username__icontains=username_filter)
 
     logs = qs[:500]
-    
+
     all_logs_for_dropdowns = AuditLog.objects.filter(
-        action="MOTOR_POINTS_SEARCH", timestamp__gte=retention_cutoff
+        action__in=action_filter, timestamp__gte=retention_cutoff
     ).select_related("user").order_by("-timestamp")[:1000]
     unique_vehicles = set()
     unique_holders = set()
@@ -4616,17 +4661,19 @@ def motor_points_audit_logs(request):
         except Exception:
             log.params = {}
 
-    return render(request, "motor_points_audit_logs.html", {
+    return render(request, "points_audit_logs.html", {
         "logs": logs,
         "unique_vehicles": sorted(list(unique_vehicles)),
         "unique_holders": sorted(list(unique_holders)),
         "unique_companies": sorted(list(unique_companies)),
         "unique_users": sorted(list(unique_users)),
+        "filter_base_qs": filter_base_qs,
         "selected": {
             "vehicle_no": vehicle_no_filter,
             "policy_holder_name": policy_holder_name_filter,
             "insurance_company": insurance_company_filter,
             "username": username_filter,
+            "type": type_filter,
         }
     })
 

@@ -264,8 +264,8 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 from celery.schedules import crontab  # noqa: E402
 
 CELERY_BEAT_SCHEDULE = {
-    "cleanup-motor-points-search-logs": {
-        "task": "insurance.tasks.cleanup_motor_points_search_logs",
+    "cleanup-points-search-logs": {
+        "task": "insurance.tasks.cleanup_points_search_logs",
         "schedule": crontab(hour=2, minute=0),
     },
     "cleanup-security-audit-logs": {
