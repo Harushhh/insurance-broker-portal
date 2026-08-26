@@ -1243,14 +1243,14 @@ def dashboard(request):
     is_ncb = (request.GET.get("is_ncb") or "").strip()
     is_cpa = (request.GET.get("is_cpa") or "").strip()
 
-    has_filter = any([
+    filter_count = sum(1 for v in [
         q, status_filter, is_deleted_filter, created_date, date_range,
         insurance_company, product, fuel, sub_product, make_model_class,
         rto_code, make_model_code, age_range, cc_range, sc_range,
         is_zd, is_ncb, is_cpa,
-    ])
+    ] if v)
 
-    if not has_filter:
+    if filter_count < 2:
         # No filter selected yet -- skip the expensive full-table query/scan
         # entirely and just render the filter form with an empty result set.
         return render(request, "dashboard.html", {
