@@ -4691,6 +4691,51 @@ class HealthPayoutRatesAPIView(APIView):
             "results": [serialize_row(row) for row in results],
         })
 
+
+class MakeModelMasterAPIView(APIView):
+    """
+    Reference-data helper for external API consumers (e.g. the tech
+    manager's system calling PolicyLockCheckerAPIView): returns the exact
+    strings valid for that endpoint's make_names, make_model_class, and
+    product query params, so callers don't have to guess spellings. Purely
+    read-only reference data -- secured the same way as the other
+    server-to-server endpoints.
+    """
+    permission_classes = [HasAPIKey]
+
+    def get(self, request):
+        # Same cluster-token extraction as make_name_list in
+        # policy_lock_checker -- these are the individual tokens
+        # strict_match_in_cluster actually matches against, not the raw
+        # make_model_name column.
+        make_names = sorted({
+            item.strip()
+            for value in MakeModelMaster.objects.exclude(make_model_cluster__isnull=True)
+            .exclude(make_model_cluster="")
+            .values_list("make_model_cluster", flat=True)
+            for item in str(value).split(",")
+            if item.strip()
+        })
+
+        make_model_class = list(
+            MakeModelClassMaster.objects.exclude(name__iexact="NA")
+            .values_list("name", flat=True)
+            .distinct()
+            .order_by("name")
+        )
+
+        product = list(
+            ProductMaster.objects.values_list("name", flat=True)
+            .distinct()
+            .order_by("name")
+        )
+
+        return Response({
+            "make_names": make_names,
+            "make_model_class": make_model_class,
+            "product": product,
+        })
+
 # -------------------------
 # MIS REVIEW
 # -------------------------
