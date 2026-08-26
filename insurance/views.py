@@ -4493,8 +4493,11 @@ def grid_management(request):
 # MOTOR POINTS AUDIT LOGS
 # -------------------------
 def motor_points_audit_logs(request):
-    qs = AuditLog.objects.filter(action="MOTOR_POINTS_SEARCH").select_related("user").order_by("-timestamp")
-    
+    retention_cutoff = timezone.now() - timedelta(days=7)
+    qs = AuditLog.objects.filter(
+        action="MOTOR_POINTS_SEARCH", timestamp__gte=retention_cutoff
+    ).select_related("user").order_by("-timestamp")
+
     vehicle_no_filter = (request.GET.get("vehicle_no") or "").strip()
     policy_holder_name_filter = (request.GET.get("policy_holder_name") or "").strip()
     insurance_company_filter = (request.GET.get("insurance_company") or "").strip()
@@ -4511,7 +4514,9 @@ def motor_points_audit_logs(request):
 
     logs = qs[:500]
     
-    all_logs_for_dropdowns = AuditLog.objects.filter(action="MOTOR_POINTS_SEARCH").select_related("user").order_by("-timestamp")[:1000]
+    all_logs_for_dropdowns = AuditLog.objects.filter(
+        action="MOTOR_POINTS_SEARCH", timestamp__gte=retention_cutoff
+    ).select_related("user").order_by("-timestamp")[:1000]
     unique_vehicles = set()
     unique_holders = set()
     unique_companies = set()

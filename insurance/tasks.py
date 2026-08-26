@@ -1,6 +1,20 @@
 from celery import shared_task
 
 
+@shared_task
+def cleanup_motor_points_search_logs():
+    """Delete MOTOR_POINTS_SEARCH audit logs older than the 7-day retention window."""
+    from datetime import timedelta
+    from django.utils import timezone
+    from .models import AuditLog
+
+    cutoff = timezone.now() - timedelta(days=7)
+    deleted_count, _ = AuditLog.objects.filter(
+        action="MOTOR_POINTS_SEARCH", timestamp__lt=cutoff
+    ).delete()
+    return deleted_count
+
+
 @shared_task(
     bind=True,
     max_retries=2,

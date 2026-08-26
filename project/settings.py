@@ -259,6 +259,17 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ACKS_LATE = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
+# Periodic jobs, run by a `celery -A project beat` process (see Procfile's
+# `beat` entry). Requires that process to actually be deployed/running.
+from celery.schedules import crontab  # noqa: E402
+
+CELERY_BEAT_SCHEDULE = {
+    "cleanup-motor-points-search-logs": {
+        "task": "insurance.tasks.cleanup_motor_points_search_logs",
+        "schedule": crontab(hour=2, minute=0),
+    },
+}
+
 # =========================================================
 # CACHE (used for login-attempt throttling)
 # =========================================================
