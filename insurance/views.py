@@ -3088,7 +3088,12 @@ def _build_health_payout_queryset(request, target_date, rate_field):
     return qs
 
 
-def health_payout_rates(request):
+def _run_health_payout_search(request):
+    """
+    Core eligibility search shared by the health_payout_rates HTML page
+    and HealthPayoutRatesAPIView. Returns (results, total_found, has_more,
+    has_searched, selected).
+    """
     has_searched = bool(request.GET)
 
     today_str = datetime.today().strftime("%Y-%m-%d")
@@ -3111,6 +3116,24 @@ def health_payout_rates(request):
             term_rate = getattr(row, rate_field)
             row.applicable_rate = term_rate if term_rate is not None else row.payin_rate
             results.append(row)
+
+    selected = {
+        "product_name": (request.GET.get("product_name") or "").strip(),
+        "business_type": (request.GET.get("business_type") or "").strip(),
+        "policy_category": (request.GET.get("policy_category") or "").strip(),
+        "sum_insured": (request.GET.get("sum_insured") or "").strip(),
+        "age": (request.GET.get("age") or "").strip(),
+        "pincode": (request.GET.get("pincode") or "").strip(),
+        "insurance_companies": [c for c in request.GET.getlist("insurance_company") if c],
+        "target_date": target_date,
+        "policy_term": policy_term,
+    }
+
+    return results, total_found, has_more, has_searched, selected
+
+
+def health_payout_rates(request):
+    results, total_found, has_more, has_searched, selected = _run_health_payout_search(request)
 
     product_list = HealthRateMaster.objects.exclude(product_name__isnull=True).exclude(
         product_name=""
@@ -3136,17 +3159,7 @@ def health_payout_rates(request):
         "category_list": category_list,
         "insurer_list": insurer_list,
         "sum_insured_options": HEALTH_SUM_INSURED_OPTIONS,
-        "selected": {
-            "product_name": (request.GET.get("product_name") or "").strip(),
-            "business_type": (request.GET.get("business_type") or "").strip(),
-            "policy_category": (request.GET.get("policy_category") or "").strip(),
-            "sum_insured": (request.GET.get("sum_insured") or "").strip(),
-            "age": (request.GET.get("age") or "").strip(),
-            "pincode": (request.GET.get("pincode") or "").strip(),
-            "insurance_companies": [c for c in request.GET.getlist("insurance_company") if c],
-            "target_date": target_date,
-            "policy_term": policy_term,
-        },
+        "selected": selected,
     })
 
 # -------------------------
@@ -4639,8 +4652,51 @@ class PolicyLockCheckerAPIView(APIView):
             "results": [serialize_row(row) for row in results],
         })
 
+
+class HealthPayoutRatesAPIView(APIView):
+    """
+    Server-to-server JSON equivalent of health_payout_rates (the Health
+    Points Checker's "Check Eligibility" search): same eligibility-matching
+    logic via _run_health_payout_search / _build_health_payout_queryset,
+    secured with a rest_framework_api_key key instead of a session login --
+    same pattern as PolicyLockCheckerAPIView.
+    """
+    permission_classes = [HasAPIKey]
+
+    def get(self, request):
+        results, total_found, has_more, has_searched, selected = _run_health_payout_search(request)
+
+        def serialize_row(row):
+            return {
+                "id": row.id,
+                "insurance_company": row.insurance_company,
+                "product_name": row.product_name,
+                "policy_category": row.policy_category,
+                "business_type": row.business_type,
+                "min_sum_insured": row.min_sum_insured,
+                "max_sum_insured": row.max_sum_insured,
+                "min_age": row.min_age,
+                "max_age": row.max_age,
+                "pincode_zone": row.pincode_zone,
+                "policy_term": selected["policy_term"],
+                "applicable_rate": row.applicable_rate,
+                "payin_rate": row.payin_rate,
+                "status": row.status,
+                "from_date": row.from_date,
+                "to_date": row.to_date,
+            }
+
+        return Response({
+            "has_searched": has_searched,
+            "total_found": total_found,
+            "has_more": has_more,
+            "max_results": HEALTH_PAYOUT_MAX_RESULTS,
+            "filters": selected,
+            "results": [serialize_row(row) for row in results],
+        })
+
 # -------------------------
-# MIS REVIEW 
+# MIS REVIEW
 # -------------------------
 def mis_review(request, pk):
     record = get_object_or_404(PolicyMISRecord.objects.select_related('source_document'), pk=pk)

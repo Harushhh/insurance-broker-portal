@@ -208,6 +208,7 @@ urlpatterns = [
     # route below: this is meant to be called server-to-server, not from a
     # logged-in browser, so it deliberately skips page_access_required.
     path('api/policy-lock-checker/', views.PolicyLockCheckerAPIView.as_view(), name='api_policy_lock_checker'),
+    path('api/health-payout-rates/', views.HealthPayoutRatesAPIView.as_view(), name='api_health_payout_rates'),
 
     # Inbound partner-portal SSO handoff (see insurance/sso.py). Both routes
     # are intentionally public/unauthenticated -- issue-ticket is gated by
