@@ -2715,7 +2715,30 @@ def _build_health_rate_queryset(request):
     deductible_range = (request.GET.get("deductible_range") or "").strip()
 
     if q:
-        qs = qs.filter(Q(insurance_company__icontains=q) | Q(plan_names__icontains=q))
+        # Supports plain text search (insurer/plan name) plus an ID lookup --
+        # the table displays each row's id as "h-<id>" (see health_rate_master.html),
+        # so accept that same "h-" prefix here (and a comma-separated list of
+        # them), alongside a bare numeric id. Only switches into ID-list mode
+        # when EVERY comma-separated token looks like an id -- otherwise q may
+        # be a genuine text search that happens to contain a comma, so it
+        # falls through to the plain insurer/plan-name match untouched.
+        id_tokens = []
+        for part in q.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if part[:2].lower() == "h-":
+                part = part[2:]
+            if part.isdigit():
+                id_tokens.append(int(part))
+            else:
+                id_tokens = None
+                break
+
+        text_match = Q(insurance_company__icontains=q) | Q(plan_names__icontains=q)
+        if id_tokens:
+            text_match |= Q(pk__in=id_tokens)
+        qs = qs.filter(text_match)
     if insurance_company:
         qs = qs.filter(insurance_company=insurance_company)
     if product_name:

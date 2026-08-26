@@ -196,7 +196,7 @@
                 </div>
                 <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                     <label class="text-overline">Status</label>
-                    <select name="status" class="form-select-premium">
+                    <select name="status" class="form-select-premium select2-searchable">
                         <option value="">All</option>
                         <option value="UNLOCKED" {% if selected.status == 'UNLOCKED' or selected.status == 'ACTIVE' %}selected{% endif %}>🔓 UNLOCKED</option>
                         <option value="LOCKED" {% if selected.status == 'LOCKED' or selected.status == 'INACTIVE' %}selected{% endif %}>🔒 LOCKED</option>
@@ -470,7 +470,7 @@
             $(this).val('');
         });
 
-        $('.select2-searchable').select2({ width: '100%', placeholder: "Search..." });
+        $('.select2-searchable').select2({ width: '100%', placeholder: "Search...", allowClear: true });
 
         $('.modal-select2').select2({
             width: '100%',

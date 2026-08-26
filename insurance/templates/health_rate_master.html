@@ -145,8 +145,8 @@
         <form method="GET" action="{% url 'health_rate_master' %}" id="healthFilterForm">
             <div class="row g-3 mb-3">
                 <div class="col-12 col-md-4 col-lg-3 col-xl-2">
-                    <label class="text-overline">Search</label>
-                    <input type="text" name="q" placeholder="Insurer or plan name" value="{{ selected.q|default_if_none:'' }}" class="form-control-premium">
+                    <label class="text-overline">Search / ID</label>
+                    <input type="text" name="q" placeholder="Insurer, plan name, or ID (e.g. h-2183)" value="{{ selected.q|default_if_none:'' }}" class="form-control-premium">
                 </div>
                 <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                     <label class="text-overline">Insurer</label>
@@ -186,7 +186,7 @@
                 </div>
                 <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                     <label class="text-overline">Status</label>
-                    <select name="status" class="form-select-premium">
+                    <select name="status" class="form-select-premium select2-searchable">
                         <option value="">All</option>
                         <option value="ACTIVE" {% if selected.status == 'ACTIVE' %}selected{% endif %}>✅ ACTIVE</option>
                         <option value="INACTIVE" {% if selected.status == 'INACTIVE' %}selected{% endif %}>⛔ INACTIVE</option>
@@ -395,7 +395,7 @@
             $(this).val('');
         });
 
-        $('.select2-searchable').select2({ width: '100%', placeholder: "Search..." });
+        $('.select2-searchable').select2({ width: '100%', placeholder: "Search...", allowClear: true });
         $('.modal-select2').select2({ width: '100%', dropdownParent: $('#bulkModal') });
 
         const hasAdvancedData = {% if selected.pincode_zone or selected.pincode or selected.date_range or selected.sum_insured_range or selected.age_range or selected.deductible_range or selected.is_deleted %}true{% else %}false{% endif %};
