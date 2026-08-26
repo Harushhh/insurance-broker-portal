@@ -3461,7 +3461,12 @@ def motor_payout_rates_more(request):
 # -------------------------
 # POLICY LOCK CHECKER
 # -------------------------
-def policy_lock_checker(request):
+def _run_policy_lock_checker_search(request):
+    """
+    Core search/filter/dedup logic shared by the policy_lock_checker HTML
+    page and PolicyLockCheckerAPIView. Returns (results, has_searched, selected)
+    -- everything the two callers need, minus the HTML-only dropdown lists.
+    """
     has_searched = bool(request.GET)
 
     if has_searched:
@@ -3473,7 +3478,7 @@ def policy_lock_checker(request):
         
         if flat_params:
             AuditLog.objects.create(
-                user=request.user,
+                user=request.user if request.user.is_authenticated else None,
                 action="MOTOR_POINTS_SEARCH",
                 details=str(flat_params)
             )
@@ -3706,6 +3711,30 @@ def policy_lock_checker(request):
 
     results = sorted(best_by_key.values(), key=lambda r: r.effective_rate, reverse=True)[:300]
 
+    selected = {
+        "target_date": target_date,
+        "vehicle_no": vehicle_no,
+        "policy_holder_name": policy_holder_name,
+        "product": product,
+        "make_model_class": make_model_class,
+        "sub_product": sub_product,
+        "make_names": make_names,
+        "rto_code": rto_code,
+        "cc": cc,
+        "fuel": fuel,
+        "sc": sc,
+        "mfg_year": mfg_year,
+        "is_zd": is_zd,
+        "is_cpa": is_cpa,
+        "is_ncb": is_ncb,
+    }
+
+    return results, has_searched, selected
+
+
+def policy_lock_checker(request):
+    results, has_searched, selected = _run_policy_lock_checker_search(request)
+
     make_name_list = sorted({
         item.strip()
         for value in MakeModelMaster.objects.exclude(make_model_cluster__isnull=True)
@@ -3722,29 +3751,13 @@ def policy_lock_checker(request):
         "product_list": ProductMaster.objects.all().order_by("name"),
         "sub_product_list": SubProductMaster.objects.all().order_by("name"),
         "fuel_list": FuelTypeMaster.objects.all().order_by("name"),
-        "make_model_class_list": get_dynamic_make_model_class_list(product),
+        "make_model_class_list": get_dynamic_make_model_class_list(selected["product"]),
         "make_name_list": make_name_list,
-        
+
         "make_class_mapping_json": json.dumps(NA_MAKE_MODEL_MAP),
         "all_make_classes_json": json.dumps(list(MakeModelClassMaster.objects.exclude(name__iexact="NA").values('id', 'name'))),
-        
-        "selected": {
-            "target_date": target_date,
-            "vehicle_no": vehicle_no,
-            "policy_holder_name": policy_holder_name,
-            "product": product,
-            "make_model_class": make_model_class,
-            "sub_product": sub_product,
-            "make_names": make_names,
-            "rto_code": rto_code,
-            "cc": cc,
-            "fuel": fuel,
-            "sc": sc,
-            "mfg_year": mfg_year,
-            "is_zd": is_zd,
-            "is_cpa": is_cpa,
-            "is_ncb": is_ncb,
-        }
+
+        "selected": selected,
     })
 
 # -------------------------
@@ -4580,9 +4593,51 @@ def motor_points_audit_logs(request):
 # REST API ENDPOINTS
 # =========================================================
 class ExportRatesAPIView(generics.ListAPIView):
-    permission_classes = [HasAPIKey] 
-    queryset = RateMaster.objects.filter(is_deleted="NO") 
+    permission_classes = [HasAPIKey]
+    queryset = RateMaster.objects.filter(is_deleted="NO")
     serializer_class = RateMasterSerializer
+
+
+class PolicyLockCheckerAPIView(APIView):
+    """
+    Server-to-server JSON equivalent of policy_lock_checker (the Motor
+    Points page): same search/filter/dedup logic via
+    _run_policy_lock_checker_search, secured with a rest_framework_api_key
+    key instead of a session login -- same pattern as IssueSSOTicketAPIView.
+    """
+    permission_classes = [HasAPIKey]
+
+    def get(self, request):
+        results, has_searched, selected = _run_policy_lock_checker_search(request)
+
+        def serialize_row(row):
+            return {
+                "group_id": row.display_group_id,
+                "insurance_company": row.insurance_company,
+                "product": row.product.name if row.product else None,
+                "sub_product": row.sub_product.name if row.sub_product else None,
+                "make_model_class": row.display_make_model_class,
+                "fuel_type": row.fuel_type.name if row.fuel_type else None,
+                "tariff_min": row.tariff_min,
+                "tariff_max": row.tariff_max,
+                "po_type": row.po_type,
+                "po_od_rate": row.po_od_rate,
+                "po_tp_rate": row.po_tp_rate,
+                "po_net_rate": row.po_net_rate,
+                "po_flat_amount": row.po_flat_amount,
+                "effective_rate": row.effective_rate,
+                "status": row.status,
+                "lock_status": row.lock_status,
+                "from_date": row.from_date,
+                "to_date": row.to_date,
+            }
+
+        return Response({
+            "has_searched": has_searched,
+            "total_found": len(results),
+            "filters": selected,
+            "results": [serialize_row(row) for row in results],
+        })
 
 # -------------------------
 # MIS REVIEW 
