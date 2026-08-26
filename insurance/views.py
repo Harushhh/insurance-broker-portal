@@ -4766,23 +4766,20 @@ class HealthPayoutRatesAPIView(APIView):
         results, total_found, has_more, has_searched, selected = _run_health_payout_search(request)
 
         def serialize_row(row):
+            # Mirrors the "Valid Matches Found" table in health_payout_rates.html
+            # (see the {% for row in data %} block there) so the API's values
+            # render exactly like the web page's, string-for-string -- payouts
+            # are always on a NET 1 Year basis regardless of the policy term
+            # searched, so this is intentionally not derived from policy_term.
+            rate = row.applicable_rate
+            applicable_rate = f"{rate:.2f}%" if rate is not None else "-%"
+
             return {
-                "id": row.id,
-                "insurance_company": row.insurance_company,
-                "product_name": row.product_name,
-                "policy_category": row.policy_category,
-                "business_type": row.business_type,
-                "min_sum_insured": row.min_sum_insured,
-                "max_sum_insured": row.max_sum_insured,
-                "min_age": row.min_age,
-                "max_age": row.max_age,
-                "pincode_zone": row.pincode_zone,
-                "policy_term": selected["policy_term"],
-                "applicable_rate": row.applicable_rate,
-                "payin_rate": row.payin_rate,
-                "status": row.status,
-                "from_date": row.from_date,
-                "to_date": row.to_date,
+                "id": f"h-{row.id}",
+                "insurer": row.insurance_company,
+                "applicable_rate": applicable_rate,
+                "payout_type": "NET 1 Year",
+                "plans": row.plan_names or "-",
             }
 
         return Response({
