@@ -2486,6 +2486,46 @@ def bulk_update_rates(request):
 
 MIS_HEALTH_BATCH_SIZE = 50
 
+# Fields shown in the Policy Details column's collapsed summary before "View
+# Details" is clicked. payload's keys are whatever column headers the
+# uploaded MIS file actually had (see mapping_engine._extract_failed_rows_from_df
+# — it keeps the source file's own header text), so these are matched as
+# case-insensitive substrings rather than exact keys.
+POLICY_DETAILS_SUMMARY_TARGETS = ["vehicle make", "model", "policy type", "sub product"]
+POLICY_DETAILS_SUMMARY_LIMIT = 3
+
+
+def _split_payload_summary(payload):
+    """
+    Pick up to POLICY_DETAILS_SUMMARY_LIMIT of a MISFailedRow's most
+    identifying payload fields for the table row's collapsed view; everything
+    else is returned separately for the "View Details" expansion. Falls back
+    to the first few payload entries if none of the target fields are present
+    (e.g. a Health row with no vehicle columns), so the summary is never blank
+    while payload itself has data.
+    """
+    items = [(k, v) for k, v in (payload or {}).items() if v not in (None, "")]
+
+    summary = []
+    used_keys = set()
+    for target in POLICY_DETAILS_SUMMARY_TARGETS:
+        if len(summary) >= POLICY_DETAILS_SUMMARY_LIMIT:
+            break
+        for k, v in items:
+            if k in used_keys:
+                continue
+            if target in k.strip().lower():
+                summary.append((k, v))
+                used_keys.add(k)
+                break
+
+    if not summary:
+        summary = items[:POLICY_DETAILS_SUMMARY_LIMIT]
+        used_keys = {k for k, _ in summary}
+
+    rest = [(k, v) for k, v in items if k not in used_keys]
+    return summary, rest
+
 
 def _sync_unsynced_mis_files():
     """
@@ -2714,6 +2754,7 @@ def rate_master_health(request):
             r.mis_file.uploaded_file.name.rsplit("/", 1)[-1]
             if r.mis_file.uploaded_file else f"File #{r.mis_file_id}"
         )
+        r.payload_summary, r.payload_rest = _split_payload_summary(r.payload)
 
     insurer_list = list(
         MISFailedRow.objects.exclude(insurer__isnull=True).exclude(insurer="")

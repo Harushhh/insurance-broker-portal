@@ -95,10 +95,33 @@
     .pager .page-num { min-width: 36px; text-align: center; }
     .pager .page-num.active { background: #2563eb; color: #fff; border-color: #2563eb; }
 
-    /* Policy details chip grid — same pattern as the Support Tickets "Captured Search Data" column. */
+    /* Policy details chip grid — same pattern as the Support Tickets "Captured Search Data" column.
+       Collapsed by default (payload_summary, 2-3 fields) with the rest of the
+       payload (payload_rest) behind a "View Details" toggle, laid out as a
+       dense 2-3 column grid rather than one field per line. */
     .payload-list { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 6px; }
     .payload-list li { background: #f8fafc; padding: 4px 8px; border-radius: 6px; border: 1px solid #e2e8f0; font-size: 11px; color: #334155; }
     .payload-key { font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.05em; margin-right: 2px; }
+
+    .payload-toggle {
+        display: inline-flex; align-items: center; gap: 5px; margin-top: 6px;
+        background: none; border: none; padding: 0; cursor: pointer;
+        font-size: 11px; font-weight: 700; color: #2563eb;
+    }
+    .payload-toggle:hover { color: #1d4ed8; text-decoration: underline; }
+    .payload-toggle i { transition: transform 0.15s ease; }
+    .payload-toggle.expanded i { transform: rotate(180deg); }
+    .payload-toggle .hide-label { display: none; }
+    .payload-toggle.expanded .show-label { display: none; }
+    .payload-toggle.expanded .hide-label { display: inline; }
+
+    .payload-grid {
+        list-style: none; margin: 8px 0 0; padding: 8px 0 0; border-top: 1px dashed #e2e8f0;
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px;
+    }
+    .payload-grid li { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 5px 8px; }
+    .payload-grid .payload-key { display: block; font-size: 9px; margin: 0 0 2px; }
+    .payload-grid .payload-value { display: block; font-size: 12px; font-weight: 600; color: #0f172a; word-break: break-word; }
 
     .fix-mapping-link {
         display: inline-flex; align-items: center; gap: 6px; margin: 0 4px 4px 0;
@@ -262,12 +285,25 @@
                             </td>
                             <td class="cell-wrap">
                                 <ul class="payload-list">
-                                    {% for key, value in r.payload.items %}
-                                        {% if value %}
-                                            <li><span class="payload-key">{{ key }}:</span> {{ value }}</li>
-                                        {% endif %}
+                                    {% for key, value in r.payload_summary %}
+                                        <li><span class="payload-key">{{ key }}:</span> {{ value }}</li>
                                     {% endfor %}
                                 </ul>
+                                {% if r.payload_rest %}
+                                    <button type="button" class="payload-toggle" onclick="togglePolicyDetails(this)">
+                                        <i class="bi bi-chevron-down"></i>
+                                        <span class="show-label">View {{ r.payload_rest|length }} more detail{{ r.payload_rest|length|pluralize }}</span>
+                                        <span class="hide-label">Hide details</span>
+                                    </button>
+                                    <ul class="payload-grid" hidden>
+                                        {% for key, value in r.payload_rest %}
+                                            <li>
+                                                <span class="payload-key">{{ key }}</span>
+                                                <span class="payload-value">{{ value }}</span>
+                                            </li>
+                                        {% endfor %}
+                                    </ul>
+                                {% endif %}
                             </td>
                             <td>
                                 {% if r.group_ids %}
@@ -668,6 +704,12 @@
     $(document).ready(function () {
         $('.select2-searchable').select2({ width: '100%', placeholder: "Search..." });
     });
+
+    function togglePolicyDetails(btn) {
+        var list = btn.nextElementSibling;
+        list.hidden = !list.hidden;
+        btn.classList.toggle('expanded', !list.hidden);
+    }
 
     (function () {
         var tabFilterRecords = document.getElementById('tabFilterRecords');
