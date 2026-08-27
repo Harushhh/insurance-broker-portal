@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load custom_filters %}
 {% block title %}Grid Management{% endblock %}
 
 {% block content %}
@@ -42,6 +43,28 @@
         filter: brightness(0.95);
         box-shadow: 0 4px 6px rgba(0,0,0,0.05);
     }
+
+    /* Status summary / filter cards */
+    .gm-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .gm-stat-card {
+        background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 18px 20px;
+        display: block; text-decoration: none; cursor: pointer; transition: all 0.15s ease;
+        box-shadow: 0 2px 4px rgba(15, 23, 42, 0.03);
+    }
+    .gm-stat-card:hover { transform: translateY(-2px); box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08); border-color: #cbd5e1; }
+    .gm-stat-card .gm-count { display: block; font-size: 28px; font-weight: 800; color: #0f172a; line-height: 1; }
+    .gm-stat-card.selected { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15); }
+    .gm-stat-card.selected .gm-count { color: #2563eb; }
+
+    .gm-pill {
+        display: inline-flex; align-items: center; gap: 5px; margin-top: 10px;
+        font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em;
+        padding: 3px 10px; border-radius: 20px; border: 1px solid transparent;
+    }
+    .gm-pill-all { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
+    .gm-pill-pending { background: #fef9c3; color: #854d0e; border-color: #fde047; }
+    .gm-pill-follow-up { background: #dbeafe; color: #1e3a8a; border-color: #93c5fd; }
+    .gm-pill-done { background: #dcfce7; color: #166534; border-color: #86efac; }
 </style>
 
 <div class="card" style="padding: 30px;">
@@ -53,6 +76,22 @@
         <button class="btn primary" onclick="openModal('uploadGridModal')" style="padding:12px 24px; font-weight:600; border-radius:10px;">
             + Upload New Grid
         </button>
+    </div>
+
+    <div class="gm-stat-grid">
+        <a href="?status=all" class="gm-stat-card {% if not selected_status %}selected{% endif %}">
+            <span class="gm-count">{{ total_all }}</span>
+            <span class="gm-pill gm-pill-all">📁 All</span>
+        </a>
+        {% for code, label in status_choices %}
+            <a href="?status={{ code|urlencode }}" class="gm-stat-card {% if selected_status == code %}selected{% endif %}">
+                <span class="gm-count">{{ status_counts|get_item:code|default:0 }}</span>
+                <span class="gm-pill gm-pill-{{ code|lower }}">
+                    {% if code == 'PENDING' %}⏳{% elif code == 'FOLLOW-UP' %}🔄{% elif code == 'DONE' %}✅{% endif %}
+                    {{ label }}
+                </span>
+            </a>
+        {% endfor %}
     </div>
 
     <div style="overflow-x:auto; border:1px solid var(--border); border-radius:12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
@@ -101,7 +140,11 @@
                 {% empty %}
                 <tr>
                     <td colspan="6" style="padding:40px; text-align:center; color:#64748b;">
-                        No grids uploaded yet. Click the upload button to add your first file!
+                        {% if selected_status %}
+                            No grids with this status. <a href="?status=all">Clear the filter</a> to see all uploads.
+                        {% else %}
+                            No grids uploaded yet. Click the upload button to add your first file!
+                        {% endif %}
                     </td>
                 </tr>
                 {% endfor %}

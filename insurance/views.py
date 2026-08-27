@@ -2543,6 +2543,79 @@ def _rate_master_pi_type_error_counts():
     ]
 
 
+# Range-validity rules — a RateMaster row is only valid when each "min" bound
+# is strictly less than its paired "max" bound. A bound that's NULL can't be
+# compared, so — same "unset never violates" convention as the pi_type rules
+# above — a row is only flagged once both bounds in the pair are populated.
+
+# STP (Standard Third Party) tariff_max is statutorily fixed rather than a
+# free-form upper bound, so its range rule is checked against this constant
+# *in addition to* the general tariff_min < tariff_max rule, not instead of it.
+STP_SUB_PRODUCT = "STP"
+STP_TARIFF_MAX = 100.01
+
+
+def _rate_master_min_max_violations_qs(min_field, max_field):
+    """RateMaster rows where min_field/max_field are both set but min isn't strictly less than max."""
+    lookup = {
+        f"{min_field}__isnull": False,
+        f"{max_field}__isnull": False,
+        f"{min_field}__gte": F(max_field),
+    }
+    return RateMaster.objects.filter(is_deleted="NO", **lookup)
+
+
+def _rate_master_tariff_violations_qs():
+    """
+    RateMaster rows that break the tariff_min < tariff_max rule, or — for STP
+    sub-products — don't have tariff_max pinned to exactly STP_TARIFF_MAX.
+    """
+    general_bad = Q(tariff_min__isnull=False, tariff_max__isnull=False, tariff_min__gte=F("tariff_max"))
+    stp_bad = (
+        Q(sub_product__name__iexact=STP_SUB_PRODUCT, tariff_max__isnull=False)
+        & ~Q(tariff_max=STP_TARIFF_MAX)
+    )
+    return RateMaster.objects.filter(is_deleted="NO").filter(general_bad | stp_bad)
+
+
+# One entry per Range Validation Errors card. "columns" are the extra
+# (field_path, header) pairs the Affected Rows drill-down shows beyond the
+# common Group ID / Insurer columns, so the user can see exactly which values
+# broke the rule — field_path is anything .values() accepts, including a
+# relation lookup like sub_product__name.
+RANGE_ERROR_RULES = [
+    {
+        "label": "Invalid Vehicle Age Range",
+        "violations_fn": lambda: _rate_master_min_max_violations_qs("vehicle_age_min", "vehicle_age_max"),
+        "columns": [("vehicle_age_min", "Vehicle Age Min"), ("vehicle_age_max", "Vehicle Age Max")],
+    },
+    {
+        "label": "Invalid CC Range",
+        "violations_fn": lambda: _rate_master_min_max_violations_qs("cc_min", "cc_max"),
+        "columns": [("cc_min", "CC Min"), ("cc_max", "CC Max")],
+    },
+    {
+        "label": "Invalid Seating Capacity Range",
+        "violations_fn": lambda: _rate_master_min_max_violations_qs("sc_min", "sc_max"),
+        "columns": [("sc_min", "SC Min"), ("sc_max", "SC Max")],
+    },
+    {
+        "label": "Invalid Tariff Range",
+        "violations_fn": _rate_master_tariff_violations_qs,
+        "columns": [
+            ("sub_product__name", "Sub Product"),
+            ("tariff_min", "Tariff Min"),
+            ("tariff_max", "Tariff Max"),
+        ],
+    },
+]
+RANGE_ERROR_RULES_MAP = {rule["label"]: rule for rule in RANGE_ERROR_RULES}
+
+
+def _rate_master_range_error_counts():
+    return [{"label": rule["label"], "count": rule["violations_fn"]().count()} for rule in RANGE_ERROR_RULES]
+
+
 def rate_master_health(request):
     _sync_unsynced_mis_files()
 
@@ -2600,6 +2673,7 @@ def rate_master_health(request):
     status_types = [c for c in MISFailedRow.STATUS_CHOICES if c[0] != "OTHER"]
 
     pi_type_error_counts = _rate_master_pi_type_error_counts()
+    range_error_counts = _rate_master_range_error_counts()
 
     # Drill-down: clicking an Error Dashboard card lists the distinct Rate
     # Master groups behind that rule's violating rows, so the user can jump
@@ -2627,6 +2701,26 @@ def rate_master_health(request):
             error_paginator.get_elided_page_range(error_group_page_obj.number, on_each_side=1, on_ends=1)
         )
 
+    # Drill-down: clicking a Range Validation Errors card lists the individual
+    # violating rows (not grouped counts, unlike the pi_type drill-down above)
+    # so the user can see the actual min/max values that broke the rule.
+    range_error = (request.GET.get("range_error") or "").strip()
+    selected_range_rule = RANGE_ERROR_RULES_MAP.get(range_error)
+    range_rows_page_obj = None
+    range_rows_elided_range = None
+    if selected_range_rule:
+        value_fields = ["id", "group_id", "insurance_company"] + [f for f, _ in selected_range_rule["columns"]]
+        range_rows_qs = selected_range_rule["violations_fn"]().values(*value_fields).order_by("-id")
+        range_paginator = Paginator(range_rows_qs, MIS_HEALTH_BATCH_SIZE)
+        try:
+            range_page_number = int(request.GET.get("range_page") or 1)
+        except ValueError:
+            range_page_number = 1
+        range_rows_page_obj = range_paginator.get_page(range_page_number)
+        range_rows_elided_range = list(
+            range_paginator.get_elided_page_range(range_rows_page_obj.number, on_each_side=1, on_ends=1)
+        )
+
     return render(request, "rate_master_health.html", {
         "page_obj": page_obj,
         "elided_page_range": elided_page_range,
@@ -2638,6 +2732,12 @@ def rate_master_health(request):
         "pi_type_error_counts": pi_type_error_counts,
         "pi_type_error_total": sum(r["count"] for r in pi_type_error_counts),
         "selected_pi_type_error": pi_type_error if pi_type_error in PI_TYPE_RULES_MAP else "",
+        "range_error_counts": range_error_counts,
+        "range_error_total": sum(r["count"] for r in range_error_counts),
+        "selected_range_error": range_error if selected_range_rule else "",
+        "selected_range_rule": selected_range_rule,
+        "range_rows_page_obj": range_rows_page_obj,
+        "range_rows_elided_range": range_rows_elided_range,
         "error_group_page_obj": error_group_page_obj,
         "error_group_elided_range": error_group_elided_range,
         "error_group_ungrouped_count": error_group_ungrouped_count,
@@ -4535,8 +4635,29 @@ def grid_management(request):
 
             return redirect("grid_management")
 
+    total_all = GridDocument.objects.count()
+    status_counts = dict(
+        GridDocument.objects.values("status").annotate(n=Count("id")).values_list("status", "n")
+    )
+
+    # "all" (or anything unrecognized) clears the filter, matching the Clear
+    # Filters convention used elsewhere — only a real STATUS_CHOICES code
+    # narrows the queryset and highlights its card.
+    status_filter = (request.GET.get("status") or "").strip()
+    valid_status_codes = {code for code, _ in GridDocument.STATUS_CHOICES}
+    selected_status = status_filter if status_filter in valid_status_codes else ""
+
     documents = GridDocument.objects.all().order_by("-uploaded_date")
-    return render(request, "grid_management.html", {"documents": documents})
+    if selected_status:
+        documents = documents.filter(status=selected_status)
+
+    return render(request, "grid_management.html", {
+        "documents": documents,
+        "status_choices": GridDocument.STATUS_CHOICES,
+        "status_counts": status_counts,
+        "total_all": total_all,
+        "selected_status": selected_status,
+    })
 
 # -------------------------
 # POINTS AUDIT LOGS (Motor + Health "Check Eligibility" search trail)
