@@ -472,6 +472,116 @@
         </div>
     {% endif %}
 
+    <div class="premium-card">
+        <div class="card-header-premium d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h6 class="mb-0 fw-bold" style="color: #0f172a;"><i class="bi bi-equal text-primary me-2"></i> Equality Errors</h6>
+            <span class="status-pill {% if equality_error_total %}pill-high{% else %}pill-low{% endif %}">
+                {{ equality_error_total|default:0 }} Total Errors
+            </span>
+        </div>
+
+        <div class="p-4">
+            <p class="text-muted mb-4" style="font-size: 14px; max-width: 760px;">
+                A narrower check on top of Range Validation above: the "min" side was typed in as exactly
+                equal to the "max" side, rather than a proper range. Click a card to list the affected rows.
+            </p>
+
+            <div class="rmh-stat-grid">
+                {% for rule in equality_error_counts %}
+                    <a href="?view=error&equality_error={{ rule.label|urlencode }}"
+                       class="rmh-stat-card {% if rule.count %}has-errors{% endif %} {% if selected_equality_error == rule.label %}selected{% endif %}">
+                        <span class="count">{{ rule.count }}</span>
+                        <span class="label">{{ rule.label }}</span>
+                        <span class="sub">min value equals max value</span>
+                    </a>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    {% if selected_equality_error %}
+        <div class="premium-card">
+            <div class="card-header-premium d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h6 class="mb-0 fw-bold" style="color: #0f172a;">
+                    <i class="bi bi-list-ul text-primary me-2"></i> Affected Rows — {{ selected_equality_error }}
+                </h6>
+                <a href="?view=error" class="btn-text"><i class="bi bi-x-circle"></i> Clear selection</a>
+            </div>
+
+            {% if equality_rows_page_obj and equality_rows_page_obj.paginator.count > 0 %}
+                <div class="table-responsive-custom">
+                    <table class="table-modern">
+                        <thead>
+                            <tr>
+                                <th>Group ID</th>
+                                <th>Insurer</th>
+                                {% for field, header in selected_equality_rule.columns %}
+                                    <th>{{ header }}</th>
+                                {% endfor %}
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for row in equality_rows_page_obj %}
+                                <tr>
+                                    <td><strong>{{ row.group_id|default:"-" }}</strong></td>
+                                    <td>{{ row.insurance_company|default:"-" }}</td>
+                                    {% for field, header in selected_equality_rule.columns %}
+                                        <td>{{ row|get_item:field|default:"-" }}</td>
+                                    {% endfor %}
+                                    <td>
+                                        {% if row.group_id %}
+                                            <a href="{% url 'edit_rate' row.group_id %}" class="fix-mapping-link">
+                                                <i class="bi bi-pencil-square"></i> Fix {{ row.group_id }}
+                                            </a>
+                                        {% else %}
+                                            <span class="text-muted" style="font-size: 11px;">No group</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+
+                {% if equality_rows_page_obj.paginator.num_pages > 1 %}
+                    <div class="pager">
+                        {% if equality_rows_page_obj.has_previous %}
+                            <a href="?view=error&equality_error={{ selected_equality_error|urlencode }}&equality_page=1">&laquo; First</a>
+                            <a href="?view=error&equality_error={{ selected_equality_error|urlencode }}&equality_page={{ equality_rows_page_obj.previous_page_number }}">&lsaquo; Prev</a>
+                        {% else %}
+                            <span class="disabled">&laquo; First</span>
+                            <span class="disabled">&lsaquo; Prev</span>
+                        {% endif %}
+
+                        {% for p in equality_rows_elided_range %}
+                            {% if p == equality_rows_page_obj.paginator.ELLIPSIS %}
+                                <span class="ellipsis">{{ p }}</span>
+                            {% elif p == equality_rows_page_obj.number %}
+                                <span class="page-num active">{{ p }}</span>
+                            {% else %}
+                                <a class="page-num" href="?view=error&equality_error={{ selected_equality_error|urlencode }}&equality_page={{ p }}">{{ p }}</a>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if equality_rows_page_obj.has_next %}
+                            <a href="?view=error&equality_error={{ selected_equality_error|urlencode }}&equality_page={{ equality_rows_page_obj.next_page_number }}">Next &rsaquo;</a>
+                            <a href="?view=error&equality_error={{ selected_equality_error|urlencode }}&equality_page={{ equality_rows_page_obj.paginator.num_pages }}">Last &raquo;</a>
+                        {% else %}
+                            <span class="disabled">Next &rsaquo;</span>
+                            <span class="disabled">Last &raquo;</span>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5">
+                    <i class="bi bi-check-circle" style="font-size: 40px; color: #86efac;"></i>
+                    <h5 class="mt-3 fw-bold text-slate-700">No violations for this rule.</h5>
+                </div>
+            {% endif %}
+        </div>
+    {% endif %}
+
     {% if selected_pi_type_error %}
         <div class="premium-card">
             <div class="card-header-premium d-flex justify-content-between align-items-center flex-wrap gap-2">

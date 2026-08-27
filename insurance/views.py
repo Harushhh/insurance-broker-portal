@@ -2622,6 +2622,51 @@ def _rate_master_range_error_counts():
     return [{"label": rule["label"], "count": rule["violations_fn"]().count()} for rule in RANGE_ERROR_RULES]
 
 
+def _rate_master_equality_violations_qs(min_field, max_field):
+    """RateMaster rows where min_field/max_field are both set and exactly equal."""
+    lookup = {
+        f"{min_field}__isnull": False,
+        f"{max_field}__isnull": False,
+        min_field: F(max_field),
+    }
+    return RateMaster.objects.filter(is_deleted="NO", **lookup)
+
+
+# One entry per Equality Errors card — same shape as RANGE_ERROR_RULES, but
+# flagging the narrower "min was typed in as exactly equal to max" mistake
+# rather than "min isn't strictly less than max". Every row these catch is
+# therefore already counted by the matching Range Validation Errors card too
+# (equality is a subset of "not strictly less than") — this is a deliberately
+# more specific lens on the same data, not a separate class of bad row.
+EQUALITY_ERROR_RULES = [
+    {
+        "label": "Vehicle Age Equality",
+        "violations_fn": lambda: _rate_master_equality_violations_qs("vehicle_age_min", "vehicle_age_max"),
+        "columns": [("vehicle_age_min", "Vehicle Age Min"), ("vehicle_age_max", "Vehicle Age Max")],
+    },
+    {
+        "label": "CC Equality",
+        "violations_fn": lambda: _rate_master_equality_violations_qs("cc_min", "cc_max"),
+        "columns": [("cc_min", "CC Min"), ("cc_max", "CC Max")],
+    },
+    {
+        "label": "SC Equality",
+        "violations_fn": lambda: _rate_master_equality_violations_qs("sc_min", "sc_max"),
+        "columns": [("sc_min", "SC Min"), ("sc_max", "SC Max")],
+    },
+    {
+        "label": "Tariff Equality",
+        "violations_fn": lambda: _rate_master_equality_violations_qs("tariff_min", "tariff_max"),
+        "columns": [("tariff_min", "Tariff Min"), ("tariff_max", "Tariff Max")],
+    },
+]
+EQUALITY_ERROR_RULES_MAP = {rule["label"]: rule for rule in EQUALITY_ERROR_RULES}
+
+
+def _rate_master_equality_error_counts():
+    return [{"label": rule["label"], "count": rule["violations_fn"]().count()} for rule in EQUALITY_ERROR_RULES]
+
+
 def rate_master_health(request):
     _sync_unsynced_mis_files()
 
@@ -2680,6 +2725,7 @@ def rate_master_health(request):
 
     pi_type_error_counts = _rate_master_pi_type_error_counts()
     range_error_counts = _rate_master_range_error_counts()
+    equality_error_counts = _rate_master_equality_error_counts()
 
     # Drill-down: clicking an Error Dashboard card lists the distinct Rate
     # Master groups behind that rule's violating rows, so the user can jump
@@ -2727,6 +2773,26 @@ def rate_master_health(request):
             range_paginator.get_elided_page_range(range_rows_page_obj.number, on_each_side=1, on_ends=1)
         )
 
+    # Drill-down: clicking an Equality Errors card lists the individual
+    # violating rows, the same row-level shape as the Range Validation
+    # drill-down above — equality is just a narrower rule, checked separately.
+    equality_error = (request.GET.get("equality_error") or "").strip()
+    selected_equality_rule = EQUALITY_ERROR_RULES_MAP.get(equality_error)
+    equality_rows_page_obj = None
+    equality_rows_elided_range = None
+    if selected_equality_rule:
+        value_fields = ["id", "group_id", "insurance_company"] + [f for f, _ in selected_equality_rule["columns"]]
+        equality_rows_qs = selected_equality_rule["violations_fn"]().values(*value_fields).order_by("-id")
+        equality_paginator = Paginator(equality_rows_qs, MIS_HEALTH_BATCH_SIZE)
+        try:
+            equality_page_number = int(request.GET.get("equality_page") or 1)
+        except ValueError:
+            equality_page_number = 1
+        equality_rows_page_obj = equality_paginator.get_page(equality_page_number)
+        equality_rows_elided_range = list(
+            equality_paginator.get_elided_page_range(equality_rows_page_obj.number, on_each_side=1, on_ends=1)
+        )
+
     return render(request, "rate_master_health.html", {
         "page_obj": page_obj,
         "elided_page_range": elided_page_range,
@@ -2744,6 +2810,12 @@ def rate_master_health(request):
         "selected_range_rule": selected_range_rule,
         "range_rows_page_obj": range_rows_page_obj,
         "range_rows_elided_range": range_rows_elided_range,
+        "equality_error_counts": equality_error_counts,
+        "equality_error_total": sum(r["count"] for r in equality_error_counts),
+        "selected_equality_error": equality_error if selected_equality_rule else "",
+        "selected_equality_rule": selected_equality_rule,
+        "equality_rows_page_obj": equality_rows_page_obj,
+        "equality_rows_elided_range": equality_rows_elided_range,
         "error_group_page_obj": error_group_page_obj,
         "error_group_elided_range": error_group_elided_range,
         "error_group_ungrouped_count": error_group_ungrouped_count,
