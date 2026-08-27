@@ -1258,6 +1258,7 @@ def dashboard(request):
             "page_obj": None,
             "elided_page_range": [],
             "field_names": [],
+            "bulk_update_fields": ALLOWED_BULK_UPDATE_FIELDS,
             "total": 0,
             "active_count": 0,
             "inactive_count": 0,
@@ -1481,6 +1482,7 @@ def dashboard(request):
         "page_obj": page_obj,
         "elided_page_range": elided_page_range,
         "field_names": field_names,
+        "bulk_update_fields": ALLOWED_BULK_UPDATE_FIELDS,
         "total": paginator.count,
         "active_count": active_count,
         "inactive_count": inactive_count,
@@ -2357,8 +2359,11 @@ def edit_rate(request, group_id):
 # Only these RateMaster fields may be touched via bulk update — update_field
 # comes straight from the POST body, so anything not on this list (id,
 # group_id, created_at, ...) must be rejected rather than passed through to
-# records.update(**{field_name: ...}).
-ALLOWED_BULK_UPDATE_FIELDS = {
+# records.update(**{field_name: ...}). Ordered (not a set) because this same
+# tuple also drives the "Field to Change" dropdown on the dashboard, so its
+# order is the order options appear in — keep the two in sync by construction
+# rather than maintaining a second field list in the view/template.
+ALLOWED_BULK_UPDATE_FIELDS = (
     "new_vehicle_makes", "product", "sub_product", "policy_type", "fuel_type",
     "make_model_class", "is_ncb", "is_cpa", "is_zd", "status", "is_deleted",
     "vehicle_age_min", "vehicle_age_max", "cc_min", "cc_max", "user_id",
@@ -2368,7 +2373,7 @@ ALLOWED_BULK_UPDATE_FIELDS = {
     "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount",
     "insurance_company", "insurer_vertical", "pi_type", "po_type", "veh_use",
     "add_tnc", "remarks",
-}
+)
 
 
 def bulk_update_rates(request):
@@ -2446,9 +2451,10 @@ def bulk_update_rates(request):
                     f"(must be one of: {', '.join(valid_deleted)}). No rows were changed."
                 )
                 return redirect("dashboard")
-        elif field_name in ["vehicle_age_min", "vehicle_age_max", "cc_min", "cc_max", "user_id"]:
+        elif field_name == "user_id":
             parsed_value = int(float(new_value)) if new_value else None
         elif field_name in [
+            "vehicle_age_min", "vehicle_age_max", "cc_min", "cc_max",
             "pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5",
             "pi_net_rate", "pi_flat_amount", "pi_vli", "tariff_min", "tariff_max",
             "sc_min", "sc_max", "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount"

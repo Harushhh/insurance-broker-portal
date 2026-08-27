@@ -432,10 +432,8 @@
                     <div class="mb-4">
                         <label class="text-overline">Field to Change</label>
                         <select class="form-select-premium modal-select2" name="update_field" style="width:100%;">
-                            {% for field in field_names %}
-                                {% if field != "display_group_id" and field != "records_in_group" and field != "age_range" and field != "cc_range" and field != "sc_range" and field != "display_rto_list" and field != "display_fuel_types" and field != "display_make_model_class" %}
-                                    <option value="{{ field }}">{{ field|replace:"_"|title }}</option>
-                                {% endif %}
+                            {% for field in bulk_update_fields %}
+                                <option value="{{ field }}">{{ field|replace:"_"|title }}</option>
                             {% endfor %}
                         </select>
                     </div>
