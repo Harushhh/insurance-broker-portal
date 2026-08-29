@@ -996,6 +996,7 @@ class RateOverlapPair(models.Model):
     stored twice under swapped keys.
     """
     CONFLICT_CHOICES = [
+        ("DOUBLE_RATE_RISK", "Double Rate Risk"),
         ("EXACT_DUPLICATE", "Exact Duplicate"),
         ("CONTAINED", "Contained Range"),
         ("OPEN_ENDED", "Open-Ended Overlap"),
@@ -1009,7 +1010,7 @@ class RateOverlapPair(models.Model):
     conflict_type = models.CharField(max_length=20, choices=CONFLICT_CHOICES, db_index=True)
     # CONFLICT_SEVERITY rank, denormalized so the drill-down can order by it
     # without a CASE expression on every query.
-    severity_rank = models.IntegerField(default=4)
+    severity_rank = models.IntegerField(default=5)
     row_count_a = models.IntegerField(default=0)
     row_count_b = models.IntegerField(default=0)
     # {"axes": [...]} - the per-axis breakdown describe_pair builds, including

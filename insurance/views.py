@@ -2752,6 +2752,11 @@ def _rate_master_grid_summary_qs():
 # sum to the scan's total rather than overlapping each other.
 OVERLAP_RULES = [
     {
+        "key": "DOUBLE_RATE_RISK",
+        "label": "Double Rate Risks",
+        "sub": "a raw code is duplicated across master clusters",
+    },
+    {
         "key": "EXACT_DUPLICATE",
         "label": "Exact Duplicates",
         "sub": "same rules and same T&C - one is surplus",
@@ -2907,6 +2912,22 @@ def deactivate_rate_group(request, group_key):
             "Could not deactivate: that conflict is no longer in the latest scan. Re-run the scan and try again.",
         )
         return _overlap_redirect(overlap_type)
+
+    # Double Rate Risk pairs conflict through a raw code duplicated across two
+    # RTOMaster/MakeModelMaster clusters, not through the two RateMaster groups
+    # themselves - deactivating either group leaves that master-table entry
+    # untouched, so the exact same collision resurfaces against the next group
+    # that references either cluster. The template already hides this button
+    # for that type; refuse it here too so a hand-made POST can't reach past it.
+    if pair.conflict_type == "DOUBLE_RATE_RISK":
+        messages.error(
+            request,
+            f"Group {group_key} was not deactivated - this conflict is a Double Rate Risk, caused by "
+            f"a raw code duplicated across master-table clusters, not by either RateMaster group. Fix "
+            f"the RTOMaster/MakeModelMaster entry instead.",
+        )
+        return _overlap_redirect(overlap_type)
+
     rows = _rate_group_rows(group_key)
     active_rows = rows.filter(status="ACTIVE")
     record_count = active_rows.count()

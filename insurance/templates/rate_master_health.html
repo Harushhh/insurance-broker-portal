@@ -223,6 +223,7 @@
     .ovl-gl { font-weight: 600; color: #0f172a; }
     .ovl-shared { color: #1d4ed8; font-weight: 700; }
     .ovl-differs { color: #b45309; font-weight: 700; }
+    .ovl-hidden-risk { color: #be123c; font-weight: 700; }
     .ovl-gmuted { color: #64748b; }
     .ovl-gsplit {
         grid-column: 1 / -1; background: #f8fafc; font-size: 10px; font-weight: 700;
@@ -1001,25 +1002,38 @@
                                         <a href="{% url 'edit_rate' pair.group_key_b %}" class="ovl-btn">
                                             <i class="bi bi-pencil-square"></i> Edit
                                         </a>
-                                        <form method="POST" action="{% url 'deactivate_rate_group' pair.group_key_b %}"
-                                                  onsubmit="return confirm('Deactivate group {{ pair.group_key_b }}? Its rows stay in the Rate Master but stop matching policies.');">
-                                                {% csrf_token %}
-                                                <input type="hidden" name="overlap_type" value="{{ selected_overlap_type }}">
-                                                <input type="hidden" name="pair_id" value="{{ pair.id }}">
-                                                <button type="submit" class="ovl-btn ovl-btn-danger">
-                                                    <i class="bi bi-toggle-off"></i> Deactivate
-                                                </button>
-                                        </form>
+                                        {% if pair.conflict_type != "DOUBLE_RATE_RISK" %}
+                                            <form method="POST" action="{% url 'deactivate_rate_group' pair.group_key_b %}"
+                                                      onsubmit="return confirm('Deactivate group {{ pair.group_key_b }}? Its rows stay in the Rate Master but stop matching policies.');">
+                                                    {% csrf_token %}
+                                                    <input type="hidden" name="overlap_type" value="{{ selected_overlap_type }}">
+                                                    <input type="hidden" name="pair_id" value="{{ pair.id }}">
+                                                    <button type="submit" class="ovl-btn ovl-btn-danger">
+                                                        <i class="bi bi-toggle-off"></i> Deactivate
+                                                    </button>
+                                            </form>
+                                        {% endif %}
                                     </div>
                                 </div>
                             </div>
 
+                            {% if pair.conflict_type == "DOUBLE_RATE_RISK" %}
+                                <p class="ovl-note">
+                                    <i class="bi bi-exclamation-triangle"></i>
+                                    These reference different clusters, but a raw code is duplicated across both
+                                    clusters' entries in RTOMaster / MakeModelMaster — fix the master table entry
+                                    (or point one group at a cluster that doesn't share the code), rather than
+                                    deactivating either group.
+                                </p>
+                            {% endif %}
 
                             <div class="ovl-collides">
                                 <span class="ovl-collides-label">Collides on</span>
                                 {% for span in pair.detail.summary %}
                                     <span class="ovl-chip">{{ span.label }}
-                                        {{ span.low|default_if_none:"any" }} – {{ span.high|default_if_none:"any" }}</span>
+                                        {% if span.text %}{{ span.text }}
+                                        {% else %}{{ span.low|default_if_none:"any" }} – {{ span.high|default_if_none:"any" }}
+                                        {% endif %}</span>
                                 {% empty %}
                                     <span class="ovl-collides-empty">every range wide open</span>
                                 {% endfor %}
@@ -1048,7 +1062,7 @@
                                         {% else %}
                                             <div class="ovl-gc {% if axis.is_context %}ovl-gmuted{% endif %}">{{ axis.a }}</div>
                                             <div class="ovl-gc {% if axis.is_context %}ovl-gmuted{% endif %}">{{ axis.b }}</div>
-                                            <div class="ovl-gc {% if axis.overlap == 'differs' %}ovl-differs{% else %}ovl-shared{% endif %}">{{ axis.overlap }}</div>
+                                            <div class="ovl-gc {% if axis.is_hidden_risk %}ovl-hidden-risk{% elif axis.overlap == 'differs' %}ovl-differs{% else %}ovl-shared{% endif %}">{{ axis.overlap }}</div>
                                         {% endif %}
                                     {% endfor %}
                                 </div>

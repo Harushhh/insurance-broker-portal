@@ -15,8 +15,8 @@ from django.urls import reverse
 
 from insurance import overlap_utils
 from insurance.models import (
-    PolicyTypeMaster, ProductMaster,
-    RateGroup, RateMaster, RateOverlapPair, RateOverlapScan,
+    MakeModelMaster, PolicyTypeMaster, ProductMaster,
+    RateGroup, RateMaster, RateOverlapPair, RateOverlapScan, RTOMaster,
     YesNoNAMaster,
 )
 
@@ -441,6 +441,254 @@ class DetectOverlapPairsTests(TestCase):
         self.assertEqual(keys, {(1, 2), (1, 3)})
 
 
+class BuildClusterCodeIndexTests(TestCase):
+    """
+    build_cluster_code_index({name -> set(codes)}) is the raw material the
+    Double Rate Risk sweep expands a group's cluster NAMES into cluster CODES
+    through - it has to normalize exactly the way the two things it bridges
+    already do: names like load_active_groups' split_cluster (lower, stripped)
+    so a group's new_rto_list frozenset can key straight into it, and codes
+    like mapping_engine.build_master_lookup's resolve() (upper, stripped) so a
+    match here is one the engine would actually make.
+    """
+
+    def test_indexes_by_lowercased_name_and_uppercased_codes(self):
+        RTOMaster.objects.create(rto_name="ZYX", rto_cluster="mh01, mh02")
+        index = overlap_utils.build_cluster_code_index("rto_name", "rto_cluster", RTOMaster)
+        self.assertEqual(index, {"zyx": {"MH01", "MH02"}})
+
+    def test_a_blank_cluster_is_skipped(self):
+        RTOMaster.objects.create(rto_name="zyx", rto_cluster="")
+        RTOMaster.objects.create(rto_name="abc", rto_cluster=None)
+        index = overlap_utils.build_cluster_code_index("rto_name", "rto_cluster", RTOMaster)
+        self.assertEqual(index, {})
+
+    def test_works_for_make_model_master_too(self):
+        MakeModelMaster.objects.create(make_model_name="honda_all", make_model_cluster="ACTIVA, DIO")
+        index = overlap_utils.build_cluster_code_index(
+            "make_model_name", "make_model_cluster", MakeModelMaster
+        )
+        self.assertEqual(index, {"honda_all": {"ACTIVA", "DIO"}})
+
+    def test_a_literal_zero_placeholder_is_not_a_real_code(self):
+        # Several real RTOMaster rows carry a bare "0" as cluster padding
+        # (e.g. "AP30,0,0,0,0,0,0,0,0,0,0,0,0,0") - left in, it alone connects
+        # every row that happens to have the same padding, none of which
+        # share anything real.
+        RTOMaster.objects.create(rto_name="ap_zone_a", rto_cluster="AP04,0,0,0")
+        RTOMaster.objects.create(rto_name="ap_zone_b", rto_cluster="AP31,0,0")
+        index = overlap_utils.build_cluster_code_index("rto_name", "rto_cluster", RTOMaster)
+        self.assertEqual(index, {"ap_zone_a": {"AP04"}, "ap_zone_b": {"AP31"}})
+
+    def test_a_cluster_that_is_only_placeholders_is_dropped_entirely(self):
+        # No real codes left after stripping padding - the name shouldn't
+        # appear in the index at all, or it would falsely register as
+        # "compatible with nothing" rather than simply absent.
+        RTOMaster.objects.create(rto_name="all_padding", rto_cluster="0,0,0")
+        index = overlap_utils.build_cluster_code_index("rto_name", "rto_cluster", RTOMaster)
+        self.assertEqual(index, {})
+
+
+class AxisConflictStatusTests(TestCase):
+    """_axis_conflict_status: the per-axis decision the Double Rate Risk sweep
+    is built on - compatible-by-name, compatible-only-through-a-hidden-code,
+    or genuinely incompatible."""
+
+    def test_shared_name_is_compatible_and_not_hidden(self):
+        # Already the primary sweep's territory - nothing new to report here.
+        compatible, hidden = overlap_utils._axis_conflict_status(
+            frozenset({"zyx"}), frozenset({"zyx"}), {}
+        )
+        self.assertTrue(compatible)
+        self.assertEqual(hidden, frozenset())
+
+    def test_both_blank_is_compatible_and_not_hidden(self):
+        compatible, hidden = overlap_utils._axis_conflict_status(
+            frozenset(), frozenset(), {}
+        )
+        self.assertTrue(compatible)
+        self.assertEqual(hidden, frozenset())
+
+    def test_different_names_sharing_a_raw_code_are_compatible_and_hidden(self):
+        code_index = {"zyx": {"MH01", "MH02"}, "abc": {"MH02", "DL01"}}
+        compatible, hidden = overlap_utils._axis_conflict_status(
+            frozenset({"zyx"}), frozenset({"abc"}), code_index
+        )
+        self.assertTrue(compatible)
+        self.assertEqual(hidden, {"MH02"})
+
+    def test_different_names_with_no_shared_code_are_incompatible(self):
+        code_index = {"zyx": {"MH01"}, "abc": {"DL01"}}
+        compatible, hidden = overlap_utils._axis_conflict_status(
+            frozenset({"zyx"}), frozenset({"abc"}), code_index
+        )
+        self.assertFalse(compatible)
+        self.assertEqual(hidden, frozenset())
+
+    def test_blank_against_populated_is_incompatible_not_hidden(self):
+        # A blank cluster resolves to zero codes, so it can never "hide" a
+        # collision with a populated one - RULE 5's own blank-isn't-a-wildcard
+        # rule still holds.
+        code_index = {"zyx": {"MH01"}}
+        compatible, hidden = overlap_utils._axis_conflict_status(
+            frozenset(), frozenset({"zyx"}), code_index
+        )
+        self.assertFalse(compatible)
+
+
+class DetectDoubleRateRiskPairsTests(TestCase):
+    """
+    Pure unit tests against make_group() dicts - no DB. These are the pairs
+    entirely missed by detect_overlap_pairs: everything else about the two
+    groups matches, but their RTO/Make cluster NAMES differ, and only the raw
+    codes underneath (via RTOMaster/MakeModelMaster) actually collide.
+    """
+
+    def test_a_hidden_rto_collision_is_reported(self):
+        a = make_group(grid_key=1, new_rto_list=frozenset({"cluster_a"}))
+        b = make_group(grid_key=2, new_rto_list=frozenset({"cluster_b"}))
+        rto_index = {"cluster_a": {"MH01"}, "cluster_b": {"MH01", "MH02"}}
+
+        pairs, count, capped = overlap_utils.detect_double_rate_risk_pairs(
+            [a, b], rto_index, {}
+        )
+        self.assertEqual(count, 1)
+        self.assertFalse(capped)
+        self.assertEqual(pairs[0]["conflict_type"], overlap_utils.CONFLICT_DOUBLE_RATE_RISK)
+        self.assertEqual(pairs[0]["group_key_a"], 1)
+        self.assertEqual(pairs[0]["group_key_b"], 2)
+
+    def test_a_hidden_make_model_collision_is_reported(self):
+        a = make_group(grid_key=1, new_vehicle_makes=frozenset({"honda_a"}))
+        b = make_group(grid_key=2, new_vehicle_makes=frozenset({"honda_b"}))
+        make_index = {"honda_a": {"ACTIVA"}, "honda_b": {"ACTIVA", "DIO"}}
+
+        pairs, count, _capped = overlap_utils.detect_double_rate_risk_pairs(
+            [a, b], {}, make_index
+        )
+        self.assertEqual(count, 1)
+        self.assertEqual(pairs[0]["detail"]["axes"], overlap_utils.describe_pair(
+            a, b, hidden_axis_codes={"new_vehicle_makes": frozenset({"ACTIVA"})}
+        ))
+
+    def test_a_pair_already_conflicting_by_name_is_not_reported_again(self):
+        # Shared cluster name -> already detect_overlap_pairs' territory. This
+        # sweep exists for pairs that ONLY collide through the master tables.
+        a = make_group(grid_key=1, new_rto_list=frozenset({"zyx"}))
+        b = make_group(grid_key=2, new_rto_list=frozenset({"zyx"}))
+        rto_index = {"zyx": {"MH01"}}
+
+        pairs, count, _capped = overlap_utils.detect_double_rate_risk_pairs(
+            [a, b], rto_index, {}
+        )
+        self.assertEqual(count, 0)
+        self.assertEqual(pairs, [])
+
+    def test_no_shared_code_at_all_is_not_reported(self):
+        a = make_group(grid_key=1, new_rto_list=frozenset({"cluster_a"}))
+        b = make_group(grid_key=2, new_rto_list=frozenset({"cluster_b"}))
+        rto_index = {"cluster_a": {"MH01"}, "cluster_b": {"DL01"}}
+
+        pairs, count, _capped = overlap_utils.detect_double_rate_risk_pairs(
+            [a, b], rto_index, {}
+        )
+        self.assertEqual(count, 0)
+
+    def test_a_hidden_rto_collision_is_not_reported_if_another_axis_discriminates(self):
+        # The user's own requirement: the two groups must "match the same
+        # policy parameters" for a master-table collision to be a real risk.
+        # Disjoint CC ranges mean no policy can ever reach both groups anyway.
+        a = make_group(grid_key=1, cc_min=0, cc_max=1000, new_rto_list=frozenset({"cluster_a"}))
+        b = make_group(grid_key=2, cc_min=1500, cc_max=2000, new_rto_list=frozenset({"cluster_b"}))
+        rto_index = {"cluster_a": {"MH01"}, "cluster_b": {"MH01"}}
+
+        pairs, count, _capped = overlap_utils.detect_double_rate_risk_pairs(
+            [a, b], rto_index, {}
+        )
+        self.assertEqual(count, 0)
+
+    def test_differing_add_tnc_does_not_exclude_a_double_rate_risk_pair(self):
+        # Unlike every other conflict type: the fix here is RTOMaster/
+        # MakeModelMaster, which the brokerage owns outright, regardless of
+        # whether the two RateMaster rows are legitimately different offers.
+        a = make_group(
+            grid_key=1, new_rto_list=frozenset({"cluster_a"}), add_tnc="Garbage Van"
+        )
+        b = make_group(
+            grid_key=2, new_rto_list=frozenset({"cluster_b"}), add_tnc="Construction Eq"
+        )
+        rto_index = {"cluster_a": {"MH01"}, "cluster_b": {"MH01"}}
+
+        pairs, count, _capped = overlap_utils.detect_double_rate_risk_pairs(
+            [a, b], rto_index, {}
+        )
+        self.assertEqual(count, 1)
+
+    def test_cap_reports_the_true_count_even_when_truncated(self):
+        groups = [
+            make_group(grid_key=i, new_rto_list=frozenset({f"cluster_{i}"}))
+            for i in range(1, 5)
+        ]
+        rto_index = {f"cluster_{i}": {"MH01"} for i in range(1, 5)}
+
+        pairs, count, capped = overlap_utils.detect_double_rate_risk_pairs(
+            groups, rto_index, {}, cap=2
+        )
+        self.assertEqual(len(pairs), 2)
+        self.assertEqual(count, 6)  # C(4, 2)
+        self.assertTrue(capped)
+
+
+class RunOverlapScanDoubleRateRiskTests(TestCase):
+    """Integration: does a real master-table collision reach the stored scan?"""
+
+    def setUp(self):
+        self.product = ProductMaster.objects.create(name="Private Car")
+
+    def _rate(self, group, **overrides):
+        fields = {
+            "insurance_company": "Acme General",
+            "product": self.product,
+            "status": "ACTIVE",
+            "is_deleted": "NO",
+            "group": group,
+        }
+        fields.update(overrides)
+        return RateMaster.objects.create(**fields)
+
+    def test_a_real_master_table_collision_is_scanned_and_stored(self):
+        RTOMaster.objects.create(rto_name="cluster_a", rto_cluster="MH01, MH02")
+        RTOMaster.objects.create(rto_name="cluster_b", rto_cluster="MH02, DL01")
+        group_a = RateGroup.objects.create(key_hash="h1")
+        group_b = RateGroup.objects.create(key_hash="h2")
+        self._rate(group_a, new_rto_list="cluster_a")
+        self._rate(group_b, new_rto_list="cluster_b")
+
+        scan = RateOverlapScan.objects.create()
+        overlap_utils.run_overlap_scan(scan.id)
+        scan.refresh_from_db()
+
+        self.assertEqual(scan.type_counts.get(overlap_utils.CONFLICT_DOUBLE_RATE_RISK), 1)
+        pair = RateOverlapPair.objects.get(conflict_type="DOUBLE_RATE_RISK")
+        self.assertEqual({pair.group_key_a, pair.group_key_b}, {group_a.id, group_b.id})
+        rto_axis = [ax for ax in pair.detail["axes"] if ax["label"] == "RTO Cluster"][0]
+        self.assertTrue(rto_axis["is_hidden_risk"])
+        self.assertIn("MH02", rto_axis["overlap"])
+
+    def test_a_pair_with_no_master_collision_produces_no_double_rate_risk(self):
+        RTOMaster.objects.create(rto_name="cluster_a", rto_cluster="MH01")
+        RTOMaster.objects.create(rto_name="cluster_b", rto_cluster="DL01")
+        self._rate(RateGroup.objects.create(key_hash="h1"), new_rto_list="cluster_a")
+        self._rate(RateGroup.objects.create(key_hash="h2"), new_rto_list="cluster_b")
+
+        scan = RateOverlapScan.objects.create()
+        overlap_utils.run_overlap_scan(scan.id)
+        scan.refresh_from_db()
+
+        self.assertEqual(scan.type_counts.get(overlap_utils.CONFLICT_DOUBLE_RATE_RISK), 0)
+        self.assertFalse(RateOverlapPair.objects.filter(conflict_type="DOUBLE_RATE_RISK").exists())
+
+
 class LoadActiveGroupsTests(TestCase):
     """The DB half: what gets loaded, and what a 'group' means."""
 
@@ -683,3 +931,76 @@ class OverlapDashboardViewTests(TestCase):
         )
         unrelated.refresh_from_db()
         self.assertEqual(unrelated.status, "ACTIVE")
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class DoubleRateRiskDashboardViewTests(TestCase):
+    """
+    The new card end-to-end: real master-table rows -> a real scan -> the
+    Overlaps tab's card and drill-down for Double Rate Risks specifically.
+    """
+
+    def setUp(self):
+        self.client = Client()
+        Group.objects.get_or_create(name="Can_View_Rate_Master_Health")
+        self.user = User.objects.create_user(username="ops", password="a-strong-test-password-1")
+        self.user.groups.add(Group.objects.get(name="Can_View_Rate_Master_Health"))
+        self.client.force_login(self.user)
+
+        self.product = ProductMaster.objects.create(name="Private Car")
+        RTOMaster.objects.create(rto_name="cluster_a", rto_cluster="MH01, MH02")
+        RTOMaster.objects.create(rto_name="cluster_b", rto_cluster="MH02, DL01")
+        RateMaster.objects.create(
+            insurance_company="Acme General", product=self.product,
+            status="ACTIVE", is_deleted="NO",
+            group=RateGroup.objects.create(key_hash="h1"), new_rto_list="cluster_a",
+        )
+        RateMaster.objects.create(
+            insurance_company="Acme General", product=self.product,
+            status="ACTIVE", is_deleted="NO",
+            group=RateGroup.objects.create(key_hash="h2"), new_rto_list="cluster_b",
+        )
+        scan = RateOverlapScan.objects.create()
+        overlap_utils.run_overlap_scan(scan.id)
+        self.scan = scan
+
+    def test_double_rate_risk_card_shows_the_count(self):
+        response = self.client.get(reverse("rate_master_health"), {"view": "overlap"})
+        counts = {rule["key"]: rule["count"] for rule in response.context["overlap_counts"]}
+        self.assertEqual(counts["DOUBLE_RATE_RISK"], 1)
+
+    def test_drill_down_names_the_colliding_raw_code(self):
+        response = self.client.get(
+            reverse("rate_master_health"), {"view": "overlap", "overlap_type": "DOUBLE_RATE_RISK"}
+        )
+        html = response.content.decode()
+        self.assertIn("MH02", html)
+        self.assertIn("shares raw code", html)
+
+    def test_deactivate_button_is_not_offered_for_this_card(self):
+        # Deactivating a group doesn't fix the actual cause - the master
+        # table entry - so the button that IS offered for every other card
+        # must not appear here. "ovl-btn-danger" alone isn't a safe check -
+        # its CSS rule is always in the page's <style> block - so check for
+        # the actual deactivate form/URL instead.
+        pair = RateOverlapPair.objects.get(conflict_type="DOUBLE_RATE_RISK")
+        response = self.client.get(
+            reverse("rate_master_health"), {"view": "overlap", "overlap_type": "DOUBLE_RATE_RISK"}
+        )
+        html = response.content.decode()
+        self.assertNotIn(reverse("deactivate_rate_group", args=[pair.group_key_b]), html)
+        self.assertIn("fix the master table entry", html)
+
+    def test_deactivate_is_still_refused_server_side_for_a_double_rate_risk_pair(self):
+        # The button is hidden client-side, but the view must not trust that -
+        # a hand-made POST naming this pair should still be refused, the same
+        # way a stale/no-longer-listed pair already is.
+        pair = RateOverlapPair.objects.get(conflict_type="DOUBLE_RATE_RISK")
+        self.client.post(
+            reverse("deactivate_rate_group", args=[pair.group_key_b]),
+            {"overlap_type": "DOUBLE_RATE_RISK", "pair_id": pair.id},
+        )
+        self.assertEqual(RateMaster.objects.filter(status="ACTIVE").count(), 2)

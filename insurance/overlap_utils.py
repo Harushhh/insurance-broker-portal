@@ -153,18 +153,24 @@ CONTEXT_AXES = [
 # make_model_class (RULE 2b) has two wildcard spellings, not one.
 CLASS_WILDCARDS = {"", "na"}
 
+CONFLICT_DOUBLE_RATE_RISK = "DOUBLE_RATE_RISK"
 CONFLICT_EXACT_DUPLICATE = "EXACT_DUPLICATE"
 CONFLICT_CONTAINED = "CONTAINED"
 CONFLICT_OPEN_ENDED = "OPEN_ENDED"
 CONFLICT_PARTIAL = "PARTIAL"
 
 # Lower rank == more actionable. The scan writes pairs in this order so a
-# capped result still leads with the pairs worth fixing first.
+# capped result still leads with the pairs worth fixing first. Double Rate
+# Risk ranks above Exact Duplicate: unlike every other bucket, its fix is a
+# one-line edit to RTOMaster/MakeModelMaster that the brokerage owns outright
+# (not the insurer's grid), and one such fix can resolve several pairs at once
+# since the same colliding raw code can span many RateMaster groups.
 CONFLICT_SEVERITY = {
-    CONFLICT_EXACT_DUPLICATE: 1,
-    CONFLICT_CONTAINED: 2,
-    CONFLICT_OPEN_ENDED: 3,
-    CONFLICT_PARTIAL: 4,
+    CONFLICT_DOUBLE_RATE_RISK: 1,
+    CONFLICT_EXACT_DUPLICATE: 2,
+    CONFLICT_CONTAINED: 3,
+    CONFLICT_OPEN_ENDED: 4,
+    CONFLICT_PARTIAL: 5,
 }
 
 
@@ -308,14 +314,16 @@ def _list_contains(outer_items, inner_items):
     return inner_items <= outer_items
 
 
-def groups_conflict(a, b):
+def _non_list_axes_compatible(a, b):
     """
-    True when no rule in the RULE 1-6 chain can separate these two groups -
-    i.e. some policy exists that would match both, which is precisely what
-    makes the engine emit MULTIPLE MATCHES.
+    Every RULE 1-6 axis except the RTO/Make cluster lists (RULE 5a/5b) - split
+    out of groups_conflict so the Double Rate Risk sweep
+    (detect_double_rate_risk_pairs) can reuse it with its own, different check
+    on those two list axes: a raw-code collision through the master tables
+    rather than a shared cluster NAME.
 
-    Ordered cheapest-and-most-selective first so the sweep in
-    detect_overlap_pairs bails out on the first discriminating axis.
+    Ordered cheapest-and-most-selective first so both callers bail out on the
+    first discriminating axis.
     """
     if a["insurance_company"] != b["insurance_company"]:
         return False
@@ -343,6 +351,18 @@ def groups_conflict(a, b):
     for min_field, max_field, _label in DATE_AXES:
         if not intervals_overlap(a[min_field], a[max_field], b[min_field], b[max_field]):
             return False
+
+    return True
+
+
+def groups_conflict(a, b):
+    """
+    True when no rule in the RULE 1-6 chain can separate these two groups -
+    i.e. some policy exists that would match both, which is precisely what
+    makes the engine emit MULTIPLE MATCHES.
+    """
+    if not _non_list_axes_compatible(a, b):
+        return False
 
     for field, _label in LIST_AXES:
         if not _lists_compatible(a[field], b[field]):
@@ -492,12 +512,21 @@ def _overlap_span(a_min, a_max, b_min, b_max):
     return (max(lows) if lows else None, min(highs) if highs else None)
 
 
-def describe_pair(a, b):
+def describe_pair(a, b, hidden_axis_codes=None):
     """
     Per-axis breakdown for the drill-down table: what each side carries, and -
     for the range axes - the exact span where they collide, which is the bit
     that tells someone which boundary to move.
+
+    hidden_axis_codes: {field: sorted raw codes}, for Double Rate Risk pairs
+    only. a[field] and b[field] there are DIFFERENT cluster names with no
+    shared item - describe_pair's default "both blank"/shared-name text would
+    read as "no collision here", which is wrong: the two names resolve to
+    overlapping raw codes through RTOMaster/MakeModelMaster, just not through
+    a name either group directly references. is_hidden_risk marks that row so
+    the template can call out the real cause instead of the absence of one.
     """
+    hidden_axis_codes = hidden_axis_codes or {}
     axes = []
     for field, label in CATEGORICAL_AXES:
         axes.append({
@@ -533,12 +562,22 @@ def describe_pair(a, b):
             "overlap": "wildcard" if a[field] == "NA" or b[field] == "NA" else "identical",
         })
     for field, label in LIST_AXES:
-        axes.append({
-            "label": label,
-            "a": format_cluster(a[field]),
-            "b": format_cluster(b[field]),
-            "overlap": format_cluster(a[field] & b[field], blank="both blank"),
-        })
+        hidden_codes = hidden_axis_codes.get(field)
+        if hidden_codes:
+            axes.append({
+                "label": label,
+                "a": format_cluster(a[field]),
+                "b": format_cluster(b[field]),
+                "overlap": f"shares raw code(s): {format_cluster(hidden_codes)}",
+                "is_hidden_risk": True,
+            })
+        else:
+            axes.append({
+                "label": label,
+                "a": format_cluster(a[field]),
+                "b": format_cluster(b[field]),
+                "overlap": format_cluster(a[field] & b[field], blank="both blank"),
+            })
     # Context last, flagged so the drill-down can separate it from the fields
     # that actually drove the conflict.
     for field, label in CONTEXT_AXES:
@@ -558,11 +597,17 @@ def describe_pair(a, b):
 def overlap_summary(axes):
     """
     The one-line version of describe_pair, for the drill-down's summary column:
-    just the range axes that actually pin the collision down somewhere, since
-    an axis where both sides are wide open says nothing about where to look.
+    the range axes that actually pin the collision down somewhere (an axis
+    where both sides are wide open says nothing about where to look), plus any
+    hidden-risk axis, since for a Double Rate Risk pair that IS where the
+    collision is - a range chip alone would show every axis lining up with
+    nothing pointing at the actual cause.
     """
     summary = []
     for axis in axes:
+        if axis.get("is_hidden_risk"):
+            summary.append({"label": axis["label"], "text": axis["overlap"]})
+            continue
         if not axis.get("is_range"):
             continue
         low, high = axis["overlap"]
@@ -661,6 +706,163 @@ def load_active_groups():
     return list(groups.values())
 
 
+# --- Double Rate Risk: master-table cluster collisions ----------------------
+#
+# Everything above compares RateMaster groups by the cluster NAMES each one
+# references (RULE 5a/5b's own comparison: does new_rto_list/new_vehicle_makes
+# share an item). That misses a real class of collision one layer further
+# upstream: two DIFFERENT cluster names can still resolve to the same MIS raw
+# code if that code was pasted into more than one RTOMaster.rto_cluster or
+# MakeModelMaster.make_model_cluster list. mapping_engine.build_master_lookup
+# resolves a raw MIS value to EVERY name whose cluster contains it and tries
+# all of them (see check_resolved_cluster_match) - so a policy carrying that
+# code can match both RateMaster groups even though their cluster NAMES never
+# intersect and every group-vs-group comparison above reports them as fine.
+#
+# This is deliberately not folded into groups_conflict/classify_pair: it needs
+# the master tables preloaded (build_cluster_code_index), and by construction
+# it only ever fires on pairs the primary sweep has ALREADY decided don't
+# conflict (their list-axis names don't match) - so it can never double-count
+# a pair the cards above already show, and doesn't touch classify_pair's
+# existing, tested behaviour at all.
+
+
+# Literal cluster items confirmed, by inspecting the real RTOMaster data, to
+# be padding rather than real codes - see build_cluster_code_index.
+PLACEHOLDER_CODES = {"0"}
+
+
+def build_cluster_code_index(name_field, cluster_field, model):
+    """
+    {cluster name (lower, stripped) -> set of raw codes (upper, stripped)} for
+    RTOMaster or MakeModelMaster, loaded once per scan rather than per pair.
+
+    Keys are normalized to match load_active_groups' new_rto_list/
+    new_vehicle_makes frozensets (split_cluster lower-cases); values are
+    normalized to match build_master_lookup's own upper-cased comparison, so a
+    collision found here is one the mapping engine would actually hit.
+
+    Excludes PLACEHOLDER_CODES: several RTOMaster rows carry a bare "0" as a
+    literal item (e.g. ROYAL_MAY26_REST_OF__ANDHRA_PRADESH:
+    "...,AP30,0,0,0,0,0,0,0,0,0,0,0,0,0") - almost certainly padding from
+    however the cluster strings were generated, not a real RTO/make-model
+    code. Left in, it alone connected ~1,450 otherwise-unrelated pairs across
+    a dozen Andhra Pradesh/Telangana clusters that share nothing real - a
+    single data artifact swamping every genuine finding underneath it.
+    """
+    index = {}
+    for name, cluster in model.objects.values_list(name_field, cluster_field):
+        if not cluster:
+            continue
+        codes = {
+            code.strip().upper() for code in str(cluster).split(",") if code.strip()
+        } - PLACEHOLDER_CODES
+        if codes:
+            index[str(name).strip().lower()] = codes
+    return index
+
+
+def _codes_for_names(names, code_index):
+    codes = set()
+    for name in names:
+        codes |= code_index.get(name, set())
+    return codes
+
+
+def _axis_conflict_status(a_names, b_names, code_index):
+    """
+    Does this list axis (RTO or Make cluster) fail to separate two groups, and
+    if so, is that visible through the cluster names themselves or only
+    through the raw codes underneath?
+
+    Returns (compatible, hidden_codes). compatible=False means the axis
+    genuinely discriminates the two groups - no collision here at all, by name
+    or by code. hidden_codes is non-empty only when the names DON'T overlap
+    (the ordinary case _lists_compatible already covers) but the master
+    tables' raw codes do - that's the collision this sweep exists to find.
+    """
+    if _lists_compatible(a_names, b_names):
+        return True, frozenset()
+    hidden = _codes_for_names(a_names, code_index) & _codes_for_names(b_names, code_index)
+    return bool(hidden), hidden
+
+
+def detect_double_rate_risk_pairs(groups, rto_code_index, make_model_code_index, cap=None):
+    """
+    Pairs where every RULE 1-6 axis except RTO/Make lines up, AND at least one
+    of those two list axes only conflicts through a raw code shared between
+    two differently-named clusters - never through the primary sweep's
+    name-based check, since a pair that clears BOTH axes by name is already
+    reported (or not) by classify_pair up in detect_overlap_pairs.
+
+    Unlike every other conflict type, this one does NOT exclude pairs whose
+    Add T&C differs. Everywhere else, differing T&Cs mean the fix would be
+    re-cutting the INSURER's own grid, which isn't the brokerage's to touch -
+    that's why classify_pair drops those pairs entirely. Here the object that
+    needs fixing is RTOMaster/MakeModelMaster: the brokerage's own cluster
+    definitions, always editable, regardless of whether the two RateMaster
+    rows happen to be genuinely different offers.
+
+    Returns (pairs, true_count, was_capped) - same shape as detect_overlap_pairs
+    (pairs vs counts_by_type vs capped_types) so run_overlap_scan can report
+    the true total even when the stored subset was capped.
+    """
+    by_insurer = defaultdict(list)
+    for group in groups:
+        by_insurer[group["insurance_company"]].append(group)
+
+    found = []
+    for members in by_insurer.values():
+        for first, second in _candidate_pairs(members):
+            if not _non_list_axes_compatible(first, second):
+                continue
+
+            rto_ok, rto_hidden = _axis_conflict_status(
+                first["new_rto_list"], second["new_rto_list"], rto_code_index
+            )
+            if not rto_ok:
+                continue
+            make_ok, make_hidden = _axis_conflict_status(
+                first["new_vehicle_makes"], second["new_vehicle_makes"], make_model_code_index
+            )
+            if not make_ok:
+                continue
+            if not rto_hidden and not make_hidden:
+                # Both axes line up by cluster name - already the primary
+                # sweep's territory, not a hidden collision.
+                continue
+
+            if first["grid_key"] <= second["grid_key"]:
+                low, high = first, second
+            else:
+                low, high = second, first
+
+            hidden_axis_codes = {}
+            if rto_hidden:
+                hidden_axis_codes["new_rto_list"] = rto_hidden
+            if make_hidden:
+                hidden_axis_codes["new_vehicle_makes"] = make_hidden
+
+            axes = describe_pair(low, high, hidden_axis_codes=hidden_axis_codes)
+            found.append({
+                "insurance_company": low["insurer_display"],
+                "group_key_a": low["grid_key"],
+                "group_key_b": high["grid_key"],
+                "conflict_type": CONFLICT_DOUBLE_RATE_RISK,
+                "severity_rank": CONFLICT_SEVERITY[CONFLICT_DOUBLE_RATE_RISK],
+                "row_count_a": low["row_count"],
+                "row_count_b": high["row_count"],
+                "detail": {"axes": axes, "summary": overlap_summary(axes)},
+            })
+
+    found.sort(key=lambda p: (p["insurance_company"], p["group_key_a"], p["group_key_b"]))
+    true_count = len(found)
+    was_capped = cap is not None and true_count > cap
+    if was_capped:
+        found = found[:cap]
+    return found, true_count, was_capped
+
+
 # --- Pair sweep -------------------------------------------------------------
 def _candidate_pairs(members):
     """
@@ -702,6 +904,7 @@ def _candidate_pairs(members):
 # always shows the TRUE count from counts_by_type, never the stored subset, so
 # capping never understates the problem.
 DEFAULT_TYPE_CAPS = {
+    CONFLICT_DOUBLE_RATE_RISK: 20000,
     CONFLICT_EXACT_DUPLICATE: 20000,
     CONFLICT_CONTAINED: 20000,
     CONFLICT_OPEN_ENDED: 20000,
@@ -803,7 +1006,7 @@ def run_overlap_scan(scan_id, type_caps=None):
     once this one has succeeded.
     """
     from django.utils import timezone
-    from .models import RateOverlapPair, RateOverlapScan
+    from .models import MakeModelMaster, RateOverlapPair, RateOverlapScan, RTOMaster
 
     scan = RateOverlapScan.objects.get(id=scan_id)
     try:
@@ -811,6 +1014,20 @@ def run_overlap_scan(scan_id, type_caps=None):
         pairs, counts_by_type, capped_types, tnc_differing_skipped = detect_overlap_pairs(
             groups, type_caps=type_caps
         )
+
+        caps = type_caps if type_caps is not None else DEFAULT_TYPE_CAPS
+        rto_code_index = build_cluster_code_index("rto_name", "rto_cluster", RTOMaster)
+        make_model_code_index = build_cluster_code_index(
+            "make_model_name", "make_model_cluster", MakeModelMaster
+        )
+        double_rate_pairs, double_rate_count, double_rate_capped = detect_double_rate_risk_pairs(
+            groups, rto_code_index, make_model_code_index,
+            cap=caps.get(CONFLICT_DOUBLE_RATE_RISK),
+        )
+        counts_by_type[CONFLICT_DOUBLE_RATE_RISK] = double_rate_count
+        pairs = pairs + double_rate_pairs
+        if double_rate_capped:
+            capped_types = capped_types + [CONFLICT_DOUBLE_RATE_RISK]
 
         RateOverlapPair.objects.bulk_create(
             [RateOverlapPair(scan=scan, **pair) for pair in pairs],
