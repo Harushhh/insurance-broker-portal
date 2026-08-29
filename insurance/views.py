@@ -2700,6 +2700,11 @@ EQUALITY_ERROR_RULES = [
         "violations_fn": lambda: _rate_master_equality_violations_qs("tariff_min", "tariff_max"),
         "columns": [("tariff_min", "Tariff Min"), ("tariff_max", "Tariff Max")],
     },
+    {
+        "label": "Validity Date Equality",
+        "violations_fn": lambda: _rate_master_equality_violations_qs("from_date", "to_date"),
+        "columns": [("from_date", "From Date"), ("to_date", "To Date")],
+    },
 ]
 EQUALITY_ERROR_RULES_MAP = {rule["label"]: rule for rule in EQUALITY_ERROR_RULES}
 
