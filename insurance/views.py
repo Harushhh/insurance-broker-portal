@@ -8,6 +8,7 @@ from django.urls import reverse
 from django.template.loader import render_to_string
 from django.http import HttpResponse, JsonResponse
 from django.db.models import Q, F, Count, Sum, Case, When, Value, CharField
+from django.db.models.functions import Coalesce
 from django.core.mail import send_mail
 from django.core.paginator import Paginator
 from django.core.cache import cache
@@ -2707,6 +2708,24 @@ def _rate_master_equality_error_counts():
     return [{"label": rule["label"], "count": rule["violations_fn"]().count()} for rule in EQUALITY_ERROR_RULES]
 
 
+def _rate_master_grid_summary_qs():
+    """
+    Pivot of uploaded RateMaster grids across the same six fields the
+    dashboard uses to describe a grid: product, sub_product,
+    insurance_company, from_date, to_date, status. grid_count is a DISTINCT
+    count of group_id (falling back to id for the rare row with no group
+    assigned), not a row count, so one grid that exploded into hundreds of
+    make/RTO/CC rate lines still only counts once.
+    """
+    return (
+        RateMaster.objects
+        .annotate(grid_key=Coalesce("group_id", "id"))
+        .values("product__name", "sub_product__name", "insurance_company", "from_date", "to_date", "status")
+        .annotate(grid_count=Count("grid_key", distinct=True))
+        .order_by("-grid_count", "insurance_company", "product__name", "sub_product__name")
+    )
+
+
 def rate_master_health(request):
     _sync_unsynced_mis_files()
 
@@ -2767,6 +2786,22 @@ def rate_master_health(request):
     pi_type_error_counts = _rate_master_pi_type_error_counts()
     range_error_counts = _rate_master_range_error_counts()
     equality_error_counts = _rate_master_equality_error_counts()
+
+    # Grid Summary pivot — materialized once so the paginator doesn't re-run
+    # the aggregate query, same pattern dashboard() uses for ordered_gids.
+    grid_summary_rows = list(_rate_master_grid_summary_qs())
+    grid_summary_total_combinations = len(grid_summary_rows)
+    grid_summary_total_grids = sum(r["grid_count"] for r in grid_summary_rows)
+
+    grid_summary_paginator = Paginator(grid_summary_rows, MIS_HEALTH_BATCH_SIZE)
+    try:
+        grid_summary_page_number = int(request.GET.get("grid_page") or 1)
+    except ValueError:
+        grid_summary_page_number = 1
+    grid_summary_page_obj = grid_summary_paginator.get_page(grid_summary_page_number)
+    grid_summary_elided_range = list(
+        grid_summary_paginator.get_elided_page_range(grid_summary_page_obj.number, on_each_side=1, on_ends=1)
+    )
 
     # Drill-down: clicking an Error Dashboard card lists the distinct Rate
     # Master groups behind that rule's violating rows, so the user can jump
@@ -2860,6 +2895,10 @@ def rate_master_health(request):
         "error_group_page_obj": error_group_page_obj,
         "error_group_elided_range": error_group_elided_range,
         "error_group_ungrouped_count": error_group_ungrouped_count,
+        "grid_summary_page_obj": grid_summary_page_obj,
+        "grid_summary_elided_range": grid_summary_elided_range,
+        "grid_summary_total_combinations": grid_summary_total_combinations,
+        "grid_summary_total_grids": grid_summary_total_grids,
         "selected": {
             "failure_reason": status_key,
             "insurer": insurer,
@@ -2867,6 +2906,36 @@ def rate_master_health(request):
             "date_to": date_to,
         },
     })
+
+
+def export_grid_summary_xlsx(request):
+    """
+    Same pivot as the Grid Summary tab above -- always the full aggregate
+    (all combinations), regardless of which page the on-screen table happens
+    to be showing, since grid_page only controls that table's pagination.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Grid Summary"
+    ws.append(["product", "sub_product", "insurance_company", "from_date", "to_date", "status", "grid_count"])
+
+    for r in _rate_master_grid_summary_qs():
+        ws.append([
+            r["product__name"] or "",
+            r["sub_product__name"] or "",
+            r["insurance_company"],
+            r["from_date"].strftime("%Y-%m-%d") if r["from_date"] else "",
+            r["to_date"].strftime("%Y-%m-%d") if r["to_date"] else "",
+            r["status"],
+            r["grid_count"],
+        ])
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = 'attachment; filename="grid_summary_export.xlsx"'
+    wb.save(response)
+    return response
 
 # -------------------------
 # HEALTH RATE MASTER
