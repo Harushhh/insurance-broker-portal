@@ -922,7 +922,6 @@
                 <div>
                     <label class="text-overline" style="margin-bottom: 4px;">Insurer</label>
                     <select name="insurer" class="form-select-premium" style="height: 36px; font-size: 12px; min-width: 220px;">
-                        <option value="">All Insurers</option>
                         {% for c in overlap_insurer_list %}
                             <option value="{{ c }}" {% if overlap_scan.filter_insurer == c %}selected{% endif %}>{{ c }}</option>
                         {% endfor %}
@@ -938,7 +937,7 @@
                     {% if overlap_scan_running %}Scan running…{% else %}Run Scan{% endif %}
                 </button>
                 <span class="text-muted" style="font-size: 11px; margin-bottom: 8px;">
-                    Leave blank to scan the whole active Rate Master.
+                    Leave "Valid As Of" blank to scan the insurer's full validity range.
                 </span>
             </form>
 
