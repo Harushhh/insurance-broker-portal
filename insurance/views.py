@@ -2717,7 +2717,7 @@ def _rate_master_equality_error_counts():
     return [{"label": rule["label"], "count": rule["violations_fn"]().count()} for rule in EQUALITY_ERROR_RULES]
 
 
-def _rate_master_grid_summary_qs():
+def _rate_master_grid_summary_qs(as_of_date=None):
     """
     Pivot of uploaded RateMaster grids across the same six fields the
     dashboard uses to describe a grid: product, sub_product,
@@ -2725,9 +2725,21 @@ def _rate_master_grid_summary_qs():
     count of group_id (falling back to id for the rare row with no group
     assigned), not a row count, so one grid that exploded into hundreds of
     make/RTO/CC rate lines still only counts once.
+
+    as_of_date optionally restricts the pivot to grids valid on that date -
+    same inclusive from_date/to_date check used everywhere else in this
+    codebase a payout rate's validity is tested (motor/health payout lookups,
+    the Overlap scan's own "Valid As Of" filter), with a NULL bound treated as
+    open-ended rather than "never valid".
     """
+    qs = RateMaster.objects
+    if as_of_date:
+        qs = qs.filter(
+            (Q(from_date__lte=as_of_date) | Q(from_date__isnull=True))
+            & (Q(to_date__gte=as_of_date) | Q(to_date__isnull=True))
+        )
     return (
-        RateMaster.objects
+        qs
         .annotate(grid_key=Coalesce("group_id", "id"))
         .values("product__name", "sub_product__name", "insurance_company", "from_date", "to_date", "status")
         .annotate(grid_count=Count("grid_key", distinct=True))
@@ -3092,7 +3104,15 @@ def rate_master_health(request):
 
     # Grid Summary pivot — materialized once so the paginator doesn't re-run
     # the aggregate query, same pattern dashboard() uses for ordered_gids.
-    grid_summary_rows = list(_rate_master_grid_summary_qs())
+    grid_summary_as_of_date_raw = (request.GET.get("grid_as_of_date") or "").strip()
+    grid_summary_as_of_date = None
+    if grid_summary_as_of_date_raw:
+        try:
+            grid_summary_as_of_date = datetime.strptime(grid_summary_as_of_date_raw, "%Y-%m-%d").date()
+        except ValueError:
+            grid_summary_as_of_date_raw = ""
+
+    grid_summary_rows = list(_rate_master_grid_summary_qs(as_of_date=grid_summary_as_of_date))
     grid_summary_total_combinations = len(grid_summary_rows)
     grid_summary_total_grids = sum(r["grid_count"] for r in grid_summary_rows)
 
@@ -3226,6 +3246,7 @@ def rate_master_health(request):
         "grid_summary_elided_range": grid_summary_elided_range,
         "grid_summary_total_combinations": grid_summary_total_combinations,
         "grid_summary_total_grids": grid_summary_total_grids,
+        "grid_summary_as_of_date": grid_summary_as_of_date_raw,
         "overlap_scan": overlap_scan,
         "overlap_scan_running": _active_overlap_scan(),
         "overlap_insurer_list": _active_rate_master_insurers(),
@@ -3255,13 +3276,26 @@ def export_grid_summary_xlsx(request):
     Same pivot as the Grid Summary tab above -- always the full aggregate
     (all combinations), regardless of which page the on-screen table happens
     to be showing, since grid_page only controls that table's pagination.
+
+    Does honour grid_as_of_date, though: that's a real content filter, not
+    pagination, so a Download Excel click exports whatever the on-screen
+    table is currently filtered to, same as every other export on this site
+    respects its page's own filters.
     """
+    as_of_date = None
+    as_of_date_raw = (request.GET.get("grid_as_of_date") or "").strip()
+    if as_of_date_raw:
+        try:
+            as_of_date = datetime.strptime(as_of_date_raw, "%Y-%m-%d").date()
+        except ValueError:
+            pass
+
     wb = Workbook()
     ws = wb.active
     ws.title = "Grid Summary"
     ws.append(["product", "sub_product", "insurance_company", "from_date", "to_date", "status", "grid_count"])
 
-    for r in _rate_master_grid_summary_qs():
+    for r in _rate_master_grid_summary_qs(as_of_date=as_of_date):
         ws.append([
             r["product__name"] or "",
             r["sub_product__name"] or "",

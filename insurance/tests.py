@@ -322,3 +322,75 @@ class RateCheckerEntryTests(TestCase):
     def test_forbidden_with_none_of_the_three_groups(self):
         response = self.client.get(reverse("rate_checker"))
         self.assertEqual(response.status_code, 403)
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class GridSummaryDateFilterTests(TestCase):
+    """Rate Master Health > Grid Summary's "Valid As Of" filter."""
+
+    def setUp(self):
+        from datetime import date
+        from insurance.models import ProductMaster, RateGroup, RateMaster
+
+        self.client = Client()
+        Group.objects.get_or_create(name="Can_View_Rate_Master_Health")
+        self.user = User.objects.create_user(username="ops", password="a-strong-test-password-1")
+        self.user.groups.add(Group.objects.get(name="Can_View_Rate_Master_Health"))
+        self.client.force_login(self.user)
+
+        product = ProductMaster.objects.create(name="Private Car")
+        RateMaster.objects.create(
+            insurance_company="Acme General", product=product, status="ACTIVE", is_deleted="NO",
+            group=RateGroup.objects.create(key_hash="h1"),
+            from_date=date(2026, 1, 1), to_date=date(2026, 6, 30),
+        )
+        RateMaster.objects.create(
+            insurance_company="Zenith Insurance", product=product, status="ACTIVE", is_deleted="NO",
+            group=RateGroup.objects.create(key_hash="h2"),
+            from_date=date(2026, 7, 1), to_date=date(2026, 12, 31),
+        )
+
+    def test_no_filter_shows_every_grid(self):
+        response = self.client.get(reverse("rate_master_health"), {"view": "grid"})
+        self.assertEqual(response.context["grid_summary_total_combinations"], 2)
+
+    def test_as_of_date_narrows_to_grids_valid_on_that_date(self):
+        response = self.client.get(
+            reverse("rate_master_health"), {"view": "grid", "grid_as_of_date": "2026-03-15"}
+        )
+        rows = list(response.context["grid_summary_page_obj"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["insurance_company"], "Acme General")
+
+    def test_an_invalid_date_is_ignored_rather_than_erroring(self):
+        response = self.client.get(
+            reverse("rate_master_health"), {"view": "grid", "grid_as_of_date": "not-a-date"}
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["grid_summary_total_combinations"], 2)
+
+    def test_export_honours_the_same_filter(self):
+        response = self.client.get(
+            reverse("export_grid_summary_xlsx"), {"grid_as_of_date": "2026-03-15"}
+        )
+        self.assertEqual(response.status_code, 200)
+
+        import io
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(response.content))
+        ws = wb.active
+        data_rows = list(ws.iter_rows(min_row=2, values_only=True))
+        self.assertEqual(len(data_rows), 1)
+        self.assertEqual(data_rows[0][2], "Acme General")
+
+    def test_export_with_no_filter_exports_everything(self):
+        response = self.client.get(reverse("export_grid_summary_xlsx"))
+        import io
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(response.content))
+        ws = wb.active
+        data_rows = list(ws.iter_rows(min_row=2, values_only=True))
+        self.assertEqual(len(data_rows), 2)

@@ -806,18 +806,38 @@
                     </div>
                 </div>
 
-                <a href="{% url 'export_grid_summary_xlsx' %}" class="btn-soft bg-white">
+                <a href="{% url 'export_grid_summary_xlsx' %}?grid_as_of_date={{ grid_summary_as_of_date }}" class="btn-soft bg-white">
                     <i class="bi bi-file-earmark-excel text-success fs-5"></i> Download Excel
                 </a>
             </div>
         </div>
 
         <div class="p-4">
-            <p class="text-muted mb-4" style="font-size: 14px; max-width: 760px;">
+            <p class="text-muted mb-3" style="font-size: 14px; max-width: 760px;">
                 How many insurer grids have been uploaded, deduplicated by <code>group_id</code> (a grid that
                 exploded into many make/RTO/CC rate lines still counts once) and pivoted across Product,
                 Sub Product, Insurer, From Date, To Date, and Status.
             </p>
+
+            <form method="GET"
+                  class="d-flex align-items-end flex-wrap gap-2 mb-3 p-3"
+                  style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;">
+                <input type="hidden" name="view" value="grid">
+                <div>
+                    <label class="text-overline" style="margin-bottom: 4px;">Valid As Of</label>
+                    <input type="date" name="grid_as_of_date" class="form-control-premium" style="height: 36px; font-size: 12px;"
+                           value="{{ grid_summary_as_of_date }}">
+                </div>
+                <button type="submit" class="btn-soft bg-white">
+                    <i class="bi bi-funnel"></i> Apply
+                </button>
+                {% if grid_summary_as_of_date %}
+                    <a href="?view=grid" class="btn-text">Clear</a>
+                {% endif %}
+                <span class="text-muted" style="font-size: 11px; margin-bottom: 8px;">
+                    Leave blank to show every uploaded grid, regardless of validity.
+                </span>
+            </form>
 
             {% if grid_summary_page_obj and grid_summary_page_obj.paginator.count > 0 %}
                 <div class="table-responsive-custom">
@@ -858,8 +878,8 @@
                 {% if grid_summary_page_obj.paginator.num_pages > 1 %}
                     <div class="pager">
                         {% if grid_summary_page_obj.has_previous %}
-                            <a href="?view=grid&grid_page=1">&laquo; First</a>
-                            <a href="?view=grid&grid_page={{ grid_summary_page_obj.previous_page_number }}">&lsaquo; Prev</a>
+                            <a href="?view=grid&grid_as_of_date={{ grid_summary_as_of_date }}&grid_page=1">&laquo; First</a>
+                            <a href="?view=grid&grid_as_of_date={{ grid_summary_as_of_date }}&grid_page={{ grid_summary_page_obj.previous_page_number }}">&lsaquo; Prev</a>
                         {% else %}
                             <span class="disabled">&laquo; First</span>
                             <span class="disabled">&lsaquo; Prev</span>
@@ -871,13 +891,13 @@
                             {% elif p == grid_summary_page_obj.number %}
                                 <span class="page-num active">{{ p }}</span>
                             {% else %}
-                                <a class="page-num" href="?view=grid&grid_page={{ p }}">{{ p }}</a>
+                                <a class="page-num" href="?view=grid&grid_as_of_date={{ grid_summary_as_of_date }}&grid_page={{ p }}">{{ p }}</a>
                             {% endif %}
                         {% endfor %}
 
                         {% if grid_summary_page_obj.has_next %}
-                            <a href="?view=grid&grid_page={{ grid_summary_page_obj.next_page_number }}">Next &rsaquo;</a>
-                            <a href="?view=grid&grid_page={{ grid_summary_page_obj.paginator.num_pages }}">Last &raquo;</a>
+                            <a href="?view=grid&grid_as_of_date={{ grid_summary_as_of_date }}&grid_page={{ grid_summary_page_obj.next_page_number }}">Next &rsaquo;</a>
+                            <a href="?view=grid&grid_as_of_date={{ grid_summary_as_of_date }}&grid_page={{ grid_summary_page_obj.paginator.num_pages }}">Last &raquo;</a>
                         {% else %}
                             <span class="disabled">Next &rsaquo;</span>
                             <span class="disabled">Last &raquo;</span>
