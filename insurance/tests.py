@@ -357,6 +357,37 @@ class GridSummaryDateFilterTests(TestCase):
         response = self.client.get(reverse("rate_master_health"), {"view": "grid"})
         self.assertEqual(response.context["grid_summary_total_combinations"], 2)
 
+    def test_soft_deleted_rows_are_excluded_from_the_pivot(self):
+        # is_deleted="YES" is the Rate Master dashboard's own "Is Deleted?"
+        # flag - a soft-deleted grid must not still count here as uploaded.
+        from datetime import date
+        from insurance.models import ProductMaster, RateGroup, RateMaster
+        RateMaster.objects.create(
+            insurance_company="Deleted Co", product=ProductMaster.objects.create(name="Two Wheeler"),
+            status="ACTIVE", is_deleted="YES", group=RateGroup.objects.create(key_hash="h3"),
+            from_date=date(2026, 1, 1), to_date=date(2026, 6, 30),
+        )
+        response = self.client.get(reverse("rate_master_health"), {"view": "grid"})
+        self.assertEqual(response.context["grid_summary_total_combinations"], 2)
+        rows = list(response.context["grid_summary_page_obj"])
+        self.assertFalse(any(r["insurance_company"] == "Deleted Co" for r in rows))
+
+    def test_inactive_but_not_deleted_rows_are_still_included(self):
+        # Deliberately different from is_deleted: an insurer's grid going
+        # INACTIVE is a real, current fact worth seeing - only a soft
+        # DELETE removes it from the pivot.
+        from datetime import date
+        from insurance.models import ProductMaster, RateGroup, RateMaster
+        RateMaster.objects.create(
+            insurance_company="Inactive Co", product=ProductMaster.objects.create(name="Two Wheeler"),
+            status="INACTIVE", is_deleted="NO", group=RateGroup.objects.create(key_hash="h4"),
+            from_date=date(2026, 1, 1), to_date=date(2026, 6, 30),
+        )
+        response = self.client.get(reverse("rate_master_health"), {"view": "grid"})
+        self.assertEqual(response.context["grid_summary_total_combinations"], 3)
+        rows = list(response.context["grid_summary_page_obj"])
+        self.assertTrue(any(r["insurance_company"] == "Inactive Co" for r in rows))
+
     def test_as_of_date_narrows_to_grids_valid_on_that_date(self):
         response = self.client.get(
             reverse("rate_master_health"), {"view": "grid", "grid_as_of_date": "2026-03-15"}

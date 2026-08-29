@@ -2726,13 +2726,20 @@ def _rate_master_grid_summary_qs(as_of_date=None):
     assigned), not a row count, so one grid that exploded into hundreds of
     make/RTO/CC rate lines still only counts once.
 
+    Excludes is_deleted="YES" rows - the Rate Master dashboard's own "Is
+    Deleted?" flag - so a soft-deleted grid doesn't still count here as
+    "uploaded". status itself (ACTIVE/INACTIVE) is deliberately left
+    unfiltered and shown as its own pivot column: unlike a deletion, an
+    insurer's grid going INACTIVE is a real, current fact about that grid
+    worth seeing, not stale bookkeeping to hide.
+
     as_of_date optionally restricts the pivot to grids valid on that date -
     same inclusive from_date/to_date check used everywhere else in this
     codebase a payout rate's validity is tested (motor/health payout lookups,
     the Overlap scan's own "Valid As Of" filter), with a NULL bound treated as
     open-ended rather than "never valid".
     """
-    qs = RateMaster.objects
+    qs = RateMaster.objects.filter(is_deleted="NO")
     if as_of_date:
         qs = qs.filter(
             (Q(from_date__lte=as_of_date) | Q(from_date__isnull=True))
