@@ -20,6 +20,10 @@ class Command(BaseCommand):
             help="Scope the scan to one insurer's ACTIVE Rate Master rows (exact match, e.g. 'Acme General Insurance Ltd').",
         )
         parser.add_argument(
+            "--product",
+            help="Scope the scan to one product's ACTIVE Rate Master rows (exact ProductMaster name, e.g. 'GCV 4W').",
+        )
+        parser.add_argument(
             "--as-of-date",
             help="Scope the scan to groups valid on this date (YYYY-MM-DD) - same inclusive from_date/to_date check the payout lookups use.",
         )
@@ -35,6 +39,15 @@ class Command(BaseCommand):
             if insurer not in active_insurers:
                 raise CommandError(f"'{insurer}' has no active Rate Master rows.")
 
+        product = (options.get("product") or "").strip() or None
+        if product:
+            active_products = set(
+                RateMaster.objects.filter(status="ACTIVE", is_deleted="NO", product__isnull=False)
+                .values_list("product__name", flat=True)
+            )
+            if product not in active_products:
+                raise CommandError(f"'{product}' has no active Rate Master rows.")
+
         as_of_date = None
         as_of_date_raw = (options.get("as_of_date") or "").strip()
         if as_of_date_raw:
@@ -43,8 +56,10 @@ class Command(BaseCommand):
             except ValueError:
                 raise CommandError(f"'{as_of_date_raw}' is not a valid YYYY-MM-DD date.")
 
-        scan = RateOverlapScan.objects.create(filter_insurer=insurer, filter_as_of_date=as_of_date)
-        scope_bits = [b for b in (insurer, as_of_date and f"as of {as_of_date}") if b]
+        scan = RateOverlapScan.objects.create(
+            filter_insurer=insurer, filter_product=product, filter_as_of_date=as_of_date
+        )
+        scope_bits = [b for b in (insurer, product, as_of_date and f"as of {as_of_date}") if b]
         scope_note = f" ({', '.join(scope_bits)})" if scope_bits else ""
         self.stdout.write(f"Scan #{scan.id}{scope_note} started - this takes ~20s on a full Rate Master.")
 

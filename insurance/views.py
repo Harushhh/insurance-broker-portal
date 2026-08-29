@@ -2859,12 +2859,39 @@ def _active_rate_master_insurers():
     )
 
 
+def _active_rate_master_products():
+    """Distinct product names actually present in the ACTIVE Rate Master."""
+    return list(
+        RateMaster.objects.filter(status="ACTIVE", is_deleted="NO", product__isnull=False)
+        .order_by().values_list("product__name", flat=True).distinct()
+    )
+
+
+def _scan_scope_label(scan):
+    """
+    "Acme General, GCV 4W, as of 29 Aug 2026" (or None for an unscoped scan) -
+    built once here rather than as inline template conditionals, since with
+    three independent optional parts the comma placement is combinatorial
+    (any of 7 non-empty combinations), not just a single if/else.
+    """
+    bits = [
+        bit for bit in (
+            scan.filter_insurer,
+            scan.filter_product,
+            scan.filter_as_of_date and f"as of {scan.filter_as_of_date.strftime('%d %b %Y')}",
+        )
+        if bit
+    ]
+    return ", ".join(bits) if bits else None
+
+
 def start_overlap_scan(request):
     """
-    Queues a fresh sweep, optionally scoped to one insurer and/or one validity
-    date. Results replace the previous scan's only once it succeeds - a scoped
-    scan supersedes a full one and vice versa, same as any other re-run,
-    since only the latest COMPLETED scan's pairs are ever shown.
+    Queues a fresh sweep, optionally scoped to one insurer, one product,
+    and/or one validity date. Results replace the previous scan's only once
+    it succeeds - a scoped scan supersedes a full one and vice versa, same as
+    any other re-run, since only the latest COMPLETED scan's pairs are ever
+    shown.
     """
     if request.method != "POST":
         return _overlap_redirect()
@@ -2881,6 +2908,14 @@ def start_overlap_scan(request):
         )
         return _overlap_redirect()
 
+    product = (request.POST.get("product") or "").strip()
+    if product and product not in _active_rate_master_products():
+        messages.error(
+            request,
+            f"Could not start the scan: '{product}' has no active Rate Master rows.",
+        )
+        return _overlap_redirect()
+
     as_of_date_raw = (request.POST.get("as_of_date") or "").strip()
     as_of_date = None
     if as_of_date_raw:
@@ -2893,6 +2928,7 @@ def start_overlap_scan(request):
     scan = RateOverlapScan.objects.create(
         triggered_by=request.user,
         filter_insurer=insurer or None,
+        filter_product=product or None,
         filter_as_of_date=as_of_date,
     )
     try:
@@ -2914,12 +2950,8 @@ def start_overlap_scan(request):
         )
         return _overlap_redirect()
 
-    scope_bits = []
-    if insurer:
-        scope_bits.append(insurer)
-    if as_of_date:
-        scope_bits.append(f"as of {as_of_date.strftime('%d %b %Y')}")
-    scope_note = f" ({', '.join(scope_bits)})" if scope_bits else ""
+    scope_label = _scan_scope_label(scan)
+    scope_note = f" ({scope_label})" if scope_label else ""
     messages.success(
         request, f"Overlap scan{scope_note} started. Reload this page in a moment to see the results."
     )
@@ -3144,6 +3176,7 @@ def rate_master_health(request):
     # sweep itself runs in a Celery task (start_overlap_scan), never on a page
     # view, for the same reason MISFailedRow exists.
     overlap_scan = _latest_overlap_scan()
+    overlap_scan_scope = _scan_scope_label(overlap_scan) if overlap_scan else None
     overlap_counts = _overlap_counts(overlap_scan)
     overlap_type = (request.GET.get("overlap_type") or "").strip()
     selected_overlap_rule = OVERLAP_RULES_MAP.get(overlap_type)
@@ -3196,6 +3229,8 @@ def rate_master_health(request):
         "overlap_scan": overlap_scan,
         "overlap_scan_running": _active_overlap_scan(),
         "overlap_insurer_list": _active_rate_master_insurers(),
+        "overlap_product_list": _active_rate_master_products(),
+        "overlap_scan_scope": overlap_scan_scope,
         "overlap_counts": overlap_counts,
         "overlap_total": sum(r["count"] for r in overlap_counts),
         "selected_overlap_type": overlap_type if selected_overlap_rule else "",

@@ -928,6 +928,15 @@
                     </select>
                 </div>
                 <div>
+                    <label class="text-overline" style="margin-bottom: 4px;">Product</label>
+                    <select name="product" class="form-select-premium" style="height: 36px; font-size: 12px; min-width: 180px;">
+                        <option value="">All Products</option>
+                        {% for p in overlap_product_list %}
+                            <option value="{{ p }}" {% if overlap_scan.filter_product == p %}selected{% endif %}>{{ p }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
                     <label class="text-overline" style="margin-bottom: 4px;">Valid As Of</label>
                     <input type="date" name="as_of_date" class="form-control-premium" style="height: 36px; font-size: 12px;"
                            value="{{ overlap_scan.filter_as_of_date|date:'Y-m-d'|default:'' }}">
@@ -945,14 +954,10 @@
                 <p class="text-muted mb-4" style="font-size: 12px;">
                     Last scanned {{ overlap_scan.finished_at|date:"d M Y, H:i" }} —
                     {{ overlap_scan.groups_scanned }} active groups compared
-                    {% if overlap_scan.filter_insurer or overlap_scan.filter_as_of_date %}
-                        <strong>
-                            ({% if overlap_scan.filter_insurer %}{{ overlap_scan.filter_insurer }}{% endif %}
-                            {% if overlap_scan.filter_insurer and overlap_scan.filter_as_of_date %}, {% endif %}
-                            {% if overlap_scan.filter_as_of_date %}as of {{ overlap_scan.filter_as_of_date|date:"d M Y" }}{% endif %})
-                        </strong>
+                    {% if overlap_scan_scope %}
+                        <strong>({{ overlap_scan_scope }})</strong>
                     {% else %}
-                        (all insurers, no date filter)
+                        (all insurers, all products, no date filter)
                     {% endif %}.
                     {% if overlap_scan.tnc_differing_skipped %}
                         {# Counted but not listed - see overlap_utils.classify_pair. #}

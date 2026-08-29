@@ -650,7 +650,7 @@ GROUP_VALUE_FIELDS = [
 ]
 
 
-def load_active_groups(insurer=None, as_of_date=None):
+def load_active_groups(insurer=None, product=None, as_of_date=None):
     """
     Every ACTIVE, non-deleted rate group, in the shape groups_conflict expects.
 
@@ -665,13 +665,13 @@ def load_active_groups(insurer=None, as_of_date=None):
     Reproducing that is correct here: this predicts the engine's behaviour, so
     it has to share the engine's key.
 
-    insurer/as_of_date optionally narrow the scan to one insurer and/or one
-    validity date, cutting cost on a large Rate Master and letting someone
-    check just the insurer/date they actually care about rather than the
-    whole grid. as_of_date uses the same inclusive from_date/to_date check
-    used everywhere else in this codebase a payout rate's validity is tested
-    (motor/health payout lookups) - a NULL bound is open-ended, exactly like
-    RULE 3/4 treat it during matching.
+    insurer/product/as_of_date optionally narrow the scan to one insurer, one
+    product, and/or one validity date, cutting cost on a large Rate Master and
+    letting someone check just the segment they actually care about rather
+    than the whole grid. as_of_date uses the same inclusive from_date/to_date
+    check used everywhere else in this codebase a payout rate's validity is
+    tested (motor/health payout lookups) - a NULL bound is open-ended, exactly
+    like RULE 3/4 treat it during matching.
     """
     from django.db.models import Q
     from .models import RateMaster
@@ -679,6 +679,8 @@ def load_active_groups(insurer=None, as_of_date=None):
     qs = RateMaster.objects.filter(status="ACTIVE", is_deleted="NO")
     if insurer:
         qs = qs.filter(insurance_company=insurer)
+    if product:
+        qs = qs.filter(product__name=product)
     if as_of_date:
         qs = qs.filter(
             (Q(from_date__lte=as_of_date) | Q(from_date__isnull=True))
@@ -1100,13 +1102,15 @@ def run_overlap_scan(scan_id, type_caps=None):
     scan = RateOverlapScan.objects.get(id=scan_id)
     try:
         started = time.monotonic()
-        groups = load_active_groups(insurer=scan.filter_insurer, as_of_date=scan.filter_as_of_date)
+        groups = load_active_groups(
+            insurer=scan.filter_insurer, product=scan.filter_product, as_of_date=scan.filter_as_of_date
+        )
         largest_insurer, largest_bucket = _largest_bucket_sizes(groups)
         logger.info(
             "Overlap scan %s: loaded %d active groups in %.1fs "
-            "(insurer=%r, as_of_date=%s; largest insurer=%d groups, largest same-axis bucket=%d groups)",
+            "(insurer=%r, product=%r, as_of_date=%s; largest insurer=%d groups, largest same-axis bucket=%d groups)",
             scan_id, len(groups), time.monotonic() - started,
-            scan.filter_insurer, scan.filter_as_of_date, largest_insurer, largest_bucket,
+            scan.filter_insurer, scan.filter_product, scan.filter_as_of_date, largest_insurer, largest_bucket,
         )
 
         step = time.monotonic()

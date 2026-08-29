@@ -918,10 +918,46 @@ class LoadActiveGroupsTests(TestCase):
         self.assertEqual(len(groups), 1)
         self.assertEqual(groups[0]["insurer_display"], "Acme General")
 
+    def test_product_filter_excludes_other_products(self):
+        self._rate(group=RateGroup.objects.create(key_hash="h1"), product=self.product)
+        self._rate(group=RateGroup.objects.create(key_hash="h2"), product=self.other_product)
+
+        groups = overlap_utils.load_active_groups(product="Private Car")
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["product"], "private car")
+
+    def test_insurer_and_product_and_as_of_date_all_combine(self):
+        from datetime import date
+        self._rate(
+            group=RateGroup.objects.create(key_hash="h1"), insurance_company="Acme General",
+            product=self.product, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30),
+        )
+        # Wrong product, otherwise identical - must be excluded.
+        self._rate(
+            group=RateGroup.objects.create(key_hash="h2"), insurance_company="Acme General",
+            product=self.other_product, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30),
+        )
+        # Wrong insurer, otherwise identical - must be excluded.
+        self._rate(
+            group=RateGroup.objects.create(key_hash="h3"), insurance_company="Zenith Insurance",
+            product=self.product, from_date=date(2026, 1, 1), to_date=date(2026, 6, 30),
+        )
+        # Wrong date, otherwise identical - must be excluded.
+        self._rate(
+            group=RateGroup.objects.create(key_hash="h4"), insurance_company="Acme General",
+            product=self.product, from_date=date(2026, 7, 1), to_date=date(2026, 12, 31),
+        )
+
+        groups = overlap_utils.load_active_groups(
+            insurer="Acme General", product="Private Car", as_of_date=date(2026, 3, 15)
+        )
+        self.assertEqual(len(groups), 1)
+
     def test_run_overlap_scan_reads_its_scope_off_the_scan_row(self):
-        # start_overlap_scan/the management command record filter_insurer and
-        # filter_as_of_date at CREATION time; run_overlap_scan(scan_id) itself
-        # takes no extra arguments, so it has to read them back off the scan.
+        # start_overlap_scan/the management command record filter_insurer,
+        # filter_product and filter_as_of_date at CREATION time;
+        # run_overlap_scan(scan_id) itself takes no extra arguments, so it has
+        # to read them back off the scan.
         self._rate(group=RateGroup.objects.create(key_hash="h1"), insurance_company="Acme General")
         self._rate(group=RateGroup.objects.create(key_hash="h2"), insurance_company="Zenith Insurance")
 
@@ -930,6 +966,16 @@ class LoadActiveGroupsTests(TestCase):
         scan.refresh_from_db()
 
         self.assertEqual(scan.status, RateOverlapScan.STATUS_COMPLETED)
+        self.assertEqual(scan.groups_scanned, 1)
+
+    def test_run_overlap_scan_reads_its_product_scope_off_the_scan_row(self):
+        self._rate(group=RateGroup.objects.create(key_hash="h1"), product=self.product)
+        self._rate(group=RateGroup.objects.create(key_hash="h2"), product=self.other_product)
+
+        scan = RateOverlapScan.objects.create(filter_product="Private Car")
+        overlap_utils.run_overlap_scan(scan.id)
+        scan.refresh_from_db()
+
         self.assertEqual(scan.groups_scanned, 1)
 
     def test_rows_sharing_a_group_are_one_group_not_a_self_conflict(self):
@@ -1160,7 +1206,7 @@ class OverlapDashboardViewTests(TestCase):
     "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
 })
 class OverlapScanScopeViewTests(TestCase):
-    """The Insurer / Valid As Of filter on the Run Scan form itself."""
+    """The Insurer / Product / Valid As Of filters on the Run Scan form itself."""
 
     def setUp(self):
         self.client = Client()
@@ -1170,13 +1216,14 @@ class OverlapScanScopeViewTests(TestCase):
         self.client.force_login(self.user)
 
         self.product = ProductMaster.objects.create(name="Private Car")
+        self.other_product = ProductMaster.objects.create(name="Two Wheeler")
         RateMaster.objects.create(
             insurance_company="Acme General", product=self.product,
             status="ACTIVE", is_deleted="NO",
             group=RateGroup.objects.create(key_hash="h1"),
         )
         RateMaster.objects.create(
-            insurance_company="Zenith Insurance", product=self.product,
+            insurance_company="Zenith Insurance", product=self.other_product,
             status="ACTIVE", is_deleted="NO",
             group=RateGroup.objects.create(key_hash="h2"),
         )
@@ -1198,9 +1245,21 @@ class OverlapScanScopeViewTests(TestCase):
         self.assertIsNone(scan.filter_insurer)
         self.assertIsNone(scan.filter_as_of_date)
 
+    def test_posting_a_product_scopes_the_created_scan(self):
+        self.client.post(reverse("start_overlap_scan"), {"product": "Private Car"})
+        scan = RateOverlapScan.objects.get()
+        self.assertEqual(scan.filter_product, "Private Car")
+
     def test_an_insurer_with_no_active_rows_is_refused_before_queuing(self):
         response = self.client.post(
             reverse("start_overlap_scan"), {"insurer": "Not A Real Insurer"}, follow=True
+        )
+        self.assertFalse(RateOverlapScan.objects.exists())
+        self.assertContains(response, "has no active Rate Master rows")
+
+    def test_a_product_with_no_active_rows_is_refused_before_queuing(self):
+        response = self.client.post(
+            reverse("start_overlap_scan"), {"product": "Not A Real Product"}, follow=True
         )
         self.assertFalse(RateOverlapScan.objects.exists())
         self.assertContains(response, "has no active Rate Master rows")
@@ -1218,6 +1277,12 @@ class OverlapScanScopeViewTests(TestCase):
             set(response.context["overlap_insurer_list"]), {"Acme General", "Zenith Insurance"}
         )
 
+    def test_overlap_product_list_is_scoped_to_the_active_rate_master(self):
+        response = self.client.get(reverse("rate_master_health"), {"view": "overlap"})
+        self.assertEqual(
+            set(response.context["overlap_product_list"]), {"Private Car", "Two Wheeler"}
+        )
+
     def test_the_form_pre_fills_from_the_latest_scans_own_scope(self):
         RateOverlapScan.objects.create(
             filter_insurer="Acme General", filter_as_of_date=None,
@@ -1225,6 +1290,17 @@ class OverlapScanScopeViewTests(TestCase):
         )
         response = self.client.get(reverse("rate_master_health"), {"view": "overlap"})
         self.assertContains(response, 'value="Acme General" selected')
+
+    def test_the_scope_line_reports_insurer_product_and_date_together(self):
+        from datetime import date
+        RateOverlapScan.objects.create(
+            filter_insurer="Acme General", filter_product="Private Car",
+            filter_as_of_date=date(2026, 3, 15), status=RateOverlapScan.STATUS_COMPLETED,
+        )
+        response = self.client.get(reverse("rate_master_health"), {"view": "overlap"})
+        self.assertEqual(
+            response.context["overlap_scan_scope"], "Acme General, Private Car, as of 15 Mar 2026"
+        )
 
 
 @override_settings(STORAGES={

@@ -979,8 +979,13 @@ class RateOverlapScan(models.Model):
     # (rather than passed as task args) so run_rate_overlap_scan_task's
     # signature stays just (scan_id) and a re-run of the SAME scoped scan is
     # just "Run Scan" again with the same form values, which the dashboard
-    # pre-fills from the latest scan's own filter_insurer/filter_as_of_date.
+    # pre-fills from the latest scan's own filter_insurer/filter_product/
+    # filter_as_of_date.
     filter_insurer = models.CharField(max_length=255, blank=True, null=True)
+    # ProductMaster.name, not an FK - a scan's scope has to survive that
+    # product being renamed or deleted later, same reasoning as filter_insurer
+    # storing the raw insurance_company string rather than a foreign key.
+    filter_product = models.CharField(max_length=255, blank=True, null=True)
     filter_as_of_date = models.DateField(null=True, blank=True)
     error_message = models.TextField(blank=True, null=True)
     started_at = models.DateTimeField(auto_now_add=True)
