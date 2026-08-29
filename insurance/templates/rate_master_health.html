@@ -901,18 +901,9 @@
             <h6 class="mb-0 fw-bold" style="color: #0f172a;">
                 <i class="bi bi-intersect text-primary me-2"></i> Overlapping Rate Groups
             </h6>
-            <div class="d-flex align-items-center gap-2">
-                <span class="status-pill {% if overlap_total %}pill-high{% else %}pill-low{% endif %}">
-                    {{ overlap_total|default:0 }} Conflicting Pairs
-                </span>
-                <form method="POST" action="{% url 'start_overlap_scan' %}" class="d-inline">
-                    {% csrf_token %}
-                    <button type="submit" class="btn-soft bg-white" {% if overlap_scan_running %}disabled{% endif %}>
-                        <i class="bi bi-arrow-repeat"></i>
-                        {% if overlap_scan_running %}Scan running…{% else %}Run Scan{% endif %}
-                    </button>
-                </form>
-            </div>
+            <span class="status-pill {% if overlap_total %}pill-high{% else %}pill-low{% endif %}">
+                {{ overlap_total|default:0 }} Conflicting Pairs
+            </span>
         </div>
 
         <div class="p-4">
@@ -924,10 +915,46 @@
                 that failure before the next MIS file is uploaded.
             </p>
 
+            <form method="POST" action="{% url 'start_overlap_scan' %}"
+                  class="d-flex align-items-end flex-wrap gap-2 mb-3 p-3"
+                  style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px;">
+                {% csrf_token %}
+                <div>
+                    <label class="text-overline" style="margin-bottom: 4px;">Insurer</label>
+                    <select name="insurer" class="form-select-premium" style="height: 36px; font-size: 12px; min-width: 220px;">
+                        <option value="">All Insurers</option>
+                        {% for c in overlap_insurer_list %}
+                            <option value="{{ c }}" {% if overlap_scan.filter_insurer == c %}selected{% endif %}>{{ c }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="text-overline" style="margin-bottom: 4px;">Valid As Of</label>
+                    <input type="date" name="as_of_date" class="form-control-premium" style="height: 36px; font-size: 12px;"
+                           value="{{ overlap_scan.filter_as_of_date|date:'Y-m-d'|default:'' }}">
+                </div>
+                <button type="submit" class="btn-soft bg-white" {% if overlap_scan_running %}disabled{% endif %}>
+                    <i class="bi bi-arrow-repeat"></i>
+                    {% if overlap_scan_running %}Scan running…{% else %}Run Scan{% endif %}
+                </button>
+                <span class="text-muted" style="font-size: 11px; margin-bottom: 8px;">
+                    Leave blank to scan the whole active Rate Master.
+                </span>
+            </form>
+
             {% if overlap_scan %}
                 <p class="text-muted mb-4" style="font-size: 12px;">
                     Last scanned {{ overlap_scan.finished_at|date:"d M Y, H:i" }} —
-                    {{ overlap_scan.groups_scanned }} active groups compared.
+                    {{ overlap_scan.groups_scanned }} active groups compared
+                    {% if overlap_scan.filter_insurer or overlap_scan.filter_as_of_date %}
+                        <strong>
+                            ({% if overlap_scan.filter_insurer %}{{ overlap_scan.filter_insurer }}{% endif %}
+                            {% if overlap_scan.filter_insurer and overlap_scan.filter_as_of_date %}, {% endif %}
+                            {% if overlap_scan.filter_as_of_date %}as of {{ overlap_scan.filter_as_of_date|date:"d M Y" }}{% endif %})
+                        </strong>
+                    {% else %}
+                        (all insurers, no date filter)
+                    {% endif %}.
                     {% if overlap_scan.tnc_differing_skipped %}
                         {# Counted but not listed - see overlap_utils.classify_pair. #}
                         {{ overlap_scan.tnc_differing_skipped }} pair{{ overlap_scan.tnc_differing_skipped|pluralize }}

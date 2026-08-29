@@ -974,6 +974,14 @@ class RateOverlapScan(models.Model):
     # unfixable queue beside the fixable ones. Recorded so the dashboard can
     # still say they were seen. See overlap_utils.classify_pair.
     tnc_differing_skipped = models.IntegerField(default=0)
+    # Optional scope the scan was run with. Null/blank means the full active
+    # Rate Master, same as before these existed. Recorded on the scan itself
+    # (rather than passed as task args) so run_rate_overlap_scan_task's
+    # signature stays just (scan_id) and a re-run of the SAME scoped scan is
+    # just "Run Scan" again with the same form values, which the dashboard
+    # pre-fills from the latest scan's own filter_insurer/filter_as_of_date.
+    filter_insurer = models.CharField(max_length=255, blank=True, null=True)
+    filter_as_of_date = models.DateField(null=True, blank=True)
     error_message = models.TextField(blank=True, null=True)
     started_at = models.DateTimeField(auto_now_add=True)
     finished_at = models.DateTimeField(null=True, blank=True)

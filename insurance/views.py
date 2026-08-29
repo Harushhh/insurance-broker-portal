@@ -2850,8 +2850,22 @@ def _rate_group_rows(group_key):
     return RateMaster.objects.filter(id=group_key, group__isnull=True, is_deleted="NO")
 
 
+def _active_rate_master_insurers():
+    """Distinct insurers actually present in the ACTIVE Rate Master - the population an overlap scan can run against."""
+    return list(
+        RateMaster.objects.filter(status="ACTIVE", is_deleted="NO")
+        .exclude(insurance_company="")
+        .order_by().values_list("insurance_company", flat=True).distinct()
+    )
+
+
 def start_overlap_scan(request):
-    """Queues a fresh sweep. Results replace the previous scan's only once it succeeds."""
+    """
+    Queues a fresh sweep, optionally scoped to one insurer and/or one validity
+    date. Results replace the previous scan's only once it succeeds - a scoped
+    scan supersedes a full one and vice versa, same as any other re-run,
+    since only the latest COMPLETED scan's pairs are ever shown.
+    """
     if request.method != "POST":
         return _overlap_redirect()
 
@@ -2859,7 +2873,28 @@ def start_overlap_scan(request):
         messages.info(request, "An overlap scan is already running - reload in a moment for its results.")
         return _overlap_redirect()
 
-    scan = RateOverlapScan.objects.create(triggered_by=request.user)
+    insurer = (request.POST.get("insurer") or "").strip()
+    if insurer and insurer not in _active_rate_master_insurers():
+        messages.error(
+            request,
+            f"Could not start the scan: '{insurer}' has no active Rate Master rows.",
+        )
+        return _overlap_redirect()
+
+    as_of_date_raw = (request.POST.get("as_of_date") or "").strip()
+    as_of_date = None
+    if as_of_date_raw:
+        try:
+            as_of_date = datetime.strptime(as_of_date_raw, "%Y-%m-%d").date()
+        except ValueError:
+            messages.error(request, f"Could not start the scan: '{as_of_date_raw}' is not a valid date.")
+            return _overlap_redirect()
+
+    scan = RateOverlapScan.objects.create(
+        triggered_by=request.user,
+        filter_insurer=insurer or None,
+        filter_as_of_date=as_of_date,
+    )
     try:
         run_rate_overlap_scan_task.delay(scan.id)
     except Exception as exc:
@@ -2879,7 +2914,15 @@ def start_overlap_scan(request):
         )
         return _overlap_redirect()
 
-    messages.success(request, "Overlap scan started. Reload this page in a moment to see the results.")
+    scope_bits = []
+    if insurer:
+        scope_bits.append(insurer)
+    if as_of_date:
+        scope_bits.append(f"as of {as_of_date.strftime('%d %b %Y')}")
+    scope_note = f" ({', '.join(scope_bits)})" if scope_bits else ""
+    messages.success(
+        request, f"Overlap scan{scope_note} started. Reload this page in a moment to see the results."
+    )
     return _overlap_redirect()
 
 
@@ -3152,6 +3195,7 @@ def rate_master_health(request):
         "grid_summary_total_grids": grid_summary_total_grids,
         "overlap_scan": overlap_scan,
         "overlap_scan_running": _active_overlap_scan(),
+        "overlap_insurer_list": _active_rate_master_insurers(),
         "overlap_counts": overlap_counts,
         "overlap_total": sum(r["count"] for r in overlap_counts),
         "selected_overlap_type": overlap_type if selected_overlap_rule else "",

@@ -862,6 +862,76 @@ class LoadActiveGroupsTests(TestCase):
         fields.update(overrides)
         return RateMaster.objects.create(**fields)
 
+    def test_insurer_filter_excludes_other_insurers(self):
+        self._rate(group=RateGroup.objects.create(key_hash="h1"), insurance_company="Acme General")
+        self._rate(group=RateGroup.objects.create(key_hash="h2"), insurance_company="Zenith Insurance")
+
+        groups = overlap_utils.load_active_groups(insurer="Acme General")
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["insurer_display"], "Acme General")
+
+    def test_no_insurer_filter_returns_everyone(self):
+        self._rate(group=RateGroup.objects.create(key_hash="h1"), insurance_company="Acme General")
+        self._rate(group=RateGroup.objects.create(key_hash="h2"), insurance_company="Zenith Insurance")
+        self.assertEqual(len(overlap_utils.load_active_groups()), 2)
+
+    def test_as_of_date_excludes_a_group_not_valid_on_that_date(self):
+        from datetime import date
+        self._rate(
+            group=RateGroup.objects.create(key_hash="h1"),
+            from_date=date(2026, 1, 1), to_date=date(2026, 6, 30),
+        )
+        self._rate(
+            group=RateGroup.objects.create(key_hash="h2"),
+            from_date=date(2026, 7, 1), to_date=date(2026, 12, 31),
+        )
+
+        groups = overlap_utils.load_active_groups(as_of_date=date(2026, 3, 15))
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["from_date"], date(2026, 1, 1))
+
+    def test_as_of_date_treats_a_null_bound_as_open_ended(self):
+        # Same convention as the payout lookups (motor_payout_rates etc.): a
+        # blank from_date/to_date means "always valid", not "never valid".
+        from datetime import date
+        self._rate(group=RateGroup.objects.create(key_hash="h1"), from_date=None, to_date=None)
+
+        groups = overlap_utils.load_active_groups(as_of_date=date(2026, 3, 15))
+        self.assertEqual(len(groups), 1)
+
+    def test_insurer_and_as_of_date_combine(self):
+        from datetime import date
+        self._rate(
+            group=RateGroup.objects.create(key_hash="h1"), insurance_company="Acme General",
+            from_date=date(2026, 1, 1), to_date=date(2026, 6, 30),
+        )
+        self._rate(
+            group=RateGroup.objects.create(key_hash="h2"), insurance_company="Acme General",
+            from_date=date(2026, 7, 1), to_date=date(2026, 12, 31),
+        )
+        self._rate(
+            group=RateGroup.objects.create(key_hash="h3"), insurance_company="Zenith Insurance",
+            from_date=date(2026, 1, 1), to_date=date(2026, 6, 30),
+        )
+
+        groups = overlap_utils.load_active_groups(insurer="Acme General", as_of_date=date(2026, 3, 15))
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["insurer_display"], "Acme General")
+
+    def test_run_overlap_scan_reads_its_scope_off_the_scan_row(self):
+        # start_overlap_scan/the management command record filter_insurer and
+        # filter_as_of_date at CREATION time; run_overlap_scan(scan_id) itself
+        # takes no extra arguments, so it has to read them back off the scan.
+        self._rate(group=RateGroup.objects.create(key_hash="h1"), insurance_company="Acme General")
+        self._rate(group=RateGroup.objects.create(key_hash="h2"), insurance_company="Zenith Insurance")
+
+        scan = RateOverlapScan.objects.create(filter_insurer="Acme General")
+        overlap_utils.run_overlap_scan(scan.id)
+        scan.refresh_from_db()
+
+        self.assertEqual(scan.status, RateOverlapScan.STATUS_COMPLETED)
+        self.assertEqual(scan.groups_scanned, 1)
+
     def test_rows_sharing_a_group_are_one_group_not_a_self_conflict(self):
         # A rate card exploded across per-RTO rows must not be reported as
         # conflicting with itself — the engine counts distinct groups.
@@ -1083,6 +1153,78 @@ class OverlapDashboardViewTests(TestCase):
         )
         unrelated.refresh_from_db()
         self.assertEqual(unrelated.status, "ACTIVE")
+
+
+@override_settings(STORAGES={
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+})
+class OverlapScanScopeViewTests(TestCase):
+    """The Insurer / Valid As Of filter on the Run Scan form itself."""
+
+    def setUp(self):
+        self.client = Client()
+        Group.objects.get_or_create(name="Can_View_Rate_Master_Health")
+        self.user = User.objects.create_user(username="ops", password="a-strong-test-password-1")
+        self.user.groups.add(Group.objects.get(name="Can_View_Rate_Master_Health"))
+        self.client.force_login(self.user)
+
+        self.product = ProductMaster.objects.create(name="Private Car")
+        RateMaster.objects.create(
+            insurance_company="Acme General", product=self.product,
+            status="ACTIVE", is_deleted="NO",
+            group=RateGroup.objects.create(key_hash="h1"),
+        )
+        RateMaster.objects.create(
+            insurance_company="Zenith Insurance", product=self.product,
+            status="ACTIVE", is_deleted="NO",
+            group=RateGroup.objects.create(key_hash="h2"),
+        )
+
+    def test_posting_an_insurer_scopes_the_created_scan(self):
+        self.client.post(reverse("start_overlap_scan"), {"insurer": "Acme General"})
+        scan = RateOverlapScan.objects.get()
+        self.assertEqual(scan.filter_insurer, "Acme General")
+        self.assertIsNone(scan.filter_as_of_date)
+
+    def test_posting_an_as_of_date_scopes_the_created_scan(self):
+        self.client.post(reverse("start_overlap_scan"), {"as_of_date": "2026-03-15"})
+        scan = RateOverlapScan.objects.get()
+        self.assertEqual(str(scan.filter_as_of_date), "2026-03-15")
+
+    def test_posting_neither_filter_scans_everything(self):
+        self.client.post(reverse("start_overlap_scan"), {})
+        scan = RateOverlapScan.objects.get()
+        self.assertIsNone(scan.filter_insurer)
+        self.assertIsNone(scan.filter_as_of_date)
+
+    def test_an_insurer_with_no_active_rows_is_refused_before_queuing(self):
+        response = self.client.post(
+            reverse("start_overlap_scan"), {"insurer": "Not A Real Insurer"}, follow=True
+        )
+        self.assertFalse(RateOverlapScan.objects.exists())
+        self.assertContains(response, "has no active Rate Master rows")
+
+    def test_an_invalid_date_is_refused_before_queuing(self):
+        response = self.client.post(
+            reverse("start_overlap_scan"), {"as_of_date": "not-a-date"}, follow=True
+        )
+        self.assertFalse(RateOverlapScan.objects.exists())
+        self.assertContains(response, "is not a valid date")
+
+    def test_overlap_insurer_list_is_scoped_to_the_active_rate_master(self):
+        response = self.client.get(reverse("rate_master_health"), {"view": "overlap"})
+        self.assertEqual(
+            set(response.context["overlap_insurer_list"]), {"Acme General", "Zenith Insurance"}
+        )
+
+    def test_the_form_pre_fills_from_the_latest_scans_own_scope(self):
+        RateOverlapScan.objects.create(
+            filter_insurer="Acme General", filter_as_of_date=None,
+            status=RateOverlapScan.STATUS_COMPLETED,
+        )
+        response = self.client.get(reverse("rate_master_health"), {"view": "overlap"})
+        self.assertContains(response, 'value="Acme General" selected')
 
 
 @override_settings(STORAGES={
