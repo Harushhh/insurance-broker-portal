@@ -2781,9 +2781,11 @@ OVERLAP_RULES_MAP = {rule["key"]: rule for rule in OVERLAP_RULES}
 
 # A RUNNING scan older than this is treated as abandoned (worker killed
 # mid-sweep, redis restarted) rather than blocking every future scan forever.
-# Comfortably past run_rate_overlap_scan_task's own 960s hard time limit, so a
-# scan that is merely slow is never mistaken for a dead one.
-OVERLAP_SCAN_STALE_AFTER = timedelta(minutes=20)
+# Comfortably past run_rate_overlap_scan_task's own 1860s hard time limit, so
+# a scan that is merely slow - even one running right up against that limit -
+# is never mistaken for a dead one and marked FAILED out from under a task
+# that's still legitimately executing.
+OVERLAP_SCAN_STALE_AFTER = timedelta(minutes=35)
 
 
 def _latest_overlap_scan():

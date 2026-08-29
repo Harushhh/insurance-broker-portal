@@ -85,10 +85,14 @@ across its rows, which only matters for new_rto_list (the one axis
 views.GROUP_FIELDS leaves out of the hash, so it can legitimately vary within
 a group).
 """
+import logging
+import time
 from collections import defaultdict
 
 from django.db.models import Count
 from django.db.models.functions import Coalesce
+
+logger = logging.getLogger(__name__)
 
 
 # --- Axis definitions -------------------------------------------------------
@@ -864,35 +868,74 @@ def detect_double_rate_risk_pairs(groups, rto_code_index, make_model_code_index,
 
 
 # --- Pair sweep -------------------------------------------------------------
+# Every axis _candidate_pairs pre-filters on before the expensive numeric/date/
+# list checks - each is (field, its wildcard value set), matching exactly what
+# _wildcard_compatible already treats as "matches anything" inside
+# _non_list_axes_compatible/groups_conflict. Bucketing on all of them (not
+# product alone) is what keeps one insurer with many distinct sub_product/
+# fuel_type/class/NCB-CPA-ZD combinations from forcing an O(n^2) scan over
+# every one of its rows - a single huge insurer/product bucket was measured
+# timing out a full scan in production (15+ minutes, never finishing) despite
+# taking under a minute against a smaller local copy of the same Rate Master.
+WILDCARD_BUCKET_AXES = (
+    [(field, frozenset({""})) for field, _label in CATEGORICAL_AXES]
+    + [("make_model_class", frozenset(CLASS_WILDCARDS))]
+    + [(field, frozenset({"NA"})) for field, _label in YNN_AXES]
+)
+
+
+def _bucket_key(group):
+    return tuple(group[field] for field, _wildcards in WILDCARD_BUCKET_AXES)
+
+
+def _bucket_keys_compatible(key_a, key_b):
+    """
+    Could ANY pair drawn from these two buckets still pass every
+    WILDCARD_BUCKET_AXES check? True unless some axis has two different,
+    both-non-wildcard values - exactly _wildcard_compatible's own rule,
+    applied once per bucket-pair instead of once per group-pair.
+    """
+    for (_field, wildcards), value_a, value_b in zip(WILDCARD_BUCKET_AXES, key_a, key_b):
+        if value_a in wildcards or value_b in wildcards:
+            continue
+        if value_a != value_b:
+            return False
+    return True
+
+
 def _candidate_pairs(members):
     """
     Every unordered pair from one insurer's groups, exactly once, skipping the
-    ones RULE 2's product axis already separates.
+    ones WILDCARD_BUCKET_AXES already separates.
 
-    Pure optimisation - groups_conflict re-checks product itself, so bucketing
-    can only ever drop pairs it would have rejected anyway. It matters because
-    a large insurer's group count squares: splitting by product turns one big
-    n^2 into the much smaller sum of per-product squares.
+    Pure optimisation - groups_conflict re-checks every one of these axes
+    itself, so this can only ever drop pairs it would have rejected anyway.
+    Groups are bucketed by their exact (product, sub_product, fuel_type,
+    class, ncb, cpa, zd) tuple; two buckets are only compared at all when
+    _bucket_keys_compatible says every axis could still match (same value, or
+    either side wildcard on that axis). The number of distinct buckets is
+    normally far smaller than the number of groups in them, so the expensive
+    part - the actual pairwise scan - only ever runs within one bucket or
+    across a pair of compatible buckets, never across the insurer's full
+    group list at once.
     """
-    wildcards = [g for g in members if not g["product"]]
-    by_product = defaultdict(list)
+    buckets = defaultdict(list)
     for group in members:
-        if group["product"]:
-            by_product[group["product"]].append(group)
+        buckets[_bucket_key(group)].append(group)
 
-    for bucket in by_product.values():
-        for i, first in enumerate(bucket):
-            for second in bucket[i + 1:]:
+    keys = list(buckets.keys())
+    for i, key_a in enumerate(keys):
+        bucket_a = buckets[key_a]
+        for first_idx, first in enumerate(bucket_a):
+            for second in bucket_a[first_idx + 1:]:
                 yield first, second
 
-    # A blank product matches every product, so those groups have to be tried
-    # against everything - including each other.
-    for i, first in enumerate(wildcards):
-        for second in wildcards[i + 1:]:
-            yield first, second
-        for bucket in by_product.values():
-            for second in bucket:
-                yield first, second
+        for key_b in keys[i + 1:]:
+            if not _bucket_keys_compatible(key_a, key_b):
+                continue
+            for first in bucket_a:
+                for second in buckets[key_b]:
+                    yield first, second
 
 
 # How many pairs of each type one scan stores. The three actionable buckets get
@@ -997,6 +1040,35 @@ def detect_overlap_pairs(groups, type_caps=None):
     return kept, counts_by_type, capped_types, tnc_differing_skipped
 
 
+def _largest_bucket_sizes(groups):
+    """
+    Diagnostic only - not used by detection itself. Reports the single
+    largest insurer group count, and the single largest WILDCARD_BUCKET_AXES
+    bucket within any insurer (i.e. the biggest set of groups still identical
+    on every axis _candidate_pairs pre-filters on). Logged once per scan so
+    that if a future scan is ever slow again, the logs say WHERE the size is
+    concentrated instead of just a bare timeout traceback - a large insurer
+    total with a small largest sub-bucket means the multi-axis bucketing is
+    doing its job; a large sub-bucket means the remaining O(n^2) numeric/date
+    scan within it is the next thing worth optimizing.
+    """
+    by_insurer = defaultdict(list)
+    for group in groups:
+        by_insurer[group["insurance_company"]].append(group)
+
+    largest_insurer = max((len(members) for members in by_insurer.values()), default=0)
+
+    largest_bucket = 0
+    for members in by_insurer.values():
+        bucket_sizes = defaultdict(int)
+        for group in members:
+            bucket_sizes[_bucket_key(group)] += 1
+        if bucket_sizes:
+            largest_bucket = max(largest_bucket, max(bucket_sizes.values()))
+
+    return largest_insurer, largest_bucket
+
+
 def run_overlap_scan(scan_id, type_caps=None):
     """
     Fills one RateOverlapScan with its pairs and marks it COMPLETED.
@@ -1010,12 +1082,26 @@ def run_overlap_scan(scan_id, type_caps=None):
 
     scan = RateOverlapScan.objects.get(id=scan_id)
     try:
+        started = time.monotonic()
         groups = load_active_groups()
+        largest_insurer, largest_bucket = _largest_bucket_sizes(groups)
+        logger.info(
+            "Overlap scan %s: loaded %d active groups in %.1fs "
+            "(largest insurer=%d groups, largest same-axis bucket=%d groups)",
+            scan_id, len(groups), time.monotonic() - started, largest_insurer, largest_bucket,
+        )
+
+        step = time.monotonic()
         pairs, counts_by_type, capped_types, tnc_differing_skipped = detect_overlap_pairs(
             groups, type_caps=type_caps
         )
+        logger.info(
+            "Overlap scan %s: primary sweep found %d pair(s) in %.1fs",
+            scan_id, sum(counts_by_type.values()), time.monotonic() - step,
+        )
 
         caps = type_caps if type_caps is not None else DEFAULT_TYPE_CAPS
+        step = time.monotonic()
         rto_code_index = build_cluster_code_index("rto_name", "rto_cluster", RTOMaster)
         make_model_code_index = build_cluster_code_index(
             "make_model_name", "make_model_cluster", MakeModelMaster
@@ -1023,6 +1109,10 @@ def run_overlap_scan(scan_id, type_caps=None):
         double_rate_pairs, double_rate_count, double_rate_capped = detect_double_rate_risk_pairs(
             groups, rto_code_index, make_model_code_index,
             cap=caps.get(CONFLICT_DOUBLE_RATE_RISK),
+        )
+        logger.info(
+            "Overlap scan %s: double rate risk sweep found %d pair(s) in %.1fs",
+            scan_id, double_rate_count, time.monotonic() - step,
         )
         counts_by_type[CONFLICT_DOUBLE_RATE_RISK] = double_rate_count
         pairs = pairs + double_rate_pairs
@@ -1032,6 +1122,10 @@ def run_overlap_scan(scan_id, type_caps=None):
         RateOverlapPair.objects.bulk_create(
             [RateOverlapPair(scan=scan, **pair) for pair in pairs],
             batch_size=1000,
+        )
+        logger.info(
+            "Overlap scan %s: completed in %.1fs total",
+            scan_id, time.monotonic() - started,
         )
 
         scan.groups_scanned = len(groups)

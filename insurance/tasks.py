@@ -79,12 +79,17 @@ def process_policy_document_task(self, document_id):
     max_retries=0,
     # The sweep compares every pair of active rate groups within an insurer,
     # so its cost grows with the square of a large insurer's group count.
-    # Given a generous ceiling for the same reason process_mis_mapping_task
-    # has one, and no retries: a failed scan is recorded on the
-    # RateOverlapScan row for the dashboard to show, and re-running it is a
+    # overlap_utils._candidate_pairs bucket-filters on every categorical/class/
+    # NCB-CPA-ZD axis to keep that bounded, but a production scan still hit
+    # this limit at 900s on a Rate Master far larger than any local test copy -
+    # doubled here as headroom on top of that fix, not instead of it. No
+    # retries: a failed scan is recorded on the RateOverlapScan row for the
+    # dashboard to show (overlap_utils.run_overlap_scan's except Exception
+    # catches SoftTimeLimitExceeded, an Exception subclass, and saves it
+    # rather than leaving the scan stuck RUNNING), and re-running it is a
     # button click rather than something worth repeating automatically.
-    soft_time_limit=900,
-    time_limit=960,
+    soft_time_limit=1800,
+    time_limit=1860,
 )
 def run_rate_overlap_scan_task(self, scan_id):
     from .overlap_utils import run_overlap_scan

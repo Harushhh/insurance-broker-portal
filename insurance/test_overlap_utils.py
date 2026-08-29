@@ -393,6 +393,158 @@ class ClassifyPairTests(TestCase):
         self.assertEqual(overlap_utils.classify_pair(a, b), overlap_utils.CONFLICT_PARTIAL)
 
 
+class CandidatePairsScalabilityTests(TestCase):
+    """
+    _candidate_pairs pre-filters by bucketing on every WILDCARD_BUCKET_AXES
+    field (product, sub_product, fuel_type, class, ncb, cpa, zd) instead of
+    product alone, so one insurer/product combination with many distinct
+    values on the OTHER axes doesn't force an O(n^2) scan over its whole
+    group list - this is what a production scan actually hit: 15+ minutes
+    inside this exact loop on a Rate Master too large for the untouched
+    product-only version to finish on the platform's time budget.
+
+    Getting this wrong in the other direction - dropping a pair it should
+    have yielded - would silently hide real conflicts, so every test here
+    checks the new implementation against a brute-force O(n^2) reference
+    covering every WILDCARD_BUCKET_AXES field, not just a few hand-picked
+    examples.
+    """
+
+    def _brute_force_pairs(self, members):
+        """
+        Every pair not already ruled out by WILDCARD_BUCKET_AXES alone - the
+        ground truth _candidate_pairs must match exactly, since that's the
+        one set of axes it's allowed to pre-filter on before the caller
+        re-checks everything (including these same axes) itself.
+        """
+        pairs = set()
+        for i, first in enumerate(members):
+            for second in members[i + 1:]:
+                if overlap_utils._bucket_keys_compatible(
+                    overlap_utils._bucket_key(first), overlap_utils._bucket_key(second)
+                ):
+                    pairs.add((first["grid_key"], second["grid_key"]))
+        return pairs
+
+    def _assert_matches_brute_force(self, members):
+        expected = self._brute_force_pairs(members)
+        actual = {
+            (a["grid_key"], b["grid_key"]) if a["grid_key"] < b["grid_key"]
+            else (b["grid_key"], a["grid_key"])
+            for a, b in overlap_utils._candidate_pairs(members)
+        }
+        self.assertEqual(actual, expected)
+
+    def test_matches_brute_force_with_no_wildcards_at_all(self):
+        members = [
+            make_group(grid_key=1, product="private car", sub_product="comp"),
+            make_group(grid_key=2, product="private car", sub_product="comp"),
+            make_group(grid_key=3, product="private car", sub_product="stp"),
+            make_group(grid_key=4, product="two wheeler", sub_product="comp"),
+        ]
+        self._assert_matches_brute_force(members)
+
+    def test_matches_brute_force_with_a_wildcard_on_one_axis(self):
+        members = [
+            make_group(grid_key=1, product="", sub_product="comp"),
+            make_group(grid_key=2, product="private car", sub_product="comp"),
+            make_group(grid_key=3, product="two wheeler", sub_product="comp"),
+            make_group(grid_key=4, product="two wheeler", sub_product="stp"),
+        ]
+        self._assert_matches_brute_force(members)
+
+    def test_matches_brute_force_with_wildcards_on_several_independent_axes(self):
+        # A blank sub_product and a blank fuel_type on DIFFERENT groups must
+        # each still be tried against every value of the other axis - this is
+        # exactly the case a naive multi-axis bucketing could get wrong.
+        members = [
+            make_group(grid_key=1, product="gcv 4w", sub_product="", fuel_type="diesel"),
+            make_group(grid_key=2, product="gcv 4w", sub_product="1+1", fuel_type=""),
+            make_group(grid_key=3, product="gcv 4w", sub_product="1+1", fuel_type="petrol"),
+            make_group(grid_key=4, product="gcv 4w", sub_product="std", fuel_type="diesel"),
+        ]
+        self._assert_matches_brute_force(members)
+
+    def test_matches_brute_force_with_make_model_class_wildcards(self):
+        # CLASS_WILDCARDS has two spellings ("" and "na"), unlike every other
+        # axis's single wildcard value.
+        members = [
+            make_group(grid_key=1, make_model_class="na"),
+            make_group(grid_key=2, make_model_class=""),
+            make_group(grid_key=3, make_model_class="car"),
+            make_group(grid_key=4, make_model_class="bike"),
+        ]
+        self._assert_matches_brute_force(members)
+
+    def test_matches_brute_force_with_ynn_axis_wildcards(self):
+        members = [
+            make_group(grid_key=1, is_ncb="NA", is_cpa="YES"),
+            make_group(grid_key=2, is_ncb="YES", is_cpa="NA"),
+            make_group(grid_key=3, is_ncb="YES", is_cpa="YES"),
+            make_group(grid_key=4, is_ncb="NO", is_cpa="YES"),
+        ]
+        self._assert_matches_brute_force(members)
+
+    def test_matches_brute_force_on_a_larger_randomized_population(self):
+        # A denser sweep across every axis at once, closer to a real grid's
+        # shape than the hand-picked cases above.
+        import random
+        rng = random.Random(20260829)
+        product_values = ["", "private car", "two wheeler", "gcv 4w"]
+        sub_product_values = ["", "comp", "stp", "1+1"]
+        fuel_values = ["", "petrol", "diesel", "cng"]
+        class_values = ["", "na", "car", "bike"]
+        ncb_values = ["NA", "YES", "NO"]
+
+        members = []
+        for grid_key in range(1, 121):
+            members.append(make_group(
+                grid_key=grid_key,
+                product=rng.choice(product_values),
+                sub_product=rng.choice(sub_product_values),
+                fuel_type=rng.choice(fuel_values),
+                make_model_class=rng.choice(class_values),
+                is_ncb=rng.choice(ncb_values),
+                is_cpa=rng.choice(ncb_values),
+                is_zd=rng.choice(ncb_values),
+            ))
+        self._assert_matches_brute_force(members)
+
+    def test_every_pair_is_yielded_exactly_once(self):
+        members = [
+            make_group(grid_key=1, product=""),
+            make_group(grid_key=2, product="private car"),
+            make_group(grid_key=3, product="private car"),
+        ]
+        seen = []
+        for first, second in overlap_utils._candidate_pairs(members):
+            key = tuple(sorted([first["grid_key"], second["grid_key"]]))
+            seen.append(key)
+        self.assertEqual(len(seen), len(set(seen)))
+
+    def test_end_to_end_pairs_still_match_the_full_predicate(self):
+        # The scalability change is only in candidate generation - the actual
+        # conflict decision is untouched, so detect_overlap_pairs' real output
+        # on a mixed population must be identical to a full brute-force
+        # groups_conflict sweep over the same groups.
+        members = [
+            make_group(grid_key=1, product="", cc_min=0, cc_max=1500),
+            make_group(grid_key=2, product="private car", cc_min=1000, cc_max=2000),
+            make_group(grid_key=3, product="private car", cc_min=0, cc_max=1500),
+            make_group(grid_key=4, product="two wheeler", cc_min=0, cc_max=1500),
+        ]
+        expected = set()
+        for i, a in enumerate(members):
+            for b in members[i + 1:]:
+                if overlap_utils.groups_conflict(a, b):
+                    key = tuple(sorted([a["grid_key"], b["grid_key"]]))
+                    expected.add(key)
+
+        pairs, _counts, _capped, _skipped = overlap_utils.detect_overlap_pairs(members)
+        actual = {tuple(sorted([p["group_key_a"], p["group_key_b"]])) for p in pairs}
+        self.assertEqual(actual, expected)
+
+
 class DetectOverlapPairsTests(TestCase):
     def test_pairs_are_reported_once_and_severity_ordered(self):
         groups = [
