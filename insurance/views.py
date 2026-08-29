@@ -53,6 +53,7 @@ from .models import (
     ExtractionField, FieldSynonym, PolicyDocumentUpload, PolicyMISRecord,
     LockedPolicy, SupportTicket, MISFile, MappingConfiguration,
     HealthRateMaster, SpecialRateRequest, MISFailedRow,
+    RateOverlapScan, RateOverlapPair,
 )
 
 # Import our Gemini AI utility and background logic engines
@@ -61,7 +62,10 @@ from .forms import (
     ExtractionFieldForm, MISUploadForm, MappingConfigurationForm,
     MgBgRateRequestForm, BgRateRequestForm,
 )
-from .tasks import process_mis_mapping_task, process_policy_document_task
+from .tasks import (
+    process_mis_mapping_task, process_policy_document_task,
+    run_rate_overlap_scan_task,
+)
 from .health_grid_utils import (
     parse_number as parse_health_number,
     parse_percent as parse_health_percent,
@@ -2731,6 +2735,202 @@ def _rate_master_grid_summary_qs():
     )
 
 
+# =========================================================
+# OVERLAP & AMBIGUITY DETECTOR
+#
+# The MIS Errors table above is reactive - a conflicting pair of rate groups
+# only surfaces once a real policy happens to land on it. These cards come at
+# the same problem from the Rate Master side: insurance/overlap_utils.py sweeps
+# every pair of ACTIVE groups and reports the ones no rule in the engine's
+# RULE 1-6 chain can separate, so the conflict is visible before an MIS file
+# ever hits it. See that module's docstring for the per-rule semantics.
+# =========================================================
+
+# One entry per Overlaps card, same shape as RANGE_ERROR_RULES /
+# EQUALITY_ERROR_RULES above. Unlike those two, these four buckets are mutually
+# exclusive (classify_pair assigns each pair exactly one), so the card counts
+# sum to the scan's total rather than overlapping each other.
+OVERLAP_RULES = [
+    {
+        "key": "EXACT_DUPLICATE",
+        "label": "Exact Duplicates",
+        "sub": "same rules and same T&C - one is surplus",
+    },
+    {
+        "key": "CONTAINED",
+        "label": "Contained Ranges",
+        "sub": "one group sits entirely inside another",
+    },
+    {
+        "key": "OPEN_ENDED",
+        "label": "Open-Ended Overlaps",
+        "sub": "a blank bound swallows another group",
+    },
+    {
+        "key": "PARTIAL",
+        "label": "Partial Overlaps",
+        "sub": "ranges cross on at least one axis",
+    },
+]
+OVERLAP_RULES_MAP = {rule["key"]: rule for rule in OVERLAP_RULES}
+
+# A RUNNING scan older than this is treated as abandoned (worker killed
+# mid-sweep, redis restarted) rather than blocking every future scan forever.
+# Comfortably past run_rate_overlap_scan_task's own 960s hard time limit, so a
+# scan that is merely slow is never mistaken for a dead one.
+OVERLAP_SCAN_STALE_AFTER = timedelta(minutes=20)
+
+
+def _latest_overlap_scan():
+    """The newest successful scan - the one whose pairs the dashboard shows."""
+    return RateOverlapScan.objects.filter(status=RateOverlapScan.STATUS_COMPLETED).first()
+
+
+def _active_overlap_scan():
+    """
+    A scan that is genuinely still running, retiring any that outlived the
+    task's time limit so a dead worker can't leave the button wedged.
+    """
+    running = RateOverlapScan.objects.filter(status=RateOverlapScan.STATUS_RUNNING)
+    cutoff = timezone.now() - OVERLAP_SCAN_STALE_AFTER
+    running.filter(started_at__lt=cutoff).update(
+        status=RateOverlapScan.STATUS_FAILED,
+        error_message="Scan did not finish - the worker stopped before reporting a result.",
+        finished_at=timezone.now(),
+    )
+    return running.filter(started_at__gte=cutoff).first()
+
+
+def _overlap_counts(scan):
+    """
+    Per-card counts for `scan`, with every card present even at zero.
+
+    Reads the scan's recorded type_counts rather than counting stored
+    RateOverlapPair rows: the noisier buckets are truncated at their
+    DEFAULT_TYPE_CAPS ceiling when stored, and a card must report how many
+    conflicts exist, not how many fitted.
+    """
+    if scan is None:
+        return [dict(rule, count=0, capped=False) for rule in OVERLAP_RULES]
+    counts = scan.type_counts or {}
+    capped = set(scan.capped_types or [])
+    return [
+        dict(rule, count=counts.get(rule["key"], 0), capped=rule["key"] in capped)
+        for rule in OVERLAP_RULES
+    ]
+
+
+def _overlap_redirect(overlap_type=""):
+    params = {"view": "overlap"}
+    if overlap_type:
+        params["overlap_type"] = overlap_type
+    return redirect(f"{reverse('rate_master_health')}?{urlencode(params)}")
+
+
+def _rate_group_rows(group_key):
+    """
+    The RateMaster rows behind one COALESCE(group_id, id) key.
+
+    Same group_id/id ambiguity edit_rate and bulk_update_rates both handle: a
+    group id can collide with an unrelated row's primary key, so resolve
+    against group_id first and only fall back to a raw id. The fallback is
+    additionally restricted to group-less rows, because a row that HAS a group
+    is keyed by that group, never by its own id.
+    """
+    rows = RateMaster.objects.filter(group_id=group_key, is_deleted="NO")
+    if rows.exists():
+        return rows
+    return RateMaster.objects.filter(id=group_key, group__isnull=True, is_deleted="NO")
+
+
+def start_overlap_scan(request):
+    """Queues a fresh sweep. Results replace the previous scan's only once it succeeds."""
+    if request.method != "POST":
+        return _overlap_redirect()
+
+    if _active_overlap_scan():
+        messages.info(request, "An overlap scan is already running - reload in a moment for its results.")
+        return _overlap_redirect()
+
+    scan = RateOverlapScan.objects.create(triggered_by=request.user)
+    try:
+        run_rate_overlap_scan_task.delay(scan.id)
+    except Exception as exc:
+        # Broker/worker unreachable. Close the scan out here rather than
+        # leaving it RUNNING, which would block every later scan until it
+        # aged past OVERLAP_SCAN_STALE_AFTER.
+        logger.exception("Could not queue rate overlap scan %s", scan.id)
+        scan.status = RateOverlapScan.STATUS_FAILED
+        scan.error_message = f"Could not queue the scan: {exc}"
+        scan.finished_at = timezone.now()
+        scan.save(update_fields=["status", "error_message", "finished_at"])
+        messages.error(
+            request,
+            "Could not start the overlap scan - the background worker is unreachable. "
+            "Check that REDIS_URL is set and the Celery worker is running, or run the "
+            "scan directly with: python manage.py run_overlap_scan",
+        )
+        return _overlap_redirect()
+
+    messages.success(request, "Overlap scan started. Reload this page in a moment to see the results.")
+    return _overlap_redirect()
+
+
+def deactivate_rate_group(request, group_key):
+    """
+    Takes one side of a conflicting pair out of the running by marking its rows
+    INACTIVE - the fix for an exact duplicate, where the two groups are
+    interchangeable and one is simply surplus.
+
+    Deliberately not a delete: the rows stay queryable, keep their history, and
+    can be switched back on from the Rate Master dashboard. Narrowing a range
+    instead (the fix for a partial overlap) is left to Edit Rate, which already
+    validates every field - the drill-down links straight to it.
+    """
+    if request.method != "POST":
+        return _overlap_redirect()
+
+    overlap_type = (request.POST.get("overlap_type") or "").strip()
+
+    # Deactivating is only ever right when the two groups are interchangeable,
+    # which is why the pair has to be one this scan actually listed. Pairs whose
+    # T&Cs differ are separate offers rather than duplicates and never reach the
+    # dashboard at all (overlap_utils.classify_pair drops them), so requiring a
+    # live pair id is also what keeps a stale page or a hand-made POST from
+    # deactivating one of those behind the scan's back.
+    pair = RateOverlapPair.objects.filter(
+        id=request.POST.get("pair_id") or 0, scan__status=RateOverlapScan.STATUS_COMPLETED
+    ).first()
+    if pair is None or group_key not in (pair.group_key_a, pair.group_key_b):
+        messages.error(
+            request,
+            "Could not deactivate: that conflict is no longer in the latest scan. Re-run the scan and try again.",
+        )
+        return _overlap_redirect(overlap_type)
+    rows = _rate_group_rows(group_key)
+    active_rows = rows.filter(status="ACTIVE")
+    record_count = active_rows.count()
+
+    if not record_count:
+        messages.warning(request, f"Group {group_key} has no active rows to deactivate.")
+        return _overlap_redirect(overlap_type)
+
+    active_rows.update(status="INACTIVE")
+    AuditLog.objects.create(
+        user=request.user,
+        action="OVERLAP DEACTIVATE",
+        details=(
+            f"Deactivated Group/Record ID {group_key} ({record_count} rows) from the "
+            f"Rate Master Health overlap detector."
+        ),
+    )
+    messages.success(
+        request,
+        f"Group {group_key} deactivated ({record_count} rows). Re-run the scan to refresh the conflict list.",
+    )
+    return _overlap_redirect(overlap_type)
+
+
 def rate_master_health(request):
     _sync_unsynced_mis_files()
 
@@ -2874,6 +3074,29 @@ def rate_master_health(request):
             equality_paginator.get_elided_page_range(equality_rows_page_obj.number, on_each_side=1, on_ends=1)
         )
 
+    # Overlaps tab. Reads only the newest COMPLETED scan's stored pairs — the
+    # sweep itself runs in a Celery task (start_overlap_scan), never on a page
+    # view, for the same reason MISFailedRow exists.
+    overlap_scan = _latest_overlap_scan()
+    overlap_counts = _overlap_counts(overlap_scan)
+    overlap_type = (request.GET.get("overlap_type") or "").strip()
+    selected_overlap_rule = OVERLAP_RULES_MAP.get(overlap_type)
+    overlap_page_obj = None
+    overlap_elided_range = None
+    if selected_overlap_rule and overlap_scan:
+        overlap_qs = RateOverlapPair.objects.filter(
+            scan=overlap_scan, conflict_type=selected_overlap_rule["key"]
+        )
+        overlap_paginator = Paginator(overlap_qs, MIS_HEALTH_BATCH_SIZE)
+        try:
+            overlap_page_number = int(request.GET.get("overlap_page") or 1)
+        except ValueError:
+            overlap_page_number = 1
+        overlap_page_obj = overlap_paginator.get_page(overlap_page_number)
+        overlap_elided_range = list(
+            overlap_paginator.get_elided_page_range(overlap_page_obj.number, on_each_side=1, on_ends=1)
+        )
+
     return render(request, "rate_master_health.html", {
         "page_obj": page_obj,
         "elided_page_range": elided_page_range,
@@ -2904,6 +3127,18 @@ def rate_master_health(request):
         "grid_summary_elided_range": grid_summary_elided_range,
         "grid_summary_total_combinations": grid_summary_total_combinations,
         "grid_summary_total_grids": grid_summary_total_grids,
+        "overlap_scan": overlap_scan,
+        "overlap_scan_running": _active_overlap_scan(),
+        "overlap_counts": overlap_counts,
+        "overlap_total": sum(r["count"] for r in overlap_counts),
+        "selected_overlap_type": overlap_type if selected_overlap_rule else "",
+        "selected_overlap_rule": selected_overlap_rule,
+        "selected_overlap_capped": bool(
+            selected_overlap_rule and overlap_scan
+            and selected_overlap_rule["key"] in (overlap_scan.capped_types or [])
+        ),
+        "overlap_page_obj": overlap_page_obj,
+        "overlap_elided_range": overlap_elided_range,
         "selected": {
             "failure_reason": status_key,
             "insurer": insurer,
@@ -4693,7 +4928,10 @@ def analysis_payout_data(request):
 # actions only. MOTOR_POINTS_SEARCH and the sso_ticket_* events have their own
 # purposes and are never shown here. Keep this in sync with
 # SECURITY_AUDIT_LOG_ACTIONS in insurance/tasks.py (the 7-day purge job).
-SECURITY_AUDIT_LOG_ACTIONS = ["MANUAL EDIT", "BULK UPDATE", "HEALTH RATE EDIT", "HEALTH BULK UPDATE"]
+SECURITY_AUDIT_LOG_ACTIONS = [
+    "MANUAL EDIT", "BULK UPDATE", "HEALTH RATE EDIT", "HEALTH BULK UPDATE",
+    "OVERLAP DEACTIVATE",
+]
 
 def _filtered_audit_logs(request):
     # Bounded to the last 7 days to match the retention window enforced by

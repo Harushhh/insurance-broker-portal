@@ -919,3 +919,111 @@ class MappingConfiguration(models.Model):
         
     def get_mapping_type_display(self):
         return dict(self.OPERATOR_CHOICES).get(self.operator, self.operator)
+
+# =========================================================
+# RATE MASTER OVERLAP DETECTION
+# =========================================================
+
+class RateOverlapScan(models.Model):
+    """
+    One run of insurance/overlap_utils.py's sweep over the Rate Master.
+
+    Materialized for the same reason MISFailedRow is: the sweep compares every
+    pair of active rate groups within an insurer, which is far too expensive to
+    redo on each dashboard page view. Each scan owns its own pairs, so a run in
+    progress leaves the results already on screen untouched and only replaces
+    them once it succeeds.
+    """
+    STATUS_RUNNING = "RUNNING"
+    STATUS_COMPLETED = "COMPLETED"
+    STATUS_FAILED = "FAILED"
+
+    STATUS_CHOICES = [
+        (STATUS_RUNNING, "Running"),
+        (STATUS_COMPLETED, "Completed"),
+        (STATUS_FAILED, "Failed"),
+    ]
+
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_RUNNING, db_index=True
+    )
+    triggered_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rate_overlap_scans",
+    )
+    groups_scanned = models.IntegerField(default=0)
+    # The TRUE number of conflicting pairs the sweep found, which is not
+    # necessarily how many were stored - see capped_types.
+    pairs_found = models.IntegerField(default=0)
+    # {conflict_type: true count}. The dashboard cards read these rather than
+    # counting stored RateOverlapPair rows, so a capped bucket still reports
+    # its real size.
+    type_counts = models.JSONField(default=dict, blank=True)
+    # Conflict types whose stored pairs were truncated at their
+    # DEFAULT_TYPE_CAPS ceiling, so the drill-down can say it is showing a
+    # sample rather than everything.
+    capped_types = models.JSONField(default=list, blank=True)
+    was_capped = models.BooleanField(default=False)
+    # Real conflicts the sweep found and deliberately did not list: two groups
+    # identical on every field the engine matches on, differing only in their
+    # T&Cs. They are distinct offers rather than duplicates, and the only fix
+    # would be re-cutting the insurer's own grid, so listing them would park an
+    # unfixable queue beside the fixable ones. Recorded so the dashboard can
+    # still say they were seen. See overlap_utils.classify_pair.
+    tnc_differing_skipped = models.IntegerField(default=0)
+    error_message = models.TextField(blank=True, null=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        return f"Overlap scan #{self.id} - {self.status}"
+
+
+class RateOverlapPair(models.Model):
+    """
+    Two ACTIVE rate groups that no rule in the MIS Payout Engine's RULE 1-6
+    chain can tell apart - so any policy landing in their shared span resolves
+    to both and lands on the dashboard as MULTIPLE MATCHES.
+
+    Keys are COALESCE(group_id, id), matching how process_mis_mapping counts
+    distinct matches, with group_key_a < group_key_b so one conflict is never
+    stored twice under swapped keys.
+    """
+    CONFLICT_CHOICES = [
+        ("EXACT_DUPLICATE", "Exact Duplicate"),
+        ("CONTAINED", "Contained Range"),
+        ("OPEN_ENDED", "Open-Ended Overlap"),
+        ("PARTIAL", "Partial Overlap"),
+    ]
+
+    scan = models.ForeignKey(RateOverlapScan, on_delete=models.CASCADE, related_name="pairs")
+    insurance_company = models.CharField(max_length=255, blank=True, null=True, db_index=True)
+    group_key_a = models.IntegerField()
+    group_key_b = models.IntegerField()
+    conflict_type = models.CharField(max_length=20, choices=CONFLICT_CHOICES, db_index=True)
+    # CONFLICT_SEVERITY rank, denormalized so the drill-down can order by it
+    # without a CASE expression on every query.
+    severity_rank = models.IntegerField(default=4)
+    row_count_a = models.IntegerField(default=0)
+    row_count_b = models.IntegerField(default=0)
+    # {"axes": [...]} - the per-axis breakdown describe_pair builds, including
+    # the exact overlapping span on each range axis, so the drill-down doesn't
+    # have to re-derive it.
+    detail = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["severity_rank", "insurance_company", "group_key_a", "group_key_b"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scan", "group_key_a", "group_key_b"], name="uniq_rate_overlap_pair"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.group_key_a} <-> {self.group_key_b} ({self.conflict_type})"

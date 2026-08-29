@@ -154,6 +154,88 @@
     .rmh-stat-card.has-errors { background: #fef2f2; border-color: #fecaca; }
     .rmh-stat-card.has-errors .count { color: #dc2626; }
     .rmh-stat-card.selected { border-color: #2563eb; box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25); }
+
+    /* ---- Overlaps tab ----
+       Deliberately not a table: a pair is a two-sided comparison, and nesting a
+       detail table inside a colspan cell of the scrolling results table made the
+       inner width resolve against the outer table instead of the viewport, which
+       pushed the whole panel off screen. Cards + CSS grid can't do that. */
+    .ovl-list { padding: 16px 24px 4px; display: flex; flex-direction: column; gap: 12px; }
+
+    .ovl-card { border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; overflow: hidden; }
+    .ovl-card-head {
+        display: flex; align-items: center; justify-content: space-between; gap: 12px;
+        padding: 9px 16px; background: #f8fafc; border-bottom: 1px solid #e2e8f0;
+    }
+    .ovl-insurer {
+        font-size: 12px; font-weight: 800; color: #0f172a; letter-spacing: .01em;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ovl-type {
+        flex: none; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+        color: #92400e; background: #fef3c7; border: 1px solid #fde68a; border-radius: 999px; padding: 3px 10px;
+    }
+
+    .ovl-sides { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 12px; padding: 12px 16px; }
+    .ovl-side { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+    .ovl-side-key { font-size: 13px; font-weight: 800; color: #0f172a; }
+    .ovl-side-rows { font-size: 11px; color: #64748b; }
+    .ovl-side-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .ovl-vs { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #94a3b8; }
+
+    .ovl-btn {
+        display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 7px;
+        background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe;
+        font-size: 11px; font-weight: 700; text-decoration: none; cursor: pointer; white-space: nowrap;
+    }
+    .ovl-btn:hover { background: #dbeafe; color: #1d4ed8; }
+    .ovl-btn-danger { background: #fff1f2; color: #be123c; border-color: #fecdd3; }
+    .ovl-btn-danger:hover { background: #ffe4e6; color: #9f1239; }
+
+    .ovl-note {
+        margin: 0; padding: 8px 16px; background: #fffbeb; border-top: 1px solid #fef3c7;
+        color: #92400e; font-size: 11px; font-weight: 600; line-height: 1.45;
+    }
+
+    .ovl-collides {
+        display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+        padding: 10px 16px; border-top: 1px solid #f1f5f9; background: #fcfdff;
+    }
+    .ovl-collides-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #94a3b8; }
+    .ovl-collides-empty { font-size: 11px; color: #94a3b8; }
+    .ovl-chip {
+        display: inline-block; padding: 2px 8px; border-radius: 6px;
+        background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8;
+        font-size: 11px; font-weight: 600; white-space: nowrap;
+    }
+    .ovl-toggle {
+        margin-left: auto; background: none; border: none; padding: 0;
+        color: #2563eb; font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap;
+    }
+    .ovl-toggle:hover { text-decoration: underline; }
+
+    /* min-width:0 on the cells is what lets a long cluster name wrap instead of
+       widening its column past the card. */
+    .ovl-fields { padding: 0 16px 14px; }
+    .ovl-grid { display: grid; grid-template-columns: 116px 1fr 1fr 132px; gap: 1px; background: #e2e8f0; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; }
+    .ovl-gh, .ovl-gc, .ovl-gsplit { background: #fff; padding: 6px 10px; min-width: 0; overflow-wrap: anywhere; font-size: 12px; color: #334155; }
+    .ovl-gh { background: #f8fafc; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
+    .ovl-gl { font-weight: 600; color: #0f172a; }
+    .ovl-shared { color: #1d4ed8; font-weight: 700; }
+    .ovl-differs { color: #b45309; font-weight: 700; }
+    .ovl-gmuted { color: #64748b; }
+    .ovl-gsplit {
+        grid-column: 1 / -1; background: #f8fafc; font-size: 10px; font-weight: 700;
+        text-transform: uppercase; letter-spacing: .04em; color: #94a3b8;
+    }
+
+    @media (max-width: 720px) {
+        .ovl-sides { grid-template-columns: 1fr; }
+        .ovl-vs { display: none; }
+        .ovl-grid { grid-template-columns: 1fr; }
+        .ovl-gh:not(:first-child) { display: none; }
+    }
+
 </style>
 
 <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3 mb-4">
@@ -184,6 +266,9 @@
     </button>
     <button type="button" id="tabGridSummary" role="tab" aria-pressed="false">
         <i class="bi bi-grid-3x3-gap"></i> Grid Summary
+    </button>
+    <button type="button" id="tabOverlaps" role="tab" aria-pressed="false">
+        <i class="bi bi-intersect"></i> Overlaps
     </button>
 </div>
 
@@ -809,6 +894,209 @@
 </div>
 <!-- /#gridSummaryView -->
 
+<div id="overlapView" hidden>
+    <div class="premium-card">
+        <div class="card-header-premium d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h6 class="mb-0 fw-bold" style="color: #0f172a;">
+                <i class="bi bi-intersect text-primary me-2"></i> Overlapping Rate Groups
+            </h6>
+            <div class="d-flex align-items-center gap-2">
+                <span class="status-pill {% if overlap_total %}pill-high{% else %}pill-low{% endif %}">
+                    {{ overlap_total|default:0 }} Conflicting Pairs
+                </span>
+                <form method="POST" action="{% url 'start_overlap_scan' %}" class="d-inline">
+                    {% csrf_token %}
+                    <button type="submit" class="btn-soft bg-white" {% if overlap_scan_running %}disabled{% endif %}>
+                        <i class="bi bi-arrow-repeat"></i>
+                        {% if overlap_scan_running %}Scan running…{% else %}Run Scan{% endif %}
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="p-4">
+            <p class="text-muted mb-3" style="font-size: 14px; max-width: 860px;">
+                Pairs of ACTIVE rate groups that no rule in the MIS Payout Engine's matching chain can tell
+                apart — same insurer, compatible product/class/NCB-CPA-ZD, and overlapping CC, seating,
+                vehicle age, tariff and validity ranges all at once. Any policy landing in their shared span
+                matches both, which is what produces a ⚠️ MULTIPLE MATCHES row. Fixing a pair here removes
+                that failure before the next MIS file is uploaded.
+            </p>
+
+            {% if overlap_scan %}
+                <p class="text-muted mb-4" style="font-size: 12px;">
+                    Last scanned {{ overlap_scan.finished_at|date:"d M Y, H:i" }} —
+                    {{ overlap_scan.groups_scanned }} active groups compared.
+                    {% if overlap_scan.tnc_differing_skipped %}
+                        {# Counted but not listed - see overlap_utils.classify_pair. #}
+                        {{ overlap_scan.tnc_differing_skipped }} pair{{ overlap_scan.tnc_differing_skipped|pluralize }}
+                        with differing T&amp;Cs not listed — separate offers, not duplicates.
+                    {% endif %}
+                </p>
+            {% else %}
+                <p class="text-muted mb-4" style="font-size: 12px;">
+                    No scan has completed yet. Click <strong>Run Scan</strong> to sweep the Rate Master.
+                </p>
+            {% endif %}
+
+            <div class="rmh-stat-grid">
+                {% for rule in overlap_counts %}
+                    <a href="?view=overlap&overlap_type={{ rule.key }}"
+                       class="rmh-stat-card {% if rule.count %}has-errors{% endif %} {% if selected_overlap_type == rule.key %}selected{% endif %}">
+                        <span class="count">{{ rule.count }}</span>
+                        <span class="label">{{ rule.label }}</span>
+                        <span class="sub">{{ rule.sub }}</span>
+                        {% if rule.capped %}
+                            <span class="sub" style="color:#b45309;">browsable sample only</span>
+                        {% endif %}
+                    </a>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+
+    {% if selected_overlap_rule %}
+        <div class="premium-card">
+            <div class="card-header-premium d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h6 class="mb-0 fw-bold" style="color: #0f172a;">
+                    <i class="bi bi-list-ul text-primary me-2"></i> Conflicting Pairs — {{ selected_overlap_rule.label }}
+                </h6>
+                <a href="?view=overlap" class="btn-text"><i class="bi bi-x-circle"></i> Clear selection</a>
+            </div>
+
+            {% if selected_overlap_capped %}
+                <div class="px-4 pt-3">
+                    <p class="text-muted mb-0" style="font-size: 12px;">
+                        This bucket runs to tens of thousands of pairs — a health metric rather than a
+                        work queue — so the scan stores a browsable sample. Every group listed here is
+                        genuinely affected; the card above shows the full count.
+                    </p>
+                </div>
+            {% endif %}
+
+            {% if overlap_page_obj and overlap_page_obj.paginator.count > 0 %}
+                <div class="ovl-list">
+                    {% for pair in overlap_page_obj %}
+                        <article class="ovl-card">
+                            <header class="ovl-card-head">
+                                <span class="ovl-insurer">{{ pair.insurance_company|default:"-" }}</span>
+                                <span class="ovl-type">{{ pair.get_conflict_type_display }}</span>
+                            </header>
+
+                            <div class="ovl-sides">
+                                <div class="ovl-side">
+                                    <div class="ovl-side-key">Group {{ pair.group_key_a }}</div>
+                                    <div class="ovl-side-rows">{{ pair.row_count_a }} row{{ pair.row_count_a|pluralize }}</div>
+                                    <a href="{% url 'edit_rate' pair.group_key_a %}" class="ovl-btn">
+                                        <i class="bi bi-pencil-square"></i> Edit
+                                    </a>
+                                </div>
+
+                                <div class="ovl-vs">vs</div>
+
+                                <div class="ovl-side">
+                                    <div class="ovl-side-key">Group {{ pair.group_key_b }}</div>
+                                    <div class="ovl-side-rows">{{ pair.row_count_b }} row{{ pair.row_count_b|pluralize }}</div>
+                                    <div class="ovl-side-actions">
+                                        <a href="{% url 'edit_rate' pair.group_key_b %}" class="ovl-btn">
+                                            <i class="bi bi-pencil-square"></i> Edit
+                                        </a>
+                                        <form method="POST" action="{% url 'deactivate_rate_group' pair.group_key_b %}"
+                                                  onsubmit="return confirm('Deactivate group {{ pair.group_key_b }}? Its rows stay in the Rate Master but stop matching policies.');">
+                                                {% csrf_token %}
+                                                <input type="hidden" name="overlap_type" value="{{ selected_overlap_type }}">
+                                                <input type="hidden" name="pair_id" value="{{ pair.id }}">
+                                                <button type="submit" class="ovl-btn ovl-btn-danger">
+                                                    <i class="bi bi-toggle-off"></i> Deactivate
+                                                </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+
+
+                            <div class="ovl-collides">
+                                <span class="ovl-collides-label">Collides on</span>
+                                {% for span in pair.detail.summary %}
+                                    <span class="ovl-chip">{{ span.label }}
+                                        {{ span.low|default_if_none:"any" }} – {{ span.high|default_if_none:"any" }}</span>
+                                {% empty %}
+                                    <span class="ovl-collides-empty">every range wide open</span>
+                                {% endfor %}
+                                <button type="button" class="ovl-toggle" onclick="toggleOverlapDetail(this)">
+                                    All fields
+                                </button>
+                            </div>
+
+                            <div class="ovl-fields" hidden>
+                                <div class="ovl-grid">
+                                    <div class="ovl-gh">Field</div>
+                                    <div class="ovl-gh">Group {{ pair.group_key_a }}</div>
+                                    <div class="ovl-gh">Group {{ pair.group_key_b }}</div>
+                                    <div class="ovl-gh">Shared</div>
+                                    {% for axis in pair.detail.axes %}
+                                        {% ifchanged axis.is_context %}
+                                            {% if axis.is_context %}
+                                                <div class="ovl-gsplit">Not part of the matching chain — context for deciding the fix</div>
+                                            {% endif %}
+                                        {% endifchanged %}
+                                        <div class="ovl-gc ovl-gl {% if axis.is_context %}ovl-gmuted{% endif %}">{{ axis.label }}</div>
+                                        {% if axis.is_range %}
+                                            <div class="ovl-gc">{{ axis.a.0|default_if_none:"any" }} – {{ axis.a.1|default_if_none:"any" }}</div>
+                                            <div class="ovl-gc">{{ axis.b.0|default_if_none:"any" }} – {{ axis.b.1|default_if_none:"any" }}</div>
+                                            <div class="ovl-gc ovl-shared">{{ axis.overlap.0|default_if_none:"any" }} – {{ axis.overlap.1|default_if_none:"any" }}</div>
+                                        {% else %}
+                                            <div class="ovl-gc {% if axis.is_context %}ovl-gmuted{% endif %}">{{ axis.a }}</div>
+                                            <div class="ovl-gc {% if axis.is_context %}ovl-gmuted{% endif %}">{{ axis.b }}</div>
+                                            <div class="ovl-gc {% if axis.overlap == 'differs' %}ovl-differs{% else %}ovl-shared{% endif %}">{{ axis.overlap }}</div>
+                                        {% endif %}
+                                    {% endfor %}
+                                </div>
+                            </div>
+                        </article>
+                    {% endfor %}
+                </div>
+
+                {% if overlap_page_obj.paginator.num_pages > 1 %}
+                    <div class="pager">
+                        {% if overlap_page_obj.has_previous %}
+                            <a href="?view=overlap&overlap_type={{ selected_overlap_type }}&overlap_page=1">&laquo; First</a>
+                            <a href="?view=overlap&overlap_type={{ selected_overlap_type }}&overlap_page={{ overlap_page_obj.previous_page_number }}">&lsaquo; Prev</a>
+                        {% else %}
+                            <span class="disabled">&laquo; First</span>
+                            <span class="disabled">&lsaquo; Prev</span>
+                        {% endif %}
+
+                        {% for p in overlap_elided_range %}
+                            {% if p == overlap_page_obj.paginator.ELLIPSIS %}
+                                <span class="ellipsis">{{ p }}</span>
+                            {% elif p == overlap_page_obj.number %}
+                                <span class="page-num active">{{ p }}</span>
+                            {% else %}
+                                <a class="page-num" href="?view=overlap&overlap_type={{ selected_overlap_type }}&overlap_page={{ p }}">{{ p }}</a>
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if overlap_page_obj.has_next %}
+                            <a href="?view=overlap&overlap_type={{ selected_overlap_type }}&overlap_page={{ overlap_page_obj.next_page_number }}">Next &rsaquo;</a>
+                            <a href="?view=overlap&overlap_type={{ selected_overlap_type }}&overlap_page={{ overlap_page_obj.paginator.num_pages }}">Last &raquo;</a>
+                        {% else %}
+                            <span class="disabled">Next &rsaquo;</span>
+                            <span class="disabled">Last &raquo;</span>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            {% else %}
+                <div class="text-center py-5">
+                    <i class="bi bi-check-circle" style="font-size: 40px; color: #86efac;"></i>
+                    <h5 class="mt-3 fw-bold text-slate-700">No conflicting pairs of this type.</h5>
+                </div>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+<!-- /#overlapView -->
+
 <script>
     $(document).ready(function () {
         $('.select2-searchable').select2({ width: '100%', placeholder: "Search..." });
@@ -820,11 +1108,22 @@
         btn.classList.toggle('expanded', !list.hidden);
     }
 
+    // The per-axis breakdown lives in the <tr class="ovl-detail"> immediately
+    // after the pair's own row, so walk up to that row and toggle its sibling.
+    // The field-by-field grid is the .ovl-fields block inside the same pair card.
+    function toggleOverlapDetail(btn) {
+        var fields = btn.closest('.ovl-card').querySelector('.ovl-fields');
+        if (!fields) { return; }
+        fields.hidden = !fields.hidden;
+        btn.textContent = fields.hidden ? 'All fields' : 'Hide fields';
+    }
+
     (function () {
         var views = {
             filter: { tab: document.getElementById('tabFilterRecords'), panel: document.getElementById('filterRecordsView') },
             error: { tab: document.getElementById('tabErrorDashboard'), panel: document.getElementById('errorDashboardView') },
             grid: { tab: document.getElementById('tabGridSummary'), panel: document.getElementById('gridSummaryView') },
+            overlap: { tab: document.getElementById('tabOverlaps'), panel: document.getElementById('overlapView') },
         };
 
         function setActiveView(view) {
@@ -840,7 +1139,7 @@
         });
 
         var urlView = new URLSearchParams(window.location.search).get('view');
-        if (urlView === 'error' || urlView === 'grid') {
+        if (Object.prototype.hasOwnProperty.call(views, urlView) && urlView !== 'filter') {
             setActiveView(urlView);
         }
     })();

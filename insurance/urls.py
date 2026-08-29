@@ -89,6 +89,8 @@ urlpatterns = [
     path("bulk-update/", page_access_required("Can_View_Dashboard")(views.bulk_update_rates), name="bulk_update_rates"),
     path("rate-master-health/", page_access_required("Can_View_Rate_Master_Health")(views.rate_master_health), name="rate_master_health"),
     path("rate-master-health/export-grid-summary/", page_access_required("Can_View_Rate_Master_Health")(views.export_grid_summary_xlsx), name="export_grid_summary_xlsx"),
+    path("rate-master-health/overlap-scan/", page_access_required("Can_View_Rate_Master_Health")(views.start_overlap_scan), name="start_overlap_scan"),
+    path("rate-master-health/deactivate-group/<int:group_key>/", page_access_required("Can_View_Rate_Master_Health")(views.deactivate_rate_group), name="deactivate_rate_group"),
 
     # Health Rate Master
     path("health-rate-master/", page_access_required("Can_View_Health_Rate_Master")(views.health_rate_master), name="health_rate_master"),

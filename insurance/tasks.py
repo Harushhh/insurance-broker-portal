@@ -22,7 +22,10 @@ def cleanup_points_search_logs():
 
 # Keep in sync with SECURITY_AUDIT_LOG_ACTIONS in insurance/views.py - the
 # set of action types shown on the Security Audit & History Log page.
-SECURITY_AUDIT_LOG_ACTIONS = ["MANUAL EDIT", "BULK UPDATE", "HEALTH RATE EDIT", "HEALTH BULK UPDATE"]
+SECURITY_AUDIT_LOG_ACTIONS = [
+    "MANUAL EDIT", "BULK UPDATE", "HEALTH RATE EDIT", "HEALTH BULK UPDATE",
+    "OVERLAP DEACTIVATE",
+]
 
 
 @shared_task
@@ -69,3 +72,20 @@ def process_policy_document_task(self, document_id):
     from .views import process_policy_document
     document_obj = PolicyDocumentUpload.objects.get(id=document_id)
     process_policy_document(document_obj)
+
+
+@shared_task(
+    bind=True,
+    max_retries=0,
+    # The sweep compares every pair of active rate groups within an insurer,
+    # so its cost grows with the square of a large insurer's group count.
+    # Given a generous ceiling for the same reason process_mis_mapping_task
+    # has one, and no retries: a failed scan is recorded on the
+    # RateOverlapScan row for the dashboard to show, and re-running it is a
+    # button click rather than something worth repeating automatically.
+    soft_time_limit=900,
+    time_limit=960,
+)
+def run_rate_overlap_scan_task(self, scan_id):
+    from .overlap_utils import run_overlap_scan
+    run_overlap_scan(scan_id)
