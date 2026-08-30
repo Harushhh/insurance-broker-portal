@@ -2717,6 +2717,68 @@ def _rate_master_equality_error_counts():
     return [{"label": rule["label"], "count": rule["violations_fn"]().count()} for rule in EQUALITY_ERROR_RULES]
 
 
+# Pi vs Po rate rules — a RateMaster row is only valid when each Pi (incoming)
+# rate is strictly greater than its paired Po (payout) rate, and pi_type
+# exactly matches po_type. Same "unset never violates" convention as the
+# range/equality rules above — a row is only flagged once both sides of the
+# pair are populated.
+#
+# A Pi rate of exactly 0 is a deliberate special case rather than a violation
+# of the "greater than" rule: it flips the rule to "Po must also be exactly
+# 0", since 0 can't have anything strictly less than it.
+
+
+def _rate_master_pi_po_rate_violations_qs(pi_field, po_field):
+    """
+    RateMaster rows where pi_field/po_field are both set and break the pairing
+    rule: pi_field isn't strictly greater than po_field, EXCEPT when pi_field
+    is exactly 0 — there the rule flips to po_field must also be exactly 0.
+    """
+    both_set = Q(**{f"{pi_field}__isnull": False, f"{po_field}__isnull": False})
+    pi_zero_bad = Q(**{pi_field: 0}) & ~Q(**{po_field: 0})
+    pi_nonzero_bad = ~Q(**{pi_field: 0}) & Q(**{f"{pi_field}__lte": F(po_field)})
+    return RateMaster.objects.filter(is_deleted="NO").filter(both_set & (pi_zero_bad | pi_nonzero_bad))
+
+
+def _rate_master_pi_po_type_violations_qs():
+    """RateMaster rows where pi_type/po_type are both set but don't exactly match."""
+    return (
+        RateMaster.objects.filter(is_deleted="NO", pi_type__isnull=False, po_type__isnull=False)
+        .exclude(pi_type=F("po_type"))
+    )
+
+
+# One entry per Pi vs Po Validation Errors card, same shape as
+# RANGE_ERROR_RULES / EQUALITY_ERROR_RULES above.
+PI_PO_ERROR_RULES = [
+    {
+        "label": "Invalid OD Rate",
+        "violations_fn": lambda: _rate_master_pi_po_rate_violations_qs("pi_od_rate", "po_od_rate"),
+        "columns": [("pi_od_rate", "Pi OD Rate"), ("po_od_rate", "Po OD Rate")],
+    },
+    {
+        "label": "Invalid TP Rate",
+        "violations_fn": lambda: _rate_master_pi_po_rate_violations_qs("pi_tp_rate", "po_tp_rate"),
+        "columns": [("pi_tp_rate", "Pi TP Rate"), ("po_tp_rate", "Po TP Rate")],
+    },
+    {
+        "label": "Invalid NET Rate",
+        "violations_fn": lambda: _rate_master_pi_po_rate_violations_qs("pi_net_rate", "po_net_rate"),
+        "columns": [("pi_net_rate", "Pi NET Rate"), ("po_net_rate", "Po NET Rate")],
+    },
+    {
+        "label": "Pi/Po Type Mismatch",
+        "violations_fn": _rate_master_pi_po_type_violations_qs,
+        "columns": [("pi_type", "Pi Type"), ("po_type", "Po Type")],
+    },
+]
+PI_PO_ERROR_RULES_MAP = {rule["label"]: rule for rule in PI_PO_ERROR_RULES}
+
+
+def _rate_master_pi_po_error_counts():
+    return [{"label": rule["label"], "count": rule["violations_fn"]().count()} for rule in PI_PO_ERROR_RULES]
+
+
 def _rate_master_grid_summary_qs(as_of_date=None):
     """
     Pivot of uploaded RateMaster grids across the same six fields the
@@ -3108,6 +3170,7 @@ def rate_master_health(request):
     pi_type_error_counts = _rate_master_pi_type_error_counts()
     range_error_counts = _rate_master_range_error_counts()
     equality_error_counts = _rate_master_equality_error_counts()
+    pi_po_error_counts = _rate_master_pi_po_error_counts()
 
     # Grid Summary pivot — materialized once so the paginator doesn't re-run
     # the aggregate query, same pattern dashboard() uses for ordered_gids.
@@ -3199,6 +3262,26 @@ def rate_master_health(request):
             equality_paginator.get_elided_page_range(equality_rows_page_obj.number, on_each_side=1, on_ends=1)
         )
 
+    # Drill-down: clicking a Pi vs Po Validation Errors card lists the
+    # individual violating rows, the same row-level shape as the Range/
+    # Equality drill-downs above.
+    pi_po_error = (request.GET.get("pi_po_error") or "").strip()
+    selected_pi_po_rule = PI_PO_ERROR_RULES_MAP.get(pi_po_error)
+    pi_po_rows_page_obj = None
+    pi_po_rows_elided_range = None
+    if selected_pi_po_rule:
+        value_fields = ["id", "group_id", "insurance_company"] + [f for f, _ in selected_pi_po_rule["columns"]]
+        pi_po_rows_qs = selected_pi_po_rule["violations_fn"]().values(*value_fields).order_by("-id")
+        pi_po_paginator = Paginator(pi_po_rows_qs, MIS_HEALTH_BATCH_SIZE)
+        try:
+            pi_po_page_number = int(request.GET.get("pi_po_page") or 1)
+        except ValueError:
+            pi_po_page_number = 1
+        pi_po_rows_page_obj = pi_po_paginator.get_page(pi_po_page_number)
+        pi_po_rows_elided_range = list(
+            pi_po_paginator.get_elided_page_range(pi_po_rows_page_obj.number, on_each_side=1, on_ends=1)
+        )
+
     # Overlaps tab. Reads only the newest COMPLETED scan's stored pairs — the
     # sweep itself runs in a Celery task (start_overlap_scan), never on a page
     # view, for the same reason MISFailedRow exists.
@@ -3246,6 +3329,12 @@ def rate_master_health(request):
         "selected_equality_rule": selected_equality_rule,
         "equality_rows_page_obj": equality_rows_page_obj,
         "equality_rows_elided_range": equality_rows_elided_range,
+        "pi_po_error_counts": pi_po_error_counts,
+        "pi_po_error_total": sum(r["count"] for r in pi_po_error_counts),
+        "selected_pi_po_error": pi_po_error if selected_pi_po_rule else "",
+        "selected_pi_po_rule": selected_pi_po_rule,
+        "pi_po_rows_page_obj": pi_po_rows_page_obj,
+        "pi_po_rows_elided_range": pi_po_rows_elided_range,
         "error_group_page_obj": error_group_page_obj,
         "error_group_elided_range": error_group_elided_range,
         "error_group_ungrouped_count": error_group_ungrouped_count,
