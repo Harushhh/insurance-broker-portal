@@ -179,7 +179,6 @@
             complete: async function(results) {
                 const allRows = results.data;
                 const totalRows = allRows.length;
-                let rowsProcessed = 0;
 
                 // One id per upload (this click of the button), sent with every
                 // chunk of this file -- so rate_master rows split across chunk
@@ -187,52 +186,77 @@
                 // a separate upload (even seconds later) always gets its own.
                 const uploadBatchId = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
 
-                for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
-                    const chunk = allRows.slice(i, i + CHUNK_SIZE);
+                // Sends every chunk of the file through the server once, either
+                // as a read-only check (dryRun=true -- the server validates but
+                // writes nothing) or the real save (dryRun=false). Stops and
+                // reports the error on the first chunk that fails, without
+                // sending any chunks after it.
+                async function runPass(dryRun, label) {
+                    let rowsProcessed = 0;
+                    for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
+                        const chunk = allRows.slice(i, i + CHUNK_SIZE);
 
-                    try {
-                        const response = await fetch(API_URL, {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'X-CSRFToken': csrfToken
-                            },
-                            body: JSON.stringify({
-                                target_table: targetTable,
-                                rows: chunk,
-                                upload_batch_id: uploadBatchId
-                            })
-                        });
+                        try {
+                            const response = await fetch(API_URL, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-CSRFToken': csrfToken
+                                },
+                                body: JSON.stringify({
+                                    target_table: targetTable,
+                                    rows: chunk,
+                                    upload_batch_id: uploadBatchId,
+                                    dry_run: dryRun
+                                })
+                            });
 
-                        // THIS IS THE NEW FIX: Pulling the exact error message
-                        if (!response.ok) {
-                            const errData = await response.json();
-                            throw new Error(errData.message || 'Server rejected the batch.');
+                            if (!response.ok) {
+                                const errData = await response.json();
+                                throw new Error(errData.message || 'Server rejected the batch.');
+                            }
+
+                            rowsProcessed += chunk.length;
+                            const percentage = Math.round((rowsProcessed / totalRows) * 100);
+
+                            progressBar.style.width = percentage + '%';
+                            percentageText.innerText = percentage + '%';
+                            statusText.innerText = `${label} (${rowsProcessed.toLocaleString()} / ${totalRows.toLocaleString()})`;
+
+                        } catch (error) {
+                            console.error('Error:', error);
+                            statusText.innerText = `⚠️ Upload failed: ${error.message}`;
+                            progressBar.className = 'progress-bar bg-danger';
+                            btn.disabled = false;
+                            btn.innerHTML = '<i class="bi bi-cloud-arrow-up me-2"></i> Retry Upload';
+                            return false;
                         }
-
-                        rowsProcessed += chunk.length;
-                        const percentage = Math.round((rowsProcessed / totalRows) * 100);
-                        
-                        progressBar.style.width = percentage + '%';
-                        percentageText.innerText = percentage + '%';
-                        statusText.innerText = `Saving to database... (${rowsProcessed.toLocaleString()} / ${totalRows.toLocaleString()})`;
-
-                    } catch (error) {
-                        console.error('Error:', error);
-                        // DISPLAYING THE EXACT ERROR ON SCREEN
-                        statusText.innerText = `⚠️ Upload failed: ${error.message}`;
-                        progressBar.className = 'progress-bar bg-danger';
-                        btn.disabled = false;
-                        btn.innerHTML = '<i class="bi bi-cloud-arrow-up me-2"></i> Retry Upload';
-                        return; // Halt process
                     }
+                    return true;
                 }
+
+                // Pass 1: check every chunk, save nothing. If anything in the
+                // file is invalid, this stops here with nothing written to the
+                // database at all -- so fixing the bad rows and retrying can
+                // never create duplicates from rows that "already went through",
+                // because on a failed upload none of them ever did.
+                progressBar.style.width = '0%';
+                progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-info';
+                const validated = await runPass(true, 'Validating file...');
+                if (!validated) return;
+
+                // Pass 2: the whole file already checked out clean, so this is
+                // the real save.
+                progressBar.style.width = '0%';
+                progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-primary';
+                const saved = await runPass(false, 'Saving to database...');
+                if (!saved) return;
 
                 statusText.innerText = "Upload Complete!";
                 progressBar.className = 'progress-bar bg-success';
                 btn.disabled = false;
                 btn.innerHTML = '<i class="bi bi-check-circle me-2"></i> Upload Successful';
-                
+
                 fileInput.value = '';
             }
         });

@@ -938,7 +938,13 @@ def api_upload_chunk(request):
             # "chunks of this file recognize each other" guarantee for that
             # one request.
             upload_batch_id = data.get('upload_batch_id') or datetime.now().isoformat()
-            
+            # Set by the frontend's first (validation) pass over the whole
+            # file, see upload.html -- every branch below still runs its full
+            # validation either way, it just skips the actual database writes
+            # when this is true, so a bad row anywhere in the file is caught
+            # before a single row from it is saved.
+            dry_run = bool(data.get('dry_run'))
+
             if not rows:
                 return JsonResponse({'status': 'error', 'message': 'No data provided'}, status=400)
 
@@ -951,12 +957,14 @@ def api_upload_chunk(request):
                         rto_cluster = (row.get("rto_cluster") or "").strip()
                         if not rto_name:
                             raise ValueError("rto_name is blank")
-                        RTOMaster.objects.update_or_create(
-                            rto_name=rto_name,
-                            defaults={"rto_cluster": rto_cluster or None}
-                        )
+                        if not dry_run:
+                            RTOMaster.objects.update_or_create(
+                                rto_name=rto_name,
+                                defaults={"rto_cluster": rto_cluster or None}
+                            )
                         inserted += 1
-                    cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
+                    if not dry_run:
+                        cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
 
                 elif target_table == 'make_model_master':
                     for row in rows:
@@ -964,12 +972,14 @@ def api_upload_chunk(request):
                         make_model_cluster = (row.get("make_model_cluster") or "").strip()
                         if not make_model_name:
                             raise ValueError("make_model_name is blank")
-                        MakeModelMaster.objects.update_or_create(
-                            make_model_name=make_model_name,
-                            defaults={"make_model_cluster": make_model_cluster or None}
-                        )
+                        if not dry_run:
+                            MakeModelMaster.objects.update_or_create(
+                                make_model_name=make_model_name,
+                                defaults={"make_model_cluster": make_model_cluster or None}
+                            )
                         inserted += 1
-                    cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
+                    if not dry_run:
+                        cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
 
                 elif target_table == 'pincode_master':
                     for row in rows:
@@ -977,10 +987,11 @@ def api_upload_chunk(request):
                         pincode_cluster = (row.get("pincode_cluster") or "").strip()
                         if not pincode_zone:
                             raise ValueError("pincode_zone is blank")
-                        PincodeMaster.objects.update_or_create(
-                            pincode_zone=pincode_zone,
-                            defaults={"pincode_cluster": pincode_cluster or None}
-                        )
+                        if not dry_run:
+                            PincodeMaster.objects.update_or_create(
+                                pincode_zone=pincode_zone,
+                                defaults={"pincode_cluster": pincode_cluster or None}
+                            )
                         inserted += 1
 
                 elif target_table == 'rate_master':
@@ -1122,7 +1133,14 @@ def api_upload_chunk(request):
                             "upload_batch": upload_batch_id,
                         }
 
+                        # Hashed and (in a real run) grouped even during
+                        # dry_run, so a row that would fail here -- it can't,
+                        # build_key_hash is pure computation -- is still
+                        # exercised by the validation pass. Nothing below this
+                        # point writes anything when dry_run is set.
                         key_hash, key_text = build_key_hash(cleaned)
+                        if dry_run:
+                            continue
                         if key_hash in existing_groups:
                             group_obj = existing_groups[key_hash]
                         else:
@@ -1187,8 +1205,11 @@ def api_upload_chunk(request):
                             )
                         )
 
-                    RateMaster.objects.bulk_create(instances_to_create, ignore_conflicts=True)
-                    inserted = len(instances_to_create)
+                    if dry_run:
+                        inserted = len(rows)
+                    else:
+                        RateMaster.objects.bulk_create(instances_to_create, ignore_conflicts=True)
+                        inserted = len(instances_to_create)
 
                 elif target_table == 'health_rate_master':
                     for row in rows:
@@ -1238,7 +1259,8 @@ def api_upload_chunk(request):
                         if remarks_val:
                             cleaned["remarks"] = remarks_val
 
-                        upsert_health_rate_row(cleaned)
+                        if not dry_run:
+                            upsert_health_rate_row(cleaned)
                         inserted += 1
 
                 else:
