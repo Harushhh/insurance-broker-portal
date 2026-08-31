@@ -181,19 +181,26 @@
                 const totalRows = allRows.length;
                 let rowsProcessed = 0;
 
+                // One id per upload (this click of the button), sent with every
+                // chunk of this file -- so rate_master rows split across chunk
+                // requests still recognize each other as the same upload, while
+                // a separate upload (even seconds later) always gets its own.
+                const uploadBatchId = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`);
+
                 for (let i = 0; i < totalRows; i += CHUNK_SIZE) {
                     const chunk = allRows.slice(i, i + CHUNK_SIZE);
-                    
+
                     try {
                         const response = await fetch(API_URL, {
                             method: 'POST',
-                            headers: { 
+                            headers: {
                                 'Content-Type': 'application/json',
-                                'X-CSRFToken': csrfToken 
+                                'X-CSRFToken': csrfToken
                             },
-                            body: JSON.stringify({ 
+                            body: JSON.stringify({
                                 target_table: targetTable,
-                                rows: chunk 
+                                rows: chunk,
+                                upload_batch_id: uploadBatchId
                             })
                         });
 

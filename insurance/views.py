@@ -423,7 +423,7 @@ GROUP_FIELDS = [
     "pi_net_rate", "pi_flat_amount", "pi_vli", "pi_type",
     "tariff_min", "tariff_max", "is_ncb", "is_cpa", "cc_min", "cc_max",
     "is_zd", "from_date", "to_date", "sc_min", "sc_max", "add_tnc",
-    "status", "is_deleted",
+    "status", "is_deleted", "upload_batch",
 ]
 
 def normalize(v):
@@ -932,6 +932,12 @@ def api_upload_chunk(request):
             data = json.loads(request.body)
             rows = data.get('rows', [])
             target_table = data.get('target_table', 'rate_master')
+            # One id per upload, shared by every chunk of the same file (see
+            # upload.html) -- falls back to "now" only if a request somehow
+            # arrives without it, so grouping never breaks, it just loses the
+            # "chunks of this file recognize each other" guarantee for that
+            # one request.
+            upload_batch_id = data.get('upload_batch_id') or datetime.now().isoformat()
             
             if not rows:
                 return JsonResponse({'status': 'error', 'message': 'No data provided'}, status=400)
@@ -1107,13 +1113,29 @@ def api_upload_chunk(request):
                             # with rather than always hashing an empty string here.
                             "status": "INACTIVE",
                             "is_deleted": "NO",
+                            # Every upload gets its own groups, even if the
+                            # content is byte-for-byte identical to something
+                            # already in the database -- upload_batch_id is
+                            # unique per click of the Upload button (shared
+                            # only by chunks of that same file), so it never
+                            # matches a different upload, past or future.
+                            "upload_batch": upload_batch_id,
                         }
 
                         key_hash, key_text = build_key_hash(cleaned)
                         if key_hash in existing_groups:
                             group_obj = existing_groups[key_hash]
                         else:
-                            group_obj = RateGroup.objects.create(key_hash=key_hash, key_text=key_text)
+                            # get_or_create, not create: a large file spans
+                            # multiple chunk requests, each starting with an
+                            # empty existing_groups -- without this, a later
+                            # chunk needing a group an earlier chunk of the
+                            # *same* upload already created (or a genuine
+                            # same-day retry) would crash on the key_hash
+                            # uniqueness constraint instead of reusing it.
+                            group_obj, _ = RateGroup.objects.get_or_create(
+                                key_hash=key_hash, defaults={"key_text": key_text}
+                            )
                             existing_groups[key_hash] = group_obj
 
                         instances_to_create.append(

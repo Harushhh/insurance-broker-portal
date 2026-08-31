@@ -80,6 +80,13 @@ FIELD_TO_COLUMN = {
     "add_tnc": "add_tnc",
     "status": "status",
     "is_deleted": "is_deleted",
+    # api_upload_chunk hashes a browser-generated id that isn't stored on the
+    # row itself, so it can't be reproduced exactly here -- created_at is the
+    # closest available stand-in. It still does the job group membership
+    # actually needs: rows from the same bulk_create share one created_at
+    # (same upload), rows from a different upload get a distinctly different
+    # one, so existing groups still only split where they genuinely should.
+    "upload_batch": "created_at",
 }
 
 
