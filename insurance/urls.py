@@ -90,6 +90,7 @@ urlpatterns = [
     path("rate-master-health/", page_access_required("Can_View_Rate_Master_Health")(views.rate_master_health), name="rate_master_health"),
     path("rate-master-health/export-grid-summary/", page_access_required("Can_View_Rate_Master_Health")(views.export_grid_summary_xlsx), name="export_grid_summary_xlsx"),
     path("rate-master-health/overlap-scan/", page_access_required("Can_View_Rate_Master_Health")(views.start_overlap_scan), name="start_overlap_scan"),
+    path("rate-master-health/export-overlap-pairs/", page_access_required("Can_View_Rate_Master_Health")(views.export_overlap_pairs_xlsx), name="export_overlap_pairs_xlsx"),
     path("rate-master-health/deactivate-group/<int:group_key>/", page_access_required("Can_View_Rate_Master_Health")(views.deactivate_rate_group), name="deactivate_rate_group"),
 
     # Health Rate Master

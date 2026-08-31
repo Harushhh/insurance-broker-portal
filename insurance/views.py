@@ -423,6 +423,7 @@ GROUP_FIELDS = [
     "pi_net_rate", "pi_flat_amount", "pi_vli", "pi_type",
     "tariff_min", "tariff_max", "is_ncb", "is_cpa", "cc_min", "cc_max",
     "is_zd", "from_date", "to_date", "sc_min", "sc_max", "add_tnc",
+    "status", "is_deleted",
 ]
 
 def normalize(v):
@@ -583,7 +584,7 @@ def get_make_mapping_context():
     # appear in a SELECT DISTINCT's column list, so without clearing it
     # Django silently pulls the (always-unique) id into the comparison and
     # .distinct() ends up deduplicating nothing at all.
-    rate_makes = RateMaster.objects.exclude(make_model_class__isnull=True).exclude(
+    rate_makes = RateMaster.objects.filter(is_deleted="NO").exclude(make_model_class__isnull=True).exclude(
         new_vehicle_makes__isnull=True
     ).exclude(new_vehicle_makes="").order_by().values_list(
         "make_model_class_id", "new_vehicle_makes"
@@ -1093,6 +1094,12 @@ def api_upload_chunk(request):
                             "po_tp_rate": float(row.get("po_tp_rate") or 0),
                             "po_net_rate": float(row.get("po_net_rate") or 0),
                             "po_flat_amount": float(row.get("po_flat_amount") or 0),
+                            # Must match the hardcoded values the RateMaster(...)
+                            # call below actually saves for a new upload, so the
+                            # grouping hash reflects what the row really ends up
+                            # with rather than always hashing an empty string here.
+                            "status": "INACTIVE",
+                            "is_deleted": "NO",
                         }
 
                         key_hash, key_text = build_key_hash(cleaned)
@@ -2146,7 +2153,8 @@ def _sync_pincode_zones_from_health_data():
     silently missing one after a Health grid re-import introduces a new zone."""
     existing = set(PincodeMaster.objects.values_list("pincode_zone", flat=True))
     used = set(
-        HealthRateMaster.objects.exclude(pincode_zone__isnull=True)
+        HealthRateMaster.objects.exclude(is_deleted="YES")
+        .exclude(pincode_zone__isnull=True)
         .exclude(pincode_zone="")
         .values_list("pincode_zone", flat=True)
         .distinct()
@@ -3110,6 +3118,112 @@ def deactivate_rate_group(request, group_key):
     return _overlap_redirect(overlap_type)
 
 
+def _fmt_bound(v):
+    """None means unbounded — same "any" the drill-down table shows for it."""
+    return "any" if v is None else str(v)
+
+
+def _fmt_axis_side(v):
+    """
+    One side (a/b/overlap) of a describe_pair() axis, formatted the same way
+    the "All fields" drill-down table renders it: a [low, high] pair as
+    "low – high", anything else as-is.
+    """
+    if isinstance(v, list):
+        return f"{_fmt_bound(v[0] if v else None)} - {_fmt_bound(v[1] if len(v) > 1 else None)}"
+    return v if v not in (None, "") else "(blank)"
+
+
+def export_overlap_pairs_xlsx(request):
+    """
+    Exports every conflicting pair of the given overlap_type from the latest
+    scan — the full bucket, not just whatever page the on-screen list happens
+    to be showing, same "export ignores pagination but honours real filters"
+    rule export_grid_summary_xlsx follows. With no overlap_type (or no
+    completed scan), exports an empty sheet with just the headers.
+
+    Mirrors everything the on-screen drill-down card shows for a pair,
+    including the "All fields" table that's collapsed by default on the page:
+    one column trio (Group A / Group B / Shared) per axis describe_pair()
+    compared them on. The axis list itself isn't hardcoded here — it's read
+    off the stored pairs so the export can't drift out of sync with whatever
+    overlap_utils.describe_pair happens to compare.
+    """
+    scan = _latest_overlap_scan()
+    overlap_type = (request.GET.get("overlap_type") or "").strip()
+    rule = OVERLAP_RULES_MAP.get(overlap_type)
+
+    pairs = list(RateOverlapPair.objects.filter(scan=scan, conflict_type=rule["key"])) if (rule and scan) else []
+
+    axis_labels = []
+    seen_labels = set()
+    for pair in pairs:
+        for axis in (pair.detail or {}).get("axes") or []:
+            label = axis.get("label")
+            if label and label not in seen_labels:
+                seen_labels.add(label)
+                axis_labels.append(label)
+
+    base_headers = [
+        "insurance_company", "conflict_type",
+        "group_key_a", "row_count_a", "group_key_b", "row_count_b",
+        "collides_on", "note",
+    ]
+    axis_headers = [
+        f"{label} ({side})" for label in axis_labels for side in ("Group A", "Group B", "Shared")
+    ]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Overlaps"
+    ws.append(base_headers + axis_headers)
+
+    for pair in pairs:
+        detail = pair.detail or {}
+        collides_on = "; ".join(
+            f"{span.get('label')}: {span.get('text') or (_fmt_bound(span.get('low')) + ' - ' + _fmt_bound(span.get('high')))}"
+            for span in detail.get("summary") or []
+        )
+        note = (
+            "These reference different clusters, but a raw code is duplicated across both clusters' "
+            "entries in RTOMaster / MakeModelMaster — fix the master table entry (or point one group "
+            "at a cluster that doesn't share the code), rather than deactivating either group."
+            if pair.conflict_type == "DOUBLE_RATE_RISK" else ""
+        )
+
+        row = [
+            pair.insurance_company or "",
+            pair.get_conflict_type_display(),
+            pair.group_key_a,
+            pair.row_count_a,
+            pair.group_key_b,
+            pair.row_count_b,
+            collides_on,
+            note,
+        ]
+
+        axes_by_label = {axis.get("label"): axis for axis in detail.get("axes") or []}
+        for label in axis_labels:
+            axis = axes_by_label.get(label)
+            if axis is None:
+                row += ["", "", ""]
+                continue
+            row += [
+                _fmt_axis_side(axis.get("a")),
+                _fmt_axis_side(axis.get("b")),
+                _fmt_axis_side(axis.get("overlap")),
+            ]
+        ws.append(row)
+
+    filename = f"overlap_{rule['key'].lower()}_export.xlsx" if rule else "overlap_export.xlsx"
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    wb.save(response)
+    return response
+
+
 def rate_master_health(request):
     _sync_unsynced_mis_files()
 
@@ -3898,16 +4012,16 @@ def _run_health_payout_search(request):
 def health_payout_rates(request):
     results, total_found, has_more, has_searched, selected = _run_health_payout_search(request)
 
-    product_list = HealthRateMaster.objects.exclude(product_name__isnull=True).exclude(
+    product_list = HealthRateMaster.objects.exclude(is_deleted="YES").exclude(product_name__isnull=True).exclude(
         product_name=""
     ).values_list("product_name", flat=True).distinct().order_by("product_name")
-    business_type_list = HealthRateMaster.objects.exclude(business_type__isnull=True).exclude(
+    business_type_list = HealthRateMaster.objects.exclude(is_deleted="YES").exclude(business_type__isnull=True).exclude(
         business_type=""
     ).values_list("business_type", flat=True).distinct().order_by("business_type")
-    category_list = HealthRateMaster.objects.exclude(policy_category__isnull=True).exclude(
+    category_list = HealthRateMaster.objects.exclude(is_deleted="YES").exclude(policy_category__isnull=True).exclude(
         policy_category=""
     ).values_list("policy_category", flat=True).distinct().order_by("policy_category")
-    insurer_list = HealthRateMaster.objects.exclude(insurance_company="").values_list(
+    insurer_list = HealthRateMaster.objects.exclude(is_deleted="YES").exclude(insurance_company="").values_list(
         "insurance_company", flat=True
     ).distinct().order_by("insurance_company")
 
@@ -4595,7 +4709,7 @@ def lock_unlock_policy(request, rate_id):
         })
 
     rate_obj = get_object_or_404(
-        RateMaster.objects.select_related("product", "sub_product", "fuel_type"),
+        RateMaster.objects.select_related("product", "sub_product", "fuel_type").filter(is_deleted="NO"),
         id=rate_id
     )
 

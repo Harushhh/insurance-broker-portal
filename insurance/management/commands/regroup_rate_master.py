@@ -22,6 +22,14 @@ actually mixed, and only touches rows that need to move for a real, semantic
 reason. No rate/pricing field on any row is ever read for writing or modified
 — only the `group` FK column, and only where membership genuinely changes.
 
+The reverse case also happens: two DIFFERENT existing groups can converge onto
+the same new hash (they were always identical under the fields that now
+matter, just recorded under two legacy key_hash values). That's a merge, not
+a split — the group with the most current rows keeps its id (ties go to the
+lowest/oldest group id); every row from the other group(s) is reassigned onto
+the winner, and the now-empty losing RateGroup row(s) are deleted so they
+don't collide with the winner's key_hash under the unique constraint.
+
 Safe to re-run: a second run should report zero changes.
 """
 from collections import defaultdict
@@ -70,6 +78,8 @@ FIELD_TO_COLUMN = {
     "sc_min": "sc_min",
     "sc_max": "sc_max",
     "add_tnc": "add_tnc",
+    "status": "status",
+    "is_deleted": "is_deleted",
 }
 
 
@@ -102,6 +112,8 @@ class Command(BaseCommand):
         key_text_by_hash = {}                       # new_hash -> key_text
         old_group_of_new_hash = {}                  # new_hash -> old group_id (or None)
         new_hashes_of_old_group = defaultdict(set)  # old group_id -> {new_hash, ...}
+        rows_by_old_gid = defaultdict(int)          # old group_id -> current row count
+        row_old_gid = {}                            # row id -> old group_id (for merge reporting)
 
         total_rows = 0
         ungrouped_rows = 0
@@ -122,8 +134,10 @@ class Command(BaseCommand):
 
             old_gid = row["group_id"]
             old_group_of_new_hash[key_hash] = old_gid
+            row_old_gid[row["id"]] = old_gid
             if old_gid is not None:
                 new_hashes_of_old_group[old_gid].add(key_hash)
+                rows_by_old_gid[old_gid] += 1
             else:
                 ungrouped_rows += 1
 
@@ -141,21 +155,61 @@ class Command(BaseCommand):
                     h: len(row_ids_by_new_hash[h]) for h in hashes if h != winner
                 }
 
-        winning_hashes = set(winning_hash_of_old_group.values())
-        losing_hashes = [h for h in row_ids_by_new_hash if h not in winning_hashes]
-        # (losing_hashes includes both split-off pieces and hashes with no old group at all)
+        # Merge detection: multiple old groups can independently pick the same
+        # winning hash (they were always duplicates of each other under the
+        # fields that now matter). Group old_gids by the hash they claim, and
+        # for any hash claimed by more than one, pick a merge winner: most
+        # current rows, ties broken by the lowest/oldest group id.
+        old_gids_claiming_hash = defaultdict(list)
+        for old_gid, h in winning_hash_of_old_group.items():
+            old_gids_claiming_hash[h].append(old_gid)
 
-        rows_to_reassign = sum(len(row_ids_by_new_hash[h]) for h in losing_hashes)
-        groups_updated_in_place = len(winning_hash_of_old_group)
-        groups_created = len(losing_hashes)
+        hash_owner = {}            # new_hash -> existing old_gid that will hold it
+        merge_losers_of_hash = {}  # new_hash -> [losing old_gid, ...]
+        for h, gids in old_gids_claiming_hash.items():
+            if len(gids) == 1:
+                hash_owner[h] = gids[0]
+            else:
+                winner = min(gids, key=lambda g: (-rows_by_old_gid[g], g))
+                hash_owner[h] = winner
+                merge_losers_of_hash[h] = [g for g in gids if g != winner]
+
+        merged_away_gids = {g for losers in merge_losers_of_hash.values() for g in losers}
+        rows_moved_via_merge = sum(
+            1 for h, losers in merge_losers_of_hash.items()
+            for rid in row_ids_by_new_hash[h] if row_old_gid.get(rid) in set(losers)
+        )
+
+        # Hashes with no existing owner at all need a brand new RateGroup —
+        # this is the split-off case (a losing piece of a splitting group), or
+        # a hash that never had an old group to begin with.
+        new_group_hashes = [h for h in row_ids_by_new_hash if h not in hash_owner]
+
+        rows_to_reassign = sum(len(row_ids_by_new_hash[h]) for h in new_group_hashes)
+        groups_updated_in_place = len(hash_owner)
+        groups_created = len(new_group_hashes)
 
         if not dry_run:
             with transaction.atomic():
-                for old_gid, winning_hash in winning_hash_of_old_group.items():
-                    RateGroup.objects.filter(pk=old_gid).update(
-                        key_hash=winning_hash, key_text=key_text_by_hash[winning_hash]
+                # 1. Refresh/claim every hash that has an existing owner group —
+                #    covers plain refreshes, split winners, and merge winners
+                #    alike. This pulls every row for that hash (including ones
+                #    currently sitting under a merge loser) onto the owner.
+                for h, owner_gid in hash_owner.items():
+                    RateGroup.objects.filter(pk=owner_gid).update(
+                        key_hash=h, key_text=key_text_by_hash[h]
                     )
-                for new_hash in losing_hashes:
+                    RateMaster.objects.filter(
+                        id__in=row_ids_by_new_hash[h]
+                    ).update(group_id=owner_gid)
+
+                # 2. Now that no row still points at a merge loser, delete the
+                #    redundant RateGroup rows so their key_hash frees up.
+                if merged_away_gids:
+                    RateGroup.objects.filter(pk__in=merged_away_gids).delete()
+
+                # 3. Create brand new groups for hashes nobody currently owns.
+                for new_hash in new_group_hashes:
                     new_group = RateGroup.objects.create(
                         key_hash=new_hash, key_text=key_text_by_hash[new_hash]
                     )
@@ -169,6 +223,9 @@ class Command(BaseCommand):
             f"({ungrouped_rows} rows currently ungrouped).\n"
             f"{label}{groups_updated_in_place} existing groups keep their id (hash refreshed in place).\n"
             f"{label}{len(splitting_groups)} existing groups are genuinely splitting.\n"
+            f"{label}{len(merge_losers_of_hash)} duplicate-group merges found, "
+            f"retiring {len(merged_away_gids)} redundant group id(s) "
+            f"and moving {rows_moved_via_merge} row(s) onto the surviving group.\n"
             f"{label}{groups_created} new groups would be created "
             f"(the split-off pieces, plus any previously-ungrouped rows).\n"
             f"{label}{rows_to_reassign} rows would actually be reassigned to a different group "
@@ -186,3 +243,12 @@ class Command(BaseCommand):
             for gid, losers in top:
                 total_moving = sum(losers.values())
                 self.stdout.write(f"{gid:>10}  {total_moving:>12}  {len(losers) + 1} groups total")
+
+        if merge_losers_of_hash:
+            self.stdout.write(f"\n{len(merge_losers_of_hash)} merge(s) (duplicate groups collapsing into one):")
+            self.stdout.write(f"{'winner_gid':>10}  {'loser_gid(s)':>20}  {'rows_moved':>10}")
+            for h, losers in merge_losers_of_hash.items():
+                winner_gid = hash_owner[h]
+                loser_set = set(losers)
+                moved = sum(1 for rid in row_ids_by_new_hash[h] if row_old_gid.get(rid) in loser_set)
+                self.stdout.write(f"{winner_gid:>10}  {str(losers):>20}  {moved:>10}")
