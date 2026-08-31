@@ -992,7 +992,14 @@ def api_upload_chunk(request):
                         if code.lower() not in ynn_map:
                             ynn_map[code.lower()] = YesNoNAMaster.objects.create(code=code)
 
-                    existing_groups = {g.key_hash: g for g in RateGroup.objects.all()}
+                    # Deliberately NOT seeded from RateGroup.objects.all() -- a new
+                    # upload must never silently attach its rows to a group left
+                    # over from a past, unrelated upload just because the content
+                    # hash happens to match. Starting empty means rows only group
+                    # together with other rows from this same upload; any genuine
+                    # cross-upload duplicates get consolidated later, deliberately,
+                    # by regroup_rate_master.py instead of invisibly at import time.
+                    existing_groups = {}
 
                     def get_ynn(val):
                         if not val: return ynn_map["na"]
