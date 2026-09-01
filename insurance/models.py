@@ -434,6 +434,7 @@ class GridDocument(models.Model):
 
     insurer_name = models.CharField(max_length=255)
     remarks = models.TextField(blank=True, null=True)
+    work_effected_date = models.DateField(blank=True, null=True)
     uploaded_file = models.FileField(upload_to="grid_documents/%Y/%m/")
     uploaded_date = models.DateTimeField(auto_now_add=True)
     uploaded_by = models.ForeignKey(

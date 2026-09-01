@@ -4,6 +4,27 @@
 
 {% block content %}
 <style>
+    /* Buttons */
+    .btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+        font-family: inherit; cursor: pointer; transition: all 0.18s ease;
+    }
+    .btn.primary {
+        background: linear-gradient(135deg, #2563eb, #0ea5e9);
+        color: #fff; border: none;
+        box-shadow: 0 6px 16px rgba(37, 99, 235, 0.25);
+    }
+    .btn.primary:hover { box-shadow: 0 8px 20px rgba(37, 99, 235, 0.35); transform: translateY(-1px); }
+    .btn.primary:active { transform: translateY(0); }
+
+    /* Page header */
+    .gm-header-icon {
+        width: 46px; height: 46px; border-radius: 14px; flex-shrink: 0;
+        background: linear-gradient(135deg, #f59e0b, #b45309);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 20px; box-shadow: 0 8px 18px rgba(180, 83, 9, 0.25);
+    }
+
     /* Styling for the Status Dropdown Badges */
     .status-select {
         padding: 6px 30px 6px 14px;
@@ -65,16 +86,58 @@
     .gm-pill-pending { background: #fef9c3; color: #854d0e; border-color: #fde047; }
     .gm-pill-follow-up { background: #dbeafe; color: #1e3a8a; border-color: #93c5fd; }
     .gm-pill-done { background: #dcfce7; color: #166534; border-color: #86efac; }
+
+    /* Table polish */
+    .gm-table tbody tr { transition: background-color 0.15s ease; }
+    .gm-table tbody tr:hover { background-color: #f8fafc; }
+    .gm-table tbody tr:last-child td { border-bottom: none; }
+    .gm-date-cell { display: flex; align-items: center; gap: 6px; }
+    .gm-date-cell.is-empty { color: #cbd5e1; }
+    .gm-uploader { display: flex; align-items: center; gap: 8px; }
+    .gm-uploader-avatar {
+        width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0;
+        background: linear-gradient(135deg, #94a3b8, #64748b);
+        color: #fff; font-size: 11px; font-weight: 800;
+        display: flex; align-items: center; justify-content: center;
+    }
+
+    /* Modal polish */
+    .modal-content { animation: gm-modal-in 0.18s ease; }
+    @keyframes gm-modal-in {
+        from { opacity: 0; transform: translateY(8px) scale(0.98); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .gm-field-label {
+        font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;
+        letter-spacing: 0.04em; margin-bottom: 6px; display: block;
+    }
+    .gm-input {
+        width: 100%; padding: 11px 14px; border: 1px solid #dbe2ea; border-radius: 10px;
+        margin-bottom: 16px; font-family: inherit; font-size: 14px; box-sizing: border-box;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease; background: #fff;
+    }
+    .gm-input:focus {
+        outline: none; border-color: #60a5fa; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1);
+    }
+    .gm-input::placeholder { color: #a0aec0; }
+    .gm-file-input { background: #f8fafc; padding: 9px 12px; }
+    .gm-two-col { display: grid; grid-template-columns: 1fr 1.4fr; gap: 14px; align-items: start; }
+    @media (max-width: 520px) {
+        .gm-two-col { grid-template-columns: 1fr; }
+    }
 </style>
 
 <div class="card" style="padding: 30px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 25px;">
-        <div>
-            <h2 style="margin:0; color:#0f172a;">📁 Grid Management</h2>
-            <p class="subtext" style="margin:6px 0 0;">Upload and manage raw Excel grids from insurance providers.</p>
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 28px; gap: 16px; flex-wrap: wrap;">
+        <div style="display:flex; align-items:center; gap:16px;">
+            <div class="gm-header-icon">📁</div>
+            <div>
+                <h2 style="margin:0; color:#0f172a; font-weight:800; letter-spacing:-0.3px;">Grid Management</h2>
+                <p class="subtext" style="margin:4px 0 0; color:#64748b;">Upload and manage raw Excel grids from insurance providers.</p>
+            </div>
         </div>
-        <button class="btn primary" onclick="openModal('uploadGridModal')" style="padding:12px 24px; font-weight:600; border-radius:10px;">
-            + Upload New Grid
+        <button class="btn primary" onclick="openModal('uploadGridModal')" style="padding:13px 24px; font-weight:600; font-size:14px; border-radius:10px;">
+            <i class="bi bi-plus-lg"></i> Upload New Grid
         </button>
     </div>
 
@@ -95,11 +158,12 @@
     </div>
 
     <div style="overflow-x:auto; border:1px solid var(--border); border-radius:12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);">
-        <table class="styled-table" style="width:100%; text-align:left; border-collapse:collapse;">
+        <table class="styled-table gm-table" style="width:100%; text-align:left; border-collapse:collapse;">
             <thead>
-                <tr style="background:#f8fafc; color:#475569; font-size:12px; text-transform:uppercase;">
+                <tr style="background:#f8fafc; color:#475569; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.03em;">
                     <th style="padding:16px;">Insurer Name</th>
                     <th style="padding:16px;">Remarks</th>
+                    <th style="padding:16px;">Work Effected Date</th>
                     <th style="padding:16px;">Status</th>
                     <th style="padding:16px;">Uploaded By</th>
                     <th style="padding:16px;">Date & Time</th>
@@ -108,17 +172,24 @@
             </thead>
             <tbody>
                 {% for doc in documents %}
-                <tr style="border-bottom:1px solid var(--border); background:#fff; transition: background 0.2s;">
+                <tr style="border-bottom:1px solid var(--border); background:#fff;">
                     <td style="padding:16px; font-weight:600; color:#0f172a;">{{ doc.insurer_name }}</td>
                     <td style="padding:16px; color:#475569;">{{ doc.remarks|default:"-" }}</td>
-                    
+                    <td style="padding:16px;">
+                        {% if doc.work_effected_date %}
+                            <span class="gm-date-cell" style="color:#475569;"><i class="bi bi-calendar-event"></i> {{ doc.work_effected_date|date:"d M Y" }}</span>
+                        {% else %}
+                            <span class="gm-date-cell is-empty">—</span>
+                        {% endif %}
+                    </td>
+
                     <td style="padding:16px;">
                         <form method="POST" style="margin:0;">
                             {% csrf_token %}
                             <input type="hidden" name="action" value="update_status">
                             <input type="hidden" name="doc_id" value="{{ doc.id }}">
-                            
-                            <select name="status" onchange="this.form.submit()" class="status-select 
+
+                            <select name="status" onchange="this.form.submit()" class="status-select
                                 {% if doc.status == 'PENDING' %}status-pending
                                 {% elif doc.status == 'FOLLOW-UP' %}status-follow-up
                                 {% elif doc.status == 'DONE' %}status-done{% endif %}">
@@ -129,19 +200,25 @@
                         </form>
                     </td>
 
-                    <td style="padding:16px; color:#475569;">{{ doc.uploaded_by.username|default:"System" }}</td>
+                    <td style="padding:16px;">
+                        <span class="gm-uploader">
+                            <span class="gm-uploader-avatar">{{ doc.uploaded_by.username|default:"S"|first|upper }}</span>
+                            <span style="color:#475569;">{{ doc.uploaded_by.username|default:"System" }}</span>
+                        </span>
+                    </td>
                     <td style="padding:16px; color:#475569;">{{ doc.uploaded_date|date:"d M Y, h:i A" }}</td>
                     <td style="padding:16px; text-align:right;">
                         <a href="{{ doc.uploaded_file.url }}" target="_blank" class="btn" style="background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; text-decoration:none;">
-                            ⬇️ Download
+                            <i class="bi bi-download"></i> Download
                         </a>
                     </td>
                 </tr>
                 {% empty %}
                 <tr>
-                    <td colspan="6" style="padding:40px; text-align:center; color:#64748b;">
+                    <td colspan="7" style="padding:56px 16px; text-align:center; color:#94a3b8;">
+                        <div style="font-size:32px; margin-bottom:10px;">🗂️</div>
                         {% if selected_status %}
-                            No grids with this status. <a href="?status=all">Clear the filter</a> to see all uploads.
+                            No grids with this status. <a href="?status=all" style="color:#2563eb; font-weight:600;">Clear the filter</a> to see all uploads.
                         {% else %}
                             No grids uploaded yet. Click the upload button to add your first file!
                         {% endif %}
@@ -153,29 +230,45 @@
     </div>
 </div>
 
-<div id="uploadGridModal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.6); backdrop-filter:blur(4px); z-index:1000; justify-content:center; align-items:center;">
-    <div class="modal-content" style="background:#fff; width:100%; max-width:450px; padding:30px; border-radius:16px; box-shadow:0 25px 50px rgba(0,0,0,0.2);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-            <h3 style="margin:0; color:#0f172a;">Upload Provider Grid</h3>
-            <button type="button" onclick="closeModal('uploadGridModal')" style="background:none; border:none; font-size:24px; cursor:pointer; color:#94a3b8;">&times;</button>
+<div id="uploadGridModal" class="modal-overlay" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(15,23,42,0.6); backdrop-filter:blur(4px); z-index:1000; justify-content:center; align-items:center; padding:20px; box-sizing:border-box;">
+    <div class="modal-content" style="background:#fff; width:100%; max-width:500px; padding:30px; border-radius:16px; box-shadow:0 25px 50px rgba(0,0,0,0.2);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:22px;">
+            <div style="display:flex; align-items:center; gap:12px;">
+                <div class="gm-header-icon" style="width:38px; height:38px; border-radius:11px; font-size:16px;"><i class="bi bi-cloud-arrow-up-fill"></i></div>
+                <h3 style="margin:0; color:#0f172a; font-weight:800;">Upload Provider Grid</h3>
+            </div>
+            <button type="button" onclick="closeModal('uploadGridModal')" style="background:#f1f5f9; border:none; width:32px; height:32px; border-radius:9px; font-size:20px; line-height:1; cursor:pointer; color:#64748b; transition:background 0.15s ease;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">&times;</button>
         </div>
-        
+
         <form method="POST" enctype="multipart/form-data">
             {% csrf_token %}
             <input type="hidden" name="action" value="upload_grid">
-            
-            <label style="font-size:12px; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:6px; display:block;">Insurer Name *</label>
-            <input type="text" name="insurer_name" required placeholder="e.g. Reliance General" style="width:100%; padding:12px; border:1px solid #cbd5e1; border-radius:10px; margin-bottom:16px; font-family:inherit; box-sizing:border-box;">
-            
-            <label style="font-size:12px; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:6px; display:block;">Select File (Excel, PDF, Zip) *</label>
-            <input type="file" name="uploaded_file" required style="width:100%; padding:10px; border:1px solid #cbd5e1; border-radius:10px; margin-bottom:16px; background:#f8fafc; font-family:inherit; box-sizing:border-box;">
 
-            <label style="font-size:12px; font-weight:700; color:#475569; text-transform:uppercase; margin-bottom:6px; display:block;">Remarks (Optional)</label>
-            <textarea name="remarks" placeholder="Add notes about this grid..." rows="3" style="width:100%; padding:12px; border:1px solid #cbd5e1; border-radius:10px; margin-bottom:24px; font-family:inherit; box-sizing:border-box; resize:vertical;"></textarea>
+            <label class="gm-field-label">Insurer Name *</label>
+            <input type="text" name="insurer_name" required placeholder="e.g. Reliance General" class="gm-input">
 
-            <div style="display:flex; gap:12px;">
-                <button type="submit" class="btn primary" style="flex:2; padding:14px; border-radius:10px; font-size:15px; border:none; background:linear-gradient(135deg, #2563eb, #0ea5e9); color:white; font-weight:600;">Upload File</button>
-                <button type="button" class="btn" onclick="closeModal('uploadGridModal')" style="flex:1; padding:14px; border-radius:10px; font-size:15px; border:1px solid #cbd5e1; background:#f8fafc;">Cancel</button>
+            <label class="gm-field-label">Select File (Excel, PDF, Zip) *</label>
+            <input type="file" name="uploaded_file" required class="gm-input gm-file-input">
+
+            <div class="gm-two-col">
+                <div>
+                    <label class="gm-field-label">Work Effected Date</label>
+                    <input type="date" name="work_effected_date" class="gm-input">
+                </div>
+                <div>
+                    <label class="gm-field-label" style="display:flex; justify-content:space-between; align-items:center;">
+                        <span>Remarks (Optional)</span>
+                        <span id="remarksWordCount" style="font-weight:600; color:#94a3b8; text-transform:none; letter-spacing:0;">0 / 250 words</span>
+                    </label>
+                    <textarea name="remarks" id="remarksField" placeholder="Add notes about this grid..." rows="3" class="gm-input" style="resize:vertical;" oninput="gmEnforceWordLimit(this, 'remarksWordCount', 250)"></textarea>
+                </div>
+            </div>
+
+            <div style="display:flex; gap:12px; margin-top:8px;">
+                <button type="submit" class="btn primary" style="flex:2; padding:14px; border-radius:10px; font-size:15px; font-weight:600;">
+                    <i class="bi bi-upload"></i> Upload File
+                </button>
+                <button type="button" class="btn" onclick="closeModal('uploadGridModal')" style="flex:1; padding:14px; border-radius:10px; font-size:15px; border:1px solid #cbd5e1; background:#f8fafc; color:#475569; font-weight:600;">Cancel</button>
             </div>
         </form>
     </div>
@@ -184,5 +277,14 @@
 <script>
     function openModal(id) { document.getElementById(id).style.display = 'flex'; }
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+    function gmEnforceWordLimit(el, counterId, limit) {
+        let words = el.value.trim().length ? el.value.trim().split(/\s+/) : [];
+        if (words.length > limit) {
+            words = words.slice(0, limit);
+            el.value = words.join(' ');
+        }
+        document.getElementById(counterId).textContent = words.length + ' / ' + limit + ' words';
+    }
 </script>
 {% endblock %}
