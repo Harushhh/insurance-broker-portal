@@ -54,10 +54,16 @@
         border-color: #93c5fd; 
     }
     
-    .status-done { 
+    .status-done {
         background-color: #bbf7d0; /* Green */
-        color: #166534; 
-        border-color: #86efac; 
+        color: #166534;
+        border-color: #86efac;
+    }
+
+    .status-rejected {
+        background-color: #fecaca; /* Red */
+        color: #991b1b;
+        border-color: #fca5a5;
     }
 
     .status-select:hover {
@@ -86,6 +92,7 @@
     .gm-pill-pending { background: #fef9c3; color: #854d0e; border-color: #fde047; }
     .gm-pill-follow-up { background: #dbeafe; color: #1e3a8a; border-color: #93c5fd; }
     .gm-pill-done { background: #dcfce7; color: #166534; border-color: #86efac; }
+    .gm-pill-rejected { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
 
     /* Table polish */
     .gm-table tbody tr { transition: background-color 0.15s ease; }
@@ -121,6 +128,30 @@
     }
     .gm-input::placeholder { color: #a0aec0; }
     .gm-file-input { background: #f8fafc; padding: 9px 12px; }
+
+    /* Searchable insurer dropdown */
+    .gm-combobox { position: relative; margin-bottom: 16px; }
+    .gm-combobox .gm-input { margin-bottom: 0; }
+    .gm-combobox-list {
+        display: none;
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0; right: 0;
+        max-height: 220px;
+        overflow-y: auto;
+        background: #fff;
+        border: 1px solid #dbe2ea;
+        border-radius: 10px;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.14);
+        z-index: 20;
+    }
+    .gm-combobox-list.open { display: block; }
+    .gm-combobox-option {
+        padding: 10px 14px; font-size: 13.5px; color: #1e293b; cursor: pointer;
+    }
+    .gm-combobox-option:hover { background: #eff6ff; color: #1d4ed8; }
+    .gm-combobox-option.gm-hidden { display: none; }
+    .gm-combobox-empty { padding: 10px 14px; font-size: 13px; color: #94a3b8; display: none; }
     .gm-two-col { display: grid; grid-template-columns: 1fr 1.4fr; gap: 14px; align-items: start; }
     @media (max-width: 520px) {
         .gm-two-col { grid-template-columns: 1fr; }
@@ -150,7 +181,7 @@
             <a href="?status={{ code|urlencode }}" class="gm-stat-card {% if selected_status == code %}selected{% endif %}">
                 <span class="gm-count">{{ status_counts|get_item:code|default:0 }}</span>
                 <span class="gm-pill gm-pill-{{ code|lower }}">
-                    {% if code == 'PENDING' %}⏳{% elif code == 'FOLLOW-UP' %}🔄{% elif code == 'DONE' %}✅{% endif %}
+                    {% if code == 'PENDING' %}⏳{% elif code == 'FOLLOW-UP' %}🔄{% elif code == 'DONE' %}✅{% elif code == 'REJECTED' %}❌{% endif %}
                     {{ label }}
                 </span>
             </a>
@@ -192,10 +223,12 @@
                             <select name="status" onchange="this.form.submit()" class="status-select
                                 {% if doc.status == 'PENDING' %}status-pending
                                 {% elif doc.status == 'FOLLOW-UP' %}status-follow-up
-                                {% elif doc.status == 'DONE' %}status-done{% endif %}">
+                                {% elif doc.status == 'DONE' %}status-done
+                                {% elif doc.status == 'REJECTED' %}status-rejected{% endif %}">
                                 <option value="PENDING" {% if doc.status == 'PENDING' %}selected{% endif %}>⏳ Pending</option>
                                 <option value="FOLLOW-UP" {% if doc.status == 'FOLLOW-UP' %}selected{% endif %}>🔄 Follow-up</option>
                                 <option value="DONE" {% if doc.status == 'DONE' %}selected{% endif %}>✅ Done</option>
+                                <option value="REJECTED" {% if doc.status == 'REJECTED' %}selected{% endif %}>❌ Rejected</option>
                             </select>
                         </form>
                     </td>
@@ -240,12 +273,21 @@
             <button type="button" onclick="closeModal('uploadGridModal')" style="background:#f1f5f9; border:none; width:32px; height:32px; border-radius:9px; font-size:20px; line-height:1; cursor:pointer; color:#64748b; transition:background 0.15s ease;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f1f5f9'">&times;</button>
         </div>
 
-        <form method="POST" enctype="multipart/form-data">
+        <form method="POST" enctype="multipart/form-data" onsubmit="return gmValidateGridUpload()">
             {% csrf_token %}
             <input type="hidden" name="action" value="upload_grid">
 
             <label class="gm-field-label">Insurer Name *</label>
-            <input type="text" name="insurer_name" required placeholder="e.g. Reliance General" class="gm-input">
+            <div class="gm-combobox" id="insurerCombobox">
+                <input type="text" id="insurerSearchInput" class="gm-input" placeholder="Search and select an insurer..." autocomplete="off" oninput="gmFilterInsurerOptions()" onfocus="gmOpenInsurerDropdown()">
+                <input type="hidden" name="insurer_name" id="insurerNameHidden">
+                <div class="gm-combobox-list" id="insurerDropdownList">
+                    {% for insurer in insurer_choices %}
+                        <div class="gm-combobox-option" data-value="{{ insurer }}" onclick="gmSelectInsurer(this)">{{ insurer }}</div>
+                    {% endfor %}
+                    <div class="gm-combobox-empty" id="insurerEmptyState">No matching insurer</div>
+                </div>
+            </div>
 
             <label class="gm-field-label">Select File (Excel, PDF, Zip) *</label>
             <input type="file" name="uploaded_file" required class="gm-input gm-file-input">
@@ -286,5 +328,50 @@
         }
         document.getElementById(counterId).textContent = words.length + ' / ' + limit + ' words';
     }
+
+    // Searchable insurer dropdown
+    function gmOpenInsurerDropdown() {
+        document.getElementById('insurerDropdownList').classList.add('open');
+    }
+
+    function gmFilterInsurerOptions() {
+        const query = document.getElementById('insurerSearchInput').value.trim().toLowerCase();
+        const options = document.querySelectorAll('#insurerDropdownList .gm-combobox-option');
+        let anyVisible = false;
+        options.forEach(function (opt) {
+            const match = opt.textContent.toLowerCase().includes(query);
+            opt.classList.toggle('gm-hidden', !match);
+            if (match) anyVisible = true;
+        });
+        document.getElementById('insurerEmptyState').style.display = anyVisible ? 'none' : 'block';
+        document.getElementById('insurerNameHidden').value = '';
+        gmOpenInsurerDropdown();
+    }
+
+    function gmSelectInsurer(el) {
+        const value = el.getAttribute('data-value');
+        document.getElementById('insurerSearchInput').value = value;
+        document.getElementById('insurerNameHidden').value = value;
+        document.getElementById('insurerSearchInput').style.borderColor = '';
+        document.getElementById('insurerDropdownList').classList.remove('open');
+    }
+
+    function gmValidateGridUpload() {
+        const hidden = document.getElementById('insurerNameHidden');
+        if (!hidden.value) {
+            const input = document.getElementById('insurerSearchInput');
+            input.style.borderColor = '#ef4444';
+            input.focus();
+            return false;
+        }
+        return true;
+    }
+
+    document.addEventListener('click', function (e) {
+        const combobox = document.getElementById('insurerCombobox');
+        if (combobox && !combobox.contains(e.target)) {
+            document.getElementById('insurerDropdownList').classList.remove('open');
+        }
+    });
 </script>
 {% endblock %}

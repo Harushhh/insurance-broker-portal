@@ -5418,6 +5418,33 @@ def send_email_background(subject, message, recipient_list):
 # -------------------------
 # GRID MANAGEMENT
 # -------------------------
+GRID_INSURER_CHOICES = [
+    "ACKO GENERAL INSURANCE LIMITED",
+    "BAJAJ ALLIANZ GENERAL INSURANCE CO LTD",
+    "CHOLAMANDALAM MS GENERAL INSURANCE COMPANY LTD",
+    "FUTURE GENERALI INDIA INSURANCE COMPANY LTD",
+    "GO DIGIT GENERAL INSURANCE LTD",
+    "HDFC ERGO GENERAL INSURANCE CO LTD",
+    "ICICI LOMBARD GENERAL INSURANCE CO LTD",
+    "IFFCO-TOKIO GENERAL INSURANCE CO LTD",
+    "ZURICH KOTAK GENERAL INSURANCE COMPANY (I) LIMITED",
+    "LIBERTY GENERAL INSURANCE LTD",
+    "MAGMA HDI GENERAL INSURANCE CO LTD",
+    "NATIONAL INSURANCE CO LTD",
+    "RAHEJA QBE GENERAL INSURANCE CO LTD",
+    "RELIANCE GENERAL INSURANCE CO LTD",
+    "ROYAL SUNDARAM GENERAL INSURANCE COMPANY LIMITED",
+    "SBI GENERAL INSURANCE COMPANY LIMITED",
+    "SHRIRAM GENERAL INSURANCE COMPANY LTD",
+    "TATA AIG GENERAL INSURANCE CO LTD",
+    "THE NEW INDIA ASSURANCE CO LTD",
+    "THE ORIENTAL INSURANCE CO LTD",
+    "UNITED INDIA INSURANCE CO LTD",
+    "UNIVERSAL SOMPO GENERAL INSURANCE CO LTD",
+    "ZUNO GENERAL INSURANCE LTD",
+]
+
+
 def grid_management(request):
     if request.method == "POST":
         action = request.POST.get("action")
@@ -5492,6 +5519,7 @@ def grid_management(request):
         "status_counts": status_counts,
         "total_all": total_all,
         "selected_status": selected_status,
+        "insurer_choices": GRID_INSURER_CHOICES,
     })
 
 # -------------------------

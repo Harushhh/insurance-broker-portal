@@ -430,6 +430,7 @@ class GridDocument(models.Model):
         ('PENDING', 'Pending'),
         ('FOLLOW-UP', 'Follow-up'),
         ('DONE', 'Done'),
+        ('REJECTED', 'Rejected'),
     )
 
     insurer_name = models.CharField(max_length=255)
