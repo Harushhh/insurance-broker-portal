@@ -71,6 +71,33 @@
         box-shadow: 0 4px 6px rgba(0,0,0,0.05);
     }
 
+    /* Month-year upload filter */
+    .gm-month-select {
+        padding: 10px 34px 10px 14px;
+        border: 1px solid #dbe2ea;
+        border-radius: 10px;
+        font-family: inherit;
+        font-size: 13.5px;
+        font-weight: 700;
+        color: #1e293b;
+        background-color: #fff;
+        cursor: pointer;
+        outline: none;
+        appearance: none;
+        background-image: url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23475569%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.4-12.8z%22%2F%3E%3C%2Fsvg%3E");
+        background-repeat: no-repeat;
+        background-position: right 12px top 50%;
+        background-size: 10px auto;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .gm-month-select:hover { border-color: #94a3b8; }
+    .gm-month-select:focus { border-color: #60a5fa; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1); }
+    .gm-month-filter-form { display: flex; align-items: center; gap: 10px; }
+    .gm-month-filter-form label {
+        font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;
+        letter-spacing: 0.04em; white-space: nowrap;
+    }
+
     /* Status summary / filter cards */
     .gm-stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
     .gm-stat-card {
@@ -167,18 +194,30 @@
                 <p class="subtext" style="margin:4px 0 0; color:#64748b;">Upload and manage raw Excel grids from insurance providers.</p>
             </div>
         </div>
-        <button class="btn primary" onclick="openModal('uploadGridModal')" style="padding:13px 24px; font-weight:600; font-size:14px; border-radius:10px;">
-            <i class="bi bi-plus-lg"></i> Upload New Grid
-        </button>
+        <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+            <form method="GET" class="gm-month-filter-form">
+                <input type="hidden" name="status" value="{{ selected_status }}">
+                <label for="gmMonthSelect">Upload Month</label>
+                <select name="month" id="gmMonthSelect" class="gm-month-select" onchange="this.form.submit()">
+                    <option value="" {% if not selected_month_str %}selected{% endif %}>All Months</option>
+                    {% for m in available_months %}
+                        <option value="{{ m|date:'Y-m' }}" {% if selected_month_str == m|date:'Y-m' %}selected{% endif %}>{{ m|date:"F Y" }}</option>
+                    {% endfor %}
+                </select>
+            </form>
+            <button class="btn primary" onclick="openModal('uploadGridModal')" style="padding:13px 24px; font-weight:600; font-size:14px; border-radius:10px;">
+                <i class="bi bi-plus-lg"></i> Upload New Grid
+            </button>
+        </div>
     </div>
 
     <div class="gm-stat-grid">
-        <a href="?status=all" class="gm-stat-card {% if not selected_status %}selected{% endif %}">
+        <a href="?status=all&month={{ selected_month_str|urlencode }}" class="gm-stat-card {% if not selected_status %}selected{% endif %}">
             <span class="gm-count">{{ total_all }}</span>
             <span class="gm-pill gm-pill-all">📁 All</span>
         </a>
         {% for code, label in status_choices %}
-            <a href="?status={{ code|urlencode }}" class="gm-stat-card {% if selected_status == code %}selected{% endif %}">
+            <a href="?status={{ code|urlencode }}&month={{ selected_month_str|urlencode }}" class="gm-stat-card {% if selected_status == code %}selected{% endif %}">
                 <span class="gm-count">{{ status_counts|get_item:code|default:0 }}</span>
                 <span class="gm-pill gm-pill-{{ code|lower }}">
                     {% if code == 'PENDING' %}⏳{% elif code == 'FOLLOW-UP' %}🔄{% elif code == 'DONE' %}✅{% elif code == 'REJECTED' %}❌{% endif %}
@@ -250,8 +289,8 @@
                 <tr>
                     <td colspan="7" style="padding:56px 16px; text-align:center; color:#94a3b8;">
                         <div style="font-size:32px; margin-bottom:10px;">🗂️</div>
-                        {% if selected_status %}
-                            No grids with this status. <a href="?status=all" style="color:#2563eb; font-weight:600;">Clear the filter</a> to see all uploads.
+                        {% if selected_status or selected_month_str %}
+                            No grids match this filter{% if selected_month_label %} for {{ selected_month_label }}{% endif %}. <a href="?status=all&month=" style="color:#2563eb; font-weight:600;">Clear filters</a> to see all uploads.
                         {% else %}
                             No grids uploaded yet. Click the upload button to add your first file!
                         {% endif %}
