@@ -483,7 +483,9 @@ def apply_range_filter(qs, field_min, field_max, range_val):
         if val_max:
             qs = qs.filter(**{field_max: val_max})
     else:
-        qs = qs.filter(**{field_min: range_val})
+        # A bare value (no "-") means "records whose min-max span contains
+        # this value", not an exact match on the min column.
+        qs = qs.filter(**{f"{field_min}__lte": range_val, f"{field_max}__gte": range_val})
     return qs
 
 def get_na_class_list_for_product(product_id: str):
@@ -804,7 +806,7 @@ class RateForm(forms.ModelForm):
 
     class Meta:
         model = RateMaster
-        exclude = ["group", "created_at"]
+        exclude = ["group", "created_at", "updated_at"]
 
     def __init__(self, *args, **kwargs):
         super(RateForm, self).__init__(*args, **kwargs)
@@ -1279,6 +1281,12 @@ def api_upload_chunk(request):
 # -------------------------
 DASHBOARD_BATCH_SIZE = 50
 
+# The Motor Rate Master filter/table show "UNLOCKED"/"LOCKED" (see
+# dashboard.html), but RateMaster.status only ever stores "ACTIVE"/"INACTIVE"
+# (RateMaster.STATUS_CHOICES) -- translate the UI term to the stored one
+# before filtering.
+RATE_STATUS_UI_TO_DB = {"UNLOCKED": "ACTIVE", "LOCKED": "INACTIVE"}
+
 
 def dashboard(request):
     qs = RateMaster.objects.select_related(
@@ -1366,7 +1374,7 @@ def dashboard(request):
             qs = qs.none()
 
     if status_filter:
-        qs = qs.filter(status=status_filter)
+        qs = qs.filter(status=RATE_STATUS_UI_TO_DB.get(status_filter, status_filter))
 
     if is_deleted_filter:
         qs = qs.filter(is_deleted=is_deleted_filter)
@@ -1529,7 +1537,7 @@ def dashboard(request):
         "is_ncb", "is_cpa", "is_zd", "cc_range", "from_date", "to_date", "sc_range",
         "user_id", "veh_use", "remarks", "add_tnc",
         "po_type", "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount",
-        "status", "is_deleted"
+        "status", "is_deleted", "updated_at"
     ]
 
     insurance_company_list = RateMaster.objects.exclude(insurance_company="").values_list(
@@ -1617,7 +1625,7 @@ def export_rates_xlsx(request):
             qs = qs.none()
 
     if status_filter:
-        qs = qs.filter(status=status_filter)
+        qs = qs.filter(status=RATE_STATUS_UI_TO_DB.get(status_filter, status_filter))
     if is_deleted_filter:
         qs = qs.filter(is_deleted=is_deleted_filter)
     if created_date:
@@ -1696,8 +1704,8 @@ def export_rates_xlsx(request):
         "cc_min", "cc_max", "sc_min", "sc_max", "pi_od_rate", "pi_tp_rate", 
         "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5", "pi_net_rate", "pi_flat_amount", 
         "pi_vli", "pi_type", "tariff_min", "tariff_max", "is_ncb", "is_cpa", "is_zd", 
-        "from_date", "to_date", "user_id", "veh_use", "add_tnc", "remarks", 
-        "po_type", "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount"
+        "from_date", "to_date", "user_id", "veh_use", "add_tnc", "remarks",
+        "po_type", "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount", "created_at"
     ])
 
     for r in qs.iterator(chunk_size=2000):
@@ -1746,7 +1754,8 @@ def export_rates_xlsx(request):
             r.po_od_rate,
             r.po_tp_rate,
             r.po_net_rate,
-            r.po_flat_amount
+            r.po_flat_amount,
+            r.created_at
         ])
 
     return response
@@ -2397,6 +2406,7 @@ def edit_rate(request, group_id):
             # field is only written when the user genuinely touched it.
             update_data = {field: form.cleaned_data[field] for field in form.changed_data}
             if update_data:
+                update_data["updated_at"] = timezone.now()
                 records.update(**update_data)
                 AuditLog.objects.create(
                     user=request.user,
@@ -2526,7 +2536,7 @@ def bulk_update_rates(request):
             parsed_value = float(new_value) if new_value else None
 
         # 4. Perform ultra-fast vectorized update to the DB
-        records.update(**{field_name: parsed_value})
+        records.update(**{field_name: parsed_value, "updated_at": timezone.now()})
 
         # 5. Log the action
         AuditLog.objects.create(
@@ -3153,7 +3163,7 @@ def deactivate_rate_group(request, group_key):
         messages.warning(request, f"Group {group_key} has no active rows to deactivate.")
         return _overlap_redirect(overlap_type)
 
-    active_rows.update(status="INACTIVE")
+    active_rows.update(status="INACTIVE", updated_at=timezone.now())
     AuditLog.objects.create(
         user=request.user,
         action="OVERLAP DEACTIVATE",

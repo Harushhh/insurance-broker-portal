@@ -205,6 +205,7 @@ class RateMaster(models.Model):
     po_net_rate = models.FloatField(null=True, blank=True)
     po_flat_amount = models.FloatField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["-id"]
