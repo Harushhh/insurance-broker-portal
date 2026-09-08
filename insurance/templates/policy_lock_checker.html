@@ -363,6 +363,8 @@
     white-space: nowrap;
   }
 
+  .cell-wrap { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 350px; line-height: 1.5; }
+
   .table-modern tbody tr:hover td {
     background: #f8fafc;
   }
@@ -641,7 +643,7 @@
                 {{ row.po_rate|default:"0" }}%
               {% endif %}
             </td>
-            <td>{{ row.add_tnc|default:"-" }}</td>
+            <td class="cell-wrap">{{ row.add_tnc|default:"-" }}</td>
             <td>
               {% if row.status == 'ACTIVE' %}
                 <span class="status-pill pill-unlocked"><i class="bi bi-check-circle-fill"></i> ACTIVE</span>
