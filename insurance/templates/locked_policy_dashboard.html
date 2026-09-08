@@ -262,7 +262,7 @@
         <tbody>
           {% for row in records %}
           <tr>
-            <td><strong>{{ row.source_rate.group_id|default:row.source_rate.id|default:"-" }}</strong></td>
+            <td><strong>{% if row.source_rate %}{{ row.source_rate.group_id|default:row.source_rate.id }}{% else %}-{% endif %}</strong></td>
             <td>{{ row.vehicle_no|default:"-" }}</td>
             <td>{{ row.policy_holder_name|default:"-" }}</td>
             <td>{{ row.insurance_company|default:"-" }}</td>
