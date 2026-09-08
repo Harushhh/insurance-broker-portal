@@ -1298,6 +1298,7 @@ def dashboard(request):
     status_filter = (request.GET.get("status") or "").strip()
     is_deleted_filter = (request.GET.get("is_deleted") or "").strip().upper()
     created_date = (request.GET.get("created_date") or "").strip()
+    updated_date = (request.GET.get("updated_date") or "").strip()
     date_range = (request.GET.get("date_range") or "").strip()
 
     insurance_company = (request.GET.get("insurance_company") or "").strip()
@@ -1315,7 +1316,7 @@ def dashboard(request):
     is_cpa = (request.GET.get("is_cpa") or "").strip()
 
     filter_count = sum(1 for v in [
-        q, status_filter, is_deleted_filter, created_date, date_range,
+        q, status_filter, is_deleted_filter, created_date, updated_date, date_range,
         insurance_company, product, fuel, sub_product, make_model_class,
         rto_code, make_model_code, age_range, cc_range, sc_range,
         is_zd, is_ncb, is_cpa,
@@ -1348,6 +1349,7 @@ def dashboard(request):
                 "status": status_filter,
                 "is_deleted": is_deleted_filter,
                 "created_date": created_date,
+                "updated_date": updated_date,
                 "insurance_company": insurance_company,
                 "product": product,
                 "fuel": fuel,
@@ -1380,6 +1382,8 @@ def dashboard(request):
         qs = qs.filter(is_deleted=is_deleted_filter)
     if created_date:
         qs = qs.filter(created_at__date=created_date)
+    if updated_date:
+        qs = qs.filter(updated_at__date=updated_date)
 
     if date_range:
         dates = date_range.split(" - ")
@@ -1572,6 +1576,7 @@ def dashboard(request):
             "status": status_filter,
             "is_deleted": is_deleted_filter,
             "created_date": created_date,
+            "updated_date": updated_date,
             "insurance_company": insurance_company,
             "product": product,
             "fuel": fuel,
@@ -1601,6 +1606,7 @@ def export_rates_xlsx(request):
     status_filter = (request.GET.get("status") or "").strip()
     is_deleted_filter = (request.GET.get("is_deleted") or "").strip().upper()
     created_date = (request.GET.get("created_date") or "").strip()
+    updated_date = (request.GET.get("updated_date") or "").strip()
     date_range = (request.GET.get("date_range") or "").strip()
 
     insurance_company = (request.GET.get("insurance_company") or "").strip()
@@ -1630,6 +1636,8 @@ def export_rates_xlsx(request):
         qs = qs.filter(is_deleted=is_deleted_filter)
     if created_date:
         qs = qs.filter(created_at__date=created_date)
+    if updated_date:
+        qs = qs.filter(updated_at__date=updated_date)
 
     if date_range:
         dates = date_range.split(" - ")

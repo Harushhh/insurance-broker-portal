@@ -283,6 +283,10 @@
                         <label class="text-overline">Created Date</label>
                         <input type="date" id="created_date" name="created_date" value="{{ selected.created_date|default_if_none:'' }}" class="form-control-premium">
                     </div>
+                    <div class="col-12 col-md-4 col-lg-3 col-xl-2">
+                        <label class="text-overline">Updated Date</label>
+                        <input type="date" id="updated_date" name="updated_date" value="{{ selected.updated_date|default_if_none:'' }}" class="form-control-premium">
+                    </div>
                 </div>
             </div>
 
@@ -476,7 +480,7 @@
         });
 
         // --- 2. Advanced Filters Toggle ---
-        const hasAdvancedData = {% if selected.sub_product or selected.make_model_code or selected.fuel or selected.age_range or selected.cc_range or selected.sc_range or selected.is_zd or selected.is_cpa or selected.is_ncb or selected.is_deleted or selected.created_date %}true{% else %}false{% endif %};
+        const hasAdvancedData = {% if selected.sub_product or selected.make_model_code or selected.fuel or selected.age_range or selected.cc_range or selected.sc_range or selected.is_zd or selected.is_cpa or selected.is_ncb or selected.is_deleted or selected.created_date or selected.updated_date %}true{% else %}false{% endif %};
         
         if(hasAdvancedData) {
             $('#advancedFilters').addClass('show');
