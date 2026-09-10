@@ -209,11 +209,12 @@ class RateMaster(models.Model):
 
     class Meta:
         ordering = ["-id"]
-        # Matches the exact ORDER BY used by motor_payout_rates and
-        # policy_lock_checker (po_net_rate/po_od_rate/po_flat_amount DESC,
-        # id DESC) — without it, Postgres has to fully sort every matching
-        # row on each search before it can return the first one, regardless
-        # of how few rows the view ultimately keeps.
+        # Matches the exact ORDER BY used by policy_lock_checker
+        # (po_net_rate/po_od_rate/po_flat_amount DESC, id DESC) — without it,
+        # Postgres has to fully sort every matching row on each search before
+        # it can return the first one, regardless of how few rows the view
+        # ultimately keeps. motor_payout_rates sorts by the pi_* equivalents
+        # instead and does not benefit from this index.
         indexes = [
             models.Index(
                 fields=["-po_net_rate", "-po_od_rate", "-po_flat_amount", "-id"],

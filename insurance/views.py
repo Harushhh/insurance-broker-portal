@@ -4114,8 +4114,8 @@ def health_payout_rates(request):
 MOTOR_PAYOUT_BATCH_SIZE = 50
 MOTOR_PAYOUT_MAX_RESULTS = 300
 MOTOR_PAYOUT_FIELD_NAMES = [
-    "display_group_id", "status", "insurance_company", "tariff_range", "po_type",
-    "po_rate", "po_flat_amount", "add_tnc"
+    "display_group_id", "status", "insurance_company", "tariff_range", "pi_type",
+    "pi_rate", "pi_flat_amount", "add_tnc"
 ]
 
 
@@ -4233,9 +4233,9 @@ def _build_motor_payout_queryset(request, target_date):
         qs = qs.filter(Q(is_ncb__code__iexact=is_ncb) | Q(is_ncb__code__iexact="NA"))
 
     qs = qs.order_by(
-        F("po_net_rate").desc(nulls_last=True),
-        F("po_od_rate").desc(nulls_last=True),
-        F("po_flat_amount").desc(nulls_last=True),
+        F("pi_net_rate").desc(nulls_last=True),
+        F("pi_od_rate").desc(nulls_last=True),
+        F("pi_flat_amount").desc(nulls_last=True),
         "-id"
     )
 
@@ -4301,14 +4301,14 @@ def _collect_motor_payout_rows(qs, matching_rto_names, matching_make_groups, rto
         else:
             row.display_make_model_class = row.make_model_class.name
 
-        if row.po_net_rate and row.po_net_rate > 0:
-            row.po_rate = row.po_net_rate
-        elif row.po_od_rate and row.po_od_rate > 0:
-            row.po_rate = row.po_od_rate
-        elif row.po_tp_rate and row.po_tp_rate > 0:
-            row.po_rate = row.po_tp_rate
+        if row.pi_net_rate and row.pi_net_rate > 0:
+            row.pi_rate = row.pi_net_rate
+        elif row.pi_od_rate and row.pi_od_rate > 0:
+            row.pi_rate = row.pi_od_rate
+        elif row.pi_tp_rate and row.pi_tp_rate > 0:
+            row.pi_rate = row.pi_tp_rate
         else:
-            row.po_rate = 0.0
+            row.pi_rate = 0.0
 
         results.append(row)
 
