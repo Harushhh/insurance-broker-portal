@@ -666,3 +666,64 @@ class CrossGroupDedupeTests(TestCase):
 
         self.reupload.refresh_from_db()
         self.assertEqual(self.reupload.is_deleted, "NO")
+
+
+class PurgeDeletedRateMasterCommandTests(TestCase):
+    """
+    purge_deleted_rate_master PERMANENTLY deletes every is_deleted=YES row
+    -- unlike dedupe_rate_master, this is a real DELETE, not a flag flip,
+    and it's scoped to *every* soft-deleted row table-wide (not just ones
+    from a specific cleanup run) per explicit instruction, since is_deleted
+    is also a normal, independently-used feature of the app.
+    """
+
+    def setUp(self):
+        from datetime import date
+        from insurance.models import ProductMaster, RateGroup, RateMaster
+
+        product = ProductMaster.objects.create(name="Private Car")
+        group = RateGroup.objects.create(key_hash="purge-test-group")
+
+        def make(is_deleted):
+            return RateMaster.objects.create(
+                group=group, product=product, insurance_company="Acme General",
+                status="ACTIVE", is_deleted=is_deleted, new_rto_list="MUMBAI",
+                from_date=date(2026, 1, 1), to_date=date(2026, 12, 31),
+            )
+
+        self.kept_row = make("NO")
+        self.deleted_row_1 = make("YES")
+        self.deleted_row_2 = make("YES")
+
+    def test_dry_run_reports_but_does_not_delete(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from insurance.models import RateMaster
+
+        out = StringIO()
+        call_command("purge_deleted_rate_master", stdout=out)
+        self.assertIn("2", out.getvalue())
+        self.assertEqual(RateMaster.objects.count(), 3)
+
+    def test_apply_permanently_deletes_only_is_deleted_yes_rows(self):
+        from django.core.management import call_command
+        from insurance.models import AuditLog, RateMaster
+
+        call_command("purge_deleted_rate_master", apply=True)
+
+        remaining_ids = set(RateMaster.objects.values_list("id", flat=True))
+        self.assertEqual(remaining_ids, {self.kept_row.id})
+        self.assertTrue(AuditLog.objects.filter(action="BULK PERMANENT DELETE").exists())
+
+    def test_locked_policy_referencing_a_deleted_row_is_not_broken(self):
+        from django.core.management import call_command
+        from insurance.models import LockedPolicy
+
+        lock = LockedPolicy.objects.create(
+            source_rate=self.deleted_row_1, vehicle_no="MH12AB1234", policy_holder_name="Test Holder",
+        )
+
+        call_command("purge_deleted_rate_master", apply=True)
+
+        lock.refresh_from_db()
+        self.assertIsNone(lock.source_rate)
