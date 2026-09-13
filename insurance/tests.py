@@ -533,3 +533,74 @@ class ApiUploadChunkRateMasterDedupTests(TestCase):
         response = self._upload([self._row()], upload_batch_id="a-completely-different-upload")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(RateMaster.objects.count(), 2)
+
+
+class DedupeRateMasterCommandTests(TestCase):
+    """
+    dedupe_rate_master soft-deletes the exact-duplicate rows produced by the
+    now-fixed api_upload_chunk bug, keeping the lowest id per duplicate
+    cluster. Manual testing surfaced a real bug here: the duplicate
+    signature originally included is_deleted, so every already-soft-deleted
+    row looked like a fresh duplicate of every other already-soft-deleted
+    row on the very next scan (they're identical except id) -- re-running
+    the command after a cleanup pass kept finding "more" duplicates
+    forever. Fixed by scoping detection to is_deleted="NO" rows only.
+    """
+
+    def setUp(self):
+        from datetime import date
+        from insurance.models import ProductMaster, RateGroup, RateMaster
+
+        product = ProductMaster.objects.create(name="Private Car")
+        group = RateGroup.objects.create(key_hash="dedupe-test-group")
+
+        def make(rto):
+            return RateMaster.objects.create(
+                group=group, product=product, insurance_company="Acme General",
+                status="ACTIVE", is_deleted="NO", new_rto_list=rto,
+                from_date=date(2026, 1, 1), to_date=date(2026, 12, 31),
+            )
+
+        # Group's real content: MUMBAI once, PUNE three times over (2 extras).
+        self.kept_mumbai = make("MUMBAI")
+        self.kept_pune = make("PUNE")
+        self.dup_pune_1 = make("PUNE")
+        self.dup_pune_2 = make("PUNE")
+
+    def test_dry_run_reports_but_does_not_modify(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from insurance.models import RateMaster
+
+        out = StringIO()
+        call_command("dedupe_rate_master", stdout=out)
+        self.assertIn("2", out.getvalue())
+        self.assertEqual(RateMaster.objects.filter(is_deleted="YES").count(), 0)
+
+    def test_apply_keeps_lowest_id_per_cluster_and_logs_it(self):
+        from django.core.management import call_command
+        from insurance.models import AuditLog, RateMaster
+
+        call_command("dedupe_rate_master", apply=True)
+
+        self.kept_mumbai.refresh_from_db()
+        self.kept_pune.refresh_from_db()
+        self.dup_pune_1.refresh_from_db()
+        self.dup_pune_2.refresh_from_db()
+
+        self.assertEqual(self.kept_mumbai.is_deleted, "NO")
+        self.assertEqual(self.kept_pune.is_deleted, "NO")
+        self.assertEqual(self.dup_pune_1.is_deleted, "YES")
+        self.assertEqual(self.dup_pune_2.is_deleted, "YES")
+
+        self.assertTrue(AuditLog.objects.filter(action="BULK DEDUPE").exists())
+
+    def test_rerunning_after_apply_finds_nothing_left(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        call_command("dedupe_rate_master", apply=True)
+
+        out = StringIO()
+        call_command("dedupe_rate_master", stdout=out)
+        self.assertIn("Nothing to do.", out.getvalue())

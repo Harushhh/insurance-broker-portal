@@ -16,11 +16,15 @@ from insurance.models import RateMaster
 # Every field that defines a row's content for duplicate-detection purposes.
 # Deliberately excludes id/created_at/updated_at (those are expected to
 # differ even between two otherwise-identical inserts) and the FK id fields
-# are used directly (product_id, not product) to avoid extra joins.
+# are used directly (product_id, not product) to avoid extra joins. Also
+# excludes is_deleted: the query below only ever looks at is_deleted="NO"
+# rows, so including it here would make every already-soft-deleted row look
+# like a fresh duplicate of every other already-soft-deleted row (they're
+# all identical except id) on the very next scan after a cleanup pass.
 CONTENT_FIELDS = [
     "new_vehicle_makes", "new_rto_list", "insurer_vertical", "insurance_company",
     "product_id", "sub_product_id", "policy_type_id", "fuel_type_id", "make_model_class_id",
-    "status", "is_deleted",
+    "status",
     "vehicle_age_min", "vehicle_age_max",
     "pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5",
     "pi_net_rate", "pi_flat_amount", "pi_vli", "pi_type",
@@ -45,7 +49,12 @@ class Command(BaseCommand):
         sample_groups = options["sample_groups"]
 
         fields = ["id", "group_id"] + CONTENT_FIELDS
-        rows = RateMaster.objects.exclude(group_id__isnull=True).values(*fields).iterator(chunk_size=5000)
+        rows = (
+            RateMaster.objects.exclude(group_id__isnull=True)
+            .filter(is_deleted="NO")
+            .values(*fields)
+            .iterator(chunk_size=5000)
+        )
 
         # group_id -> content_signature -> [row ids] (lowest id first)
         by_group = defaultdict(lambda: defaultdict(list))
