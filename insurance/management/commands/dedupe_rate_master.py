@@ -1,14 +1,22 @@
 """
 Soft-deletes exact-duplicate RateMaster rows found by
-find_duplicate_rate_master.py -- rows that share a group_id and are
-identical on every business field (the signature produced by the
-now-fixed api_upload_chunk bug: a source file listing the same rate line
-twice, a resent chunk, or a replayed upload session).
+find_duplicate_rate_master.py.
 
-Within each duplicate cluster, the lowest id (the original insert) is
-kept; every other id in the cluster is soft-deleted (is_deleted="YES").
-Nothing else about the row is touched -- status, rates, dates all stay
-as they are.
+Default mode: rows that share a group_id and are identical on every
+business field (the signature produced by the now-fixed api_upload_chunk
+bug: a source file listing the same rate line twice, a resent chunk, or a
+replayed upload session).
+
+--cross-group mode: identical-content ACTIVE rows anywhere in the table,
+regardless of group_id (the signature produced by re-uploading content
+that's already live under a different group). Run the default mode first
+-- cross-group is a separate, broader sweep meant to catch what that pass
+can't see, not a replacement for it.
+
+Within each duplicate cluster (whichever mode found it), the lowest id
+(the original insert) is kept; every other id is soft-deleted
+(is_deleted="YES"). Nothing else about the row is touched -- status,
+rates, dates all stay as they are.
 
 Dry-run by default: prints what would change and writes nothing. Pass
 --apply to actually perform the soft-delete.
@@ -18,7 +26,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from insurance.models import AuditLog, RateMaster
-from insurance.management.commands.find_duplicate_rate_master import CONTENT_FIELDS
+from insurance.management.commands.find_duplicate_rate_master import find_duplicate_clusters
 
 BATCH_SIZE = 2000
 
@@ -31,39 +39,25 @@ class Command(BaseCommand):
             "--apply", action="store_true",
             help="Actually perform the soft-delete. Without this, only reports what would change.",
         )
+        parser.add_argument(
+            "--cross-group", action="store_true",
+            help="Also/instead soft-delete identical-content ACTIVE rows across different group_ids.",
+        )
 
     def handle(self, *args, **options):
         apply_changes = options["apply"]
+        cross_group = options["cross_group"]
 
-        fields = ["id", "group_id"] + CONTENT_FIELDS
-        rows = (
-            RateMaster.objects.exclude(group_id__isnull=True)
-            .filter(is_deleted="NO")
-            .values(*fields)
-            .iterator(chunk_size=5000)
-        )
-
-        from collections import defaultdict
-        by_group = defaultdict(lambda: defaultdict(list))
-        for row in rows:
-            sig = tuple(row[f] for f in CONTENT_FIELDS)
-            by_group[row["group_id"]][sig].append(row["id"])
+        _, clusters = find_duplicate_clusters(cross_group)
 
         drop_ids = []
-        affected_group_count = 0
-        for group_id, sigs in by_group.items():
-            group_has_dup = False
-            for sig, ids in sigs.items():
-                if len(ids) > 1:
-                    ids.sort()
-                    drop_ids.extend(ids[1:])
-                    group_has_dup = True
-            if group_has_dup:
-                affected_group_count += 1
-
+        for extra, ids, group_ids in clusters:
+            drop_ids.extend(ids[1:])
         drop_ids.sort()
 
-        self.stdout.write(f"Groups with exact-duplicate rows: {affected_group_count:,}")
+        mode_desc = "cross-group (ACTIVE rows, any group_id)" if cross_group else "within-group"
+        self.stdout.write(f"Mode: {mode_desc}")
+        self.stdout.write(f"Duplicate clusters found: {len(clusters):,}")
         self.stdout.write(f"Rows that would be soft-deleted (is_deleted=YES): {len(drop_ids):,}")
 
         if not drop_ids:
@@ -90,8 +84,8 @@ class Command(BaseCommand):
                 user=None,
                 action="BULK DEDUPE",
                 details=(
-                    f"dedupe_rate_master management command: soft-deleted {updated_total} "
-                    f"exact-duplicate RateMaster rows across {affected_group_count} groups. "
+                    f"dedupe_rate_master management command ({mode_desc}): soft-deleted "
+                    f"{updated_total} exact-duplicate RateMaster rows across {len(clusters)} clusters. "
                     f"Lowest id per duplicate cluster was kept; nothing else on any row was modified."
                 ),
             )

@@ -604,3 +604,65 @@ class DedupeRateMasterCommandTests(TestCase):
         out = StringIO()
         call_command("dedupe_rate_master", stdout=out)
         self.assertIn("Nothing to do.", out.getvalue())
+
+
+class CrossGroupDedupeTests(TestCase):
+    """
+    --cross-group is the second, separate duplicate category found after
+    the first cleanup shipped: identical-content rows living under
+    *different* group_ids (e.g. exporting a grid and re-importing it
+    unchanged creates a brand new group with the same content as an
+    existing one). Default-mode dedupe_rate_master never compares across
+    groups, so it can't see these -- only --cross-group can.
+    """
+
+    def setUp(self):
+        from datetime import date
+        from insurance.models import ProductMaster, RateGroup, RateMaster
+
+        self.product = ProductMaster.objects.create(name="Private Car")
+
+        def make(group, status):
+            return RateMaster.objects.create(
+                group=group, product=self.product, insurance_company="Acme General",
+                status=status, is_deleted="NO", new_rto_list="MUMBAI",
+                from_date=date(2026, 1, 1), to_date=date(2026, 12, 31),
+            )
+
+        # Same exact content, two different groups -- as if re-uploaded later.
+        self.original = make(RateGroup.objects.create(key_hash="original-group"), "ACTIVE")
+        self.reupload = make(RateGroup.objects.create(key_hash="reupload-group"), "ACTIVE")
+
+    def test_default_mode_does_not_see_cross_group_duplicates(self):
+        from io import StringIO
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("dedupe_rate_master", stdout=out)
+        self.assertIn("Nothing to do.", out.getvalue())
+
+    def test_cross_group_mode_keeps_lowest_id_and_soft_deletes_the_rest(self):
+        from django.core.management import call_command
+        from insurance.models import RateMaster
+
+        call_command("dedupe_rate_master", apply=True, cross_group=True)
+
+        self.original.refresh_from_db()
+        self.reupload.refresh_from_db()
+        self.assertEqual(self.original.is_deleted, "NO")
+        self.assertEqual(self.reupload.is_deleted, "YES")
+
+    def test_cross_group_mode_ignores_inactive_matches(self):
+        # Mirrors the upload-time guard: only ACTIVE rows count as "already
+        # exists" for this sweep too, so an inactive row with matching
+        # content is left alone rather than being silently removed.
+        from django.core.management import call_command
+        from insurance.models import RateGroup, RateMaster
+
+        self.reupload.status = "INACTIVE"
+        self.reupload.save()
+
+        call_command("dedupe_rate_master", apply=True, cross_group=True)
+
+        self.reupload.refresh_from_db()
+        self.assertEqual(self.reupload.is_deleted, "NO")
