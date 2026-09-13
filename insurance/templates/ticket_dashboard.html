@@ -237,6 +237,12 @@
   .category-health { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
   .category-life { background: #f5f3ff; color: #7c3aed; border: 1px solid #ddd6fe; }
 
+  /* Ticket type label pill (shown per-row) — reuses .category-pill's shape */
+  .type-wrong-rate { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+  .type-double-rate { background: #fefce8; color: #a16207; border: 1px solid #fde68a; }
+  .type-missing-rate { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+  .type-others { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+
   /* Category filter chips (in the table head) */
   .category-filter-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .category-chip {
@@ -259,6 +265,22 @@
   .category-chip.chip-motor.active { color: #2563eb; background: #eff6ff; border-color: #bfdbfe; }
   .category-chip.chip-health.active { color: #dc2626; background: #fef2f2; border-color: #fecaca; }
   .category-chip.chip-life.active { color: #7c3aed; background: #f5f3ff; border-color: #ddd6fe; }
+
+  /* Secondary filter row: Type chips + Insurer select */
+  .secondary-filter-row { margin-top: 14px; padding-top: 14px; border-top: 1px dashed #e2e8f0; }
+  #typeFilterRow .category-chip.active { color: #334155; background: #f1f5f9; border-color: #cbd5e1; }
+  .insurer-filter-select {
+    padding: 6px 30px 6px 14px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    border: 1.5px solid #e2e8f0;
+    background: #fff;
+    color: #64748b;
+    cursor: pointer;
+    max-width: 260px;
+  }
+  .insurer-filter-select:hover { border-color: #cbd5e1; color: #334155; }
 </style>
 
 <div class="page-card">
@@ -291,16 +313,33 @@
   </div>
 
   <div class="table-card">
-    <div class="table-head d-flex justify-content-between align-items-center flex-wrap gap-3">
-      <div>
-        <div class="table-title">Ticket Records</div>
-        <div class="table-sub">Showing captured search parameters and user remarks.</div>
+    <div class="table-head">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+        <div>
+          <div class="table-title">Ticket Records</div>
+          <div class="table-sub">Showing captured search parameters and user remarks.</div>
+        </div>
+        <div class="category-filter-row" id="categoryFilterRow">
+          <button type="button" class="category-chip chip-all active" data-category-filter="ALL">All ({{ total_tickets }})</button>
+          <button type="button" class="category-chip chip-motor" data-category-filter="MOTOR">🚗 Motor ({{ category_counts.MOTOR }})</button>
+          <button type="button" class="category-chip chip-health" data-category-filter="HEALTH">❤️ Health ({{ category_counts.HEALTH }})</button>
+          <button type="button" class="category-chip chip-life" data-category-filter="LIFE">🛡️ Life ({{ category_counts.LIFE }})</button>
+        </div>
       </div>
-      <div class="category-filter-row" id="categoryFilterRow">
-        <button type="button" class="category-chip chip-all active" data-category-filter="ALL">All ({{ total_tickets }})</button>
-        <button type="button" class="category-chip chip-motor" data-category-filter="MOTOR">🚗 Motor ({{ category_counts.MOTOR }})</button>
-        <button type="button" class="category-chip chip-health" data-category-filter="HEALTH">❤️ Health ({{ category_counts.HEALTH }})</button>
-        <button type="button" class="category-chip chip-life" data-category-filter="LIFE">🛡️ Life ({{ category_counts.LIFE }})</button>
+      <div class="d-flex align-items-center flex-wrap gap-3 secondary-filter-row">
+        <div class="category-filter-row" id="typeFilterRow">
+          <button type="button" class="category-chip chip-all active" data-type-filter="ALL">All Types</button>
+          <button type="button" class="category-chip" data-type-filter="WRONG_RATE">Wrong Rate ({{ type_counts.WRONG_RATE }})</button>
+          <button type="button" class="category-chip" data-type-filter="DOUBLE_RATE">Double Rate ({{ type_counts.DOUBLE_RATE }})</button>
+          <button type="button" class="category-chip" data-type-filter="MISSING_RATE">Missing Rate ({{ type_counts.MISSING_RATE }})</button>
+          <button type="button" class="category-chip" data-type-filter="OTHERS">Others ({{ type_counts.OTHERS }})</button>
+        </div>
+        <select id="insurerFilterSelect" class="insurer-filter-select">
+          <option value="ALL">All Insurers</option>
+          {% for insurer in insurer_filter_list %}
+            <option value="{{ insurer }}">{{ insurer }}</option>
+          {% endfor %}
+        </select>
       </div>
     </div>
 
@@ -310,6 +349,7 @@
           <tr>
             <th>ID</th>
             <th>Category</th>
+            <th>Type</th>
             <th>Date & Time</th>
             <th>Raised By</th>
             <th>Remarks</th>
@@ -319,7 +359,7 @@
         </thead>
         <tbody>
           {% for ticket in tickets %}
-          <tr data-status="{{ ticket.status }}" data-category="{{ ticket.category }}">
+          <tr data-status="{{ ticket.status }}" data-category="{{ ticket.category }}" data-type="{{ ticket.ticket_type }}" data-insurer="{{ ticket.insurer_value }}">
             <td><strong>#{{ ticket.id }}</strong></td>
             <td>
               {% if ticket.category == 'HEALTH' %}
@@ -328,6 +368,19 @@
                 <span class="category-pill category-life">🛡️ Life</span>
               {% else %}
                 <span class="category-pill category-motor">🚗 Motor</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if ticket.ticket_type == 'WRONG_RATE' %}
+                <span class="category-pill type-wrong-rate">Wrong Rate</span>
+              {% elif ticket.ticket_type == 'DOUBLE_RATE' %}
+                <span class="category-pill type-double-rate">Double Rate</span>
+              {% elif ticket.ticket_type == 'MISSING_RATE' %}
+                <span class="category-pill type-missing-rate">Missing Rate</span>
+              {% elif ticket.ticket_type == 'OTHERS' %}
+                <span class="category-pill type-others">Others</span>
+              {% else %}
+                <span class="text-muted">-</span>
               {% endif %}
             </td>
             <td style="white-space: nowrap;">{{ ticket.created_at|date:"d M Y, h:i A" }}</td>
@@ -380,14 +433,14 @@
           </tr>
           {% empty %}
           <tr>
-            <td colspan="7" class="empty-row">
+            <td colspan="8" class="empty-row">
               <span style="font-size: 24px; display:block; margin-bottom: 8px;">🎉</span>
               No tickets have been raised yet.
             </td>
           </tr>
           {% endfor %}
           <tr id="noFilterMatchRow" style="display:none;">
-            <td colspan="7" class="empty-row">No tickets match these filters.</td>
+            <td colspan="8" class="empty-row">No tickets match these filters.</td>
           </tr>
         </tbody>
       </table>
@@ -398,19 +451,28 @@
 <script>
 (function () {
   var statusCards = document.querySelectorAll('.status-card');
-  var categoryChips = document.querySelectorAll('.category-chip');
+  // Scoped to each filter row specifically — both rows share the
+  // .category-chip class for styling, so an unscoped selector here would
+  // catch the Type chips too and break the Category filter (and vice versa).
+  var categoryChips = document.querySelectorAll('#categoryFilterRow .category-chip');
+  var typeChips = document.querySelectorAll('#typeFilterRow .category-chip');
+  var insurerSelect = document.getElementById('insurerFilterSelect');
   var rows = document.querySelectorAll('.table-modern tbody tr[data-status]');
   var noMatchRow = document.getElementById('noFilterMatchRow');
 
   var activeStatus = 'ALL';
   var activeCategory = 'ALL';
+  var activeType = 'ALL';
+  var activeInsurer = 'ALL';
 
   function applyFilters() {
     var visibleCount = 0;
     rows.forEach(function (row) {
       var statusOk = (activeStatus === 'ALL' || row.getAttribute('data-status') === activeStatus);
       var categoryOk = (activeCategory === 'ALL' || row.getAttribute('data-category') === activeCategory);
-      var show = statusOk && categoryOk;
+      var typeOk = (activeType === 'ALL' || row.getAttribute('data-type') === activeType);
+      var insurerOk = (activeInsurer === 'ALL' || row.getAttribute('data-insurer') === activeInsurer);
+      var show = statusOk && categoryOk && typeOk && insurerOk;
       row.style.display = show ? '' : 'none';
       if (show) visibleCount++;
     });
@@ -436,6 +498,22 @@
       applyFilters();
     });
   });
+
+  typeChips.forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      typeChips.forEach(function (c) { c.classList.remove('active'); });
+      chip.classList.add('active');
+      activeType = chip.getAttribute('data-type-filter');
+      applyFilters();
+    });
+  });
+
+  if (insurerSelect) {
+    insurerSelect.addEventListener('change', function () {
+      activeInsurer = insurerSelect.value;
+      applyFilters();
+    });
+  }
 })();
 
 function updateTicketStatus(ticketId, newStatus, selectElement) {

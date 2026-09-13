@@ -767,6 +767,13 @@ class SupportTicket(models.Model):
         ("LIFE", "Life"),
     ]
 
+    TICKET_TYPE_CHOICES = [
+        ("WRONG_RATE", "Wrong Rate"),
+        ("DOUBLE_RATE", "Double Rate"),
+        ("MISSING_RATE", "Missing Rate"),
+        ("OTHERS", "Others"),
+    ]
+
     user = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
@@ -778,6 +785,7 @@ class SupportTicket(models.Model):
     form_payload = models.JSONField(default=dict, blank=True, null=True)
     status = models.CharField(max_length=20, default="OPEN")
     category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, default="MOTOR", db_index=True)
+    ticket_type = models.CharField(max_length=20, choices=TICKET_TYPE_CHOICES, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

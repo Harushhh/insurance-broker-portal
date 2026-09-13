@@ -332,6 +332,7 @@ NA_MAKE_MODEL_MAP = {
     "PCV 3W": ["Passenger Carrying Rickshaw"],
     "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
     "MISCD": ["MISCD-Tractor", "MISCD-Others"],
+    "PCV 2W": ["PCV 2W"],
 }
 
 # Bulletproof case-insensitive dictionary matcher
@@ -566,6 +567,7 @@ def get_make_mapping_context():
 
     all_individual_makes = sorted(list(all_individual_makes))
     class_to_makes = defaultdict(set)
+    product_to_makes = defaultdict(set)
 
     # Built once and reused below instead of rescanning the full
     # MakeModelMaster table for every (rate row x make) pair — that was an
@@ -579,20 +581,25 @@ def get_make_mapping_context():
 
     # .distinct() matters a lot in practice here: many thousands of RateMaster
     # rows (differing only in numeric rate fields) commonly share the exact
-    # same (make_model_class, new_vehicle_makes) pair, so without it this
-    # loop was repeating identical work per duplicate row. .order_by() with
-    # no arguments is required alongside it — RateMaster's default
+    # same (product, make_model_class, new_vehicle_makes) triple, so without
+    # it this loop was repeating identical work per duplicate row. .order_by()
+    # with no arguments is required alongside it — RateMaster's default
     # Meta.ordering is "-id", and Postgres requires ORDER BY columns to
     # appear in a SELECT DISTINCT's column list, so without clearing it
     # Django silently pulls the (always-unique) id into the comparison and
     # .distinct() ends up deduplicating nothing at all.
-    rate_makes = RateMaster.objects.filter(is_deleted="NO").exclude(make_model_class__isnull=True).exclude(
+    #
+    # product_id is selected alongside make_model_class_id so the Make Name
+    # dropdown can be keyed by Product: every product in NA_MAKE_MODEL_MAP
+    # stores its rows under the single shared "NA" make_model_class, so a
+    # class-keyed mapping alone can't tell one product's makes from another's.
+    rate_makes = RateMaster.objects.filter(is_deleted="NO").exclude(
         new_vehicle_makes__isnull=True
     ).exclude(new_vehicle_makes="").order_by().values_list(
-        "make_model_class_id", "new_vehicle_makes"
+        "make_model_class_id", "product_id", "new_vehicle_makes"
     ).distinct()
 
-    for mmc_id, makes_str in rate_makes:
+    for mmc_id, product_id, makes_str in rate_makes:
         rate_groups = [m.strip() for m in makes_str.split(",")]
         for rg in rate_groups:
             if not rg:
@@ -601,11 +608,21 @@ def get_make_mapping_context():
             if obj and obj.make_model_cluster:
                 for item in str(obj.make_model_cluster).split(","):
                     item = item.strip()
-                    if item:
+                    if not item:
+                        continue
+                    if mmc_id is not None:
                         class_to_makes[str(mmc_id)].add(item)
+                    if product_id is not None:
+                        product_to_makes[str(product_id)].add(item)
 
     class_makes_mapping = {k: sorted(list(v)) for k, v in class_to_makes.items()}
-    return safe_json_for_script(all_individual_makes), safe_json_for_script(class_makes_mapping), all_individual_makes
+    product_makes_mapping = {k: sorted(list(v)) for k, v in product_to_makes.items()}
+    return (
+        safe_json_for_script(all_individual_makes),
+        safe_json_for_script(class_makes_mapping),
+        safe_json_for_script(product_makes_mapping),
+        all_individual_makes,
+    )
 
 # =========================================================
 # AI EXTRACTION HELPERS
@@ -1308,6 +1325,12 @@ def dashboard(request):
     make_model_class = (request.GET.get("make_model_class") or "").strip()
     rto_code = (request.GET.get("rto_code") or "").strip()
     make_model_code = (request.GET.get("make_model_code") or "").strip()
+    # Named *_filter to avoid clashing with the `for rto_name in matching_rto_names`
+    # / `for make_name in matching_make_names` loop variables further below —
+    # Python for-loops don't scope their variable, so reusing these names here
+    # would get silently overwritten by the last value of those loops.
+    rto_name_filter = (request.GET.get("rto_name") or "").strip()
+    make_model_name_filter = (request.GET.get("make_model_name") or "").strip()
     age_range = (request.GET.get("age_range") or "").strip()
     cc_range = (request.GET.get("cc_range") or "").strip()
     sc_range = (request.GET.get("sc_range") or "").strip()
@@ -1318,7 +1341,7 @@ def dashboard(request):
     filter_count = sum(1 for v in [
         q, status_filter, is_deleted_filter, created_date, updated_date, date_range,
         insurance_company, product, fuel, sub_product, make_model_class,
-        rto_code, make_model_code, age_range, cc_range, sc_range,
+        rto_code, make_model_code, rto_name_filter, make_model_name_filter, age_range, cc_range, sc_range,
         is_zd, is_ncb, is_cpa,
     ] if v)
 
@@ -1342,6 +1365,12 @@ def dashboard(request):
             "sub_product_list": SubProductMaster.objects.all().order_by("name"),
             "make_model_class_list": get_dynamic_make_model_class_list(product),
             "yes_no_na_list": YesNoNAMaster.objects.all().order_by("code"),
+            "make_model_name_list": MakeModelMaster.objects.values_list(
+                "make_model_name", flat=True
+            ).distinct().order_by("make_model_name"),
+            "rto_name_list": RTOMaster.objects.values_list(
+                "rto_name", flat=True
+            ).distinct().order_by("rto_name"),
             "make_class_mapping_json": json.dumps(NA_MAKE_MODEL_MAP),
             "all_make_classes_json": json.dumps(list(MakeModelClassMaster.objects.exclude(name__iexact="NA").values('id', 'name'))),
             "selected": {
@@ -1358,6 +1387,8 @@ def dashboard(request):
                 "date_range": date_range,
                 "rto_code": rto_code,
                 "make_model_code": make_model_code,
+                "rto_name": rto_name_filter,
+                "make_model_name": make_model_name_filter,
                 "age_range": age_range,
                 "cc_range": cc_range,
                 "sc_range": sc_range,
@@ -1430,6 +1461,14 @@ def dashboard(request):
             qs = qs.filter(q_make)
         else:
             qs = qs.none()
+
+    # Direct substring filters on the raw display columns themselves, distinct
+    # from rto_code/make_model_code above which resolve a code through the
+    # RTOMaster/MakeModelMaster cluster tables first.
+    if rto_name_filter:
+        qs = qs.filter(new_rto_list__icontains=rto_name_filter)
+    if make_model_name_filter:
+        qs = qs.filter(new_vehicle_makes__icontains=make_model_name_filter)
 
     qs = apply_make_model_filter(qs, product, make_model_class)
     qs = apply_range_filter(qs, "vehicle_age_min", "vehicle_age_max", age_range)
@@ -1567,10 +1606,16 @@ def dashboard(request):
         "sub_product_list": sub_product_list,
         "make_model_class_list": get_dynamic_make_model_class_list(product),
         "yes_no_na_list": yes_no_na_list,
-        
+        "make_model_name_list": MakeModelMaster.objects.values_list(
+            "make_model_name", flat=True
+        ).distinct().order_by("make_model_name"),
+        "rto_name_list": RTOMaster.objects.values_list(
+            "rto_name", flat=True
+        ).distinct().order_by("rto_name"),
+
         "make_class_mapping_json": json.dumps(NA_MAKE_MODEL_MAP),
         "all_make_classes_json": json.dumps(list(MakeModelClassMaster.objects.exclude(name__iexact="NA").values('id', 'name'))),
-        
+
         "selected": {
             "q": q,
             "status": status_filter,
@@ -1585,6 +1630,8 @@ def dashboard(request):
             "date_range": date_range,
             "rto_code": rto_code,
             "make_model_code": make_model_code,
+            "rto_name": rto_name_filter,
+            "make_model_name": make_model_name_filter,
             "age_range": age_range,
             "cc_range": cc_range,
             "sc_range": sc_range,
@@ -1593,6 +1640,79 @@ def dashboard(request):
             "is_cpa": is_cpa,
         }
     })
+
+
+def get_cluster_details(request):
+    """Returns the expanded cluster (individual RTO names or vehicle makes)
+    behind one group name shown in the Rate Master dashboard's Display RTO
+    List / New Vehicle Makes columns — powers the click-to-expand popup."""
+    cluster_type = (request.GET.get("type") or "").strip().lower()
+    name = (request.GET.get("name") or "").strip()
+
+    if not name or cluster_type not in ("rto", "make"):
+        return JsonResponse({"success": False, "message": "Invalid request."})
+
+    if cluster_type == "rto":
+        obj = RTOMaster.objects.filter(rto_name=name).first()
+        cluster = obj.rto_cluster if obj else None
+    else:
+        obj = MakeModelMaster.objects.filter(make_model_name=name).first()
+        cluster = obj.make_model_cluster if obj else None
+
+    if not obj:
+        return JsonResponse({"success": False, "message": f'No cluster found for "{name}".'})
+
+    items = [x.strip() for x in (cluster or "").split(",") if x.strip()]
+    return JsonResponse({"success": True, "type": cluster_type, "name": name, "items": items})
+
+
+def update_cluster_details(request):
+    """Saves an edited cluster (from the Rate Master dashboard's popup) back
+    onto the matching RTOMaster/MakeModelMaster row. Note this is master
+    reference data shared by every page that resolves an RTO/make code
+    through it (motor_payout_rates, policy_lock_checker, the dashboard's own
+    rto_code/make_model_code filters, ...) — editing it here changes matching
+    everywhere, not just this dashboard."""
+    if request.method != "POST":
+        return JsonResponse({"success": False, "message": "Invalid request method."})
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"success": False, "message": "Invalid request body."})
+
+    cluster_type = (data.get("type") or "").strip().lower()
+    name = (data.get("name") or "").strip()
+    raw_items = data.get("items")
+
+    if not name or cluster_type not in ("rto", "make") or not isinstance(raw_items, list):
+        return JsonResponse({"success": False, "message": "Invalid request."})
+
+    cleaned_items = []
+    seen = set()
+    for item in raw_items:
+        item = str(item).strip()
+        if not item or item.upper() in seen:
+            continue
+        seen.add(item.upper())
+        cleaned_items.append(item)
+
+    cluster_value = ", ".join(cleaned_items)
+
+    if cluster_type == "rto":
+        obj = RTOMaster.objects.filter(rto_name=name).first()
+        if not obj:
+            return JsonResponse({"success": False, "message": f'No RTO group found for "{name}".'})
+        obj.rto_cluster = cluster_value
+        obj.save(update_fields=["rto_cluster"])
+    else:
+        obj = MakeModelMaster.objects.filter(make_model_name=name).first()
+        if not obj:
+            return JsonResponse({"success": False, "message": f'No vehicle make group found for "{name}".'})
+        obj.make_model_cluster = cluster_value
+        obj.save(update_fields=["make_model_cluster"])
+
+    return JsonResponse({"success": True, "type": cluster_type, "name": name, "items": cleaned_items})
 
 # -------------------------
 # Export UNGROUPED to CSV (Perfect Match 1:1 Schema Update)
@@ -4114,8 +4234,8 @@ def health_payout_rates(request):
 MOTOR_PAYOUT_BATCH_SIZE = 50
 MOTOR_PAYOUT_MAX_RESULTS = 300
 MOTOR_PAYOUT_FIELD_NAMES = [
-    "display_group_id", "status", "insurance_company", "tariff_range", "pi_type",
-    "pi_rate", "pi_flat_amount", "add_tnc"
+    "display_group_id", "status", "insurance_company", "tariff_range", "type",
+    "rate", "flat_amount", "add_tnc"
 ]
 
 
@@ -4310,6 +4430,15 @@ def _collect_motor_payout_rows(qs, matching_rto_names, matching_make_groups, rto
         else:
             row.pi_rate = 0.0
 
+        if row.po_net_rate and row.po_net_rate > 0:
+            row.po_rate = row.po_net_rate
+        elif row.po_od_rate and row.po_od_rate > 0:
+            row.po_rate = row.po_od_rate
+        elif row.po_tp_rate and row.po_tp_rate > 0:
+            row.po_rate = row.po_tp_rate
+        else:
+            row.po_rate = 0.0
+
         results.append(row)
 
     return results, False
@@ -4350,13 +4479,18 @@ def motor_payout_rates(request):
             skip=0, limit=MOTOR_PAYOUT_BATCH_SIZE
         )
 
-    all_makes_json, class_makes_mapping_json, all_makes = get_make_mapping_context()
+    all_makes_json, class_makes_mapping_json, product_makes_mapping_json, all_makes = get_make_mapping_context()
+
+    insurer_list = RateMaster.objects.exclude(is_deleted="YES").exclude(insurance_company="").values_list(
+        "insurance_company", flat=True
+    ).distinct().order_by("insurance_company")
 
     return render(request, "motor_payout_rates.html", {
         "has_searched": has_searched,
         "data": results,
         "total_found": len(results),
         "has_more": has_more,
+        "insurer_list": insurer_list,
         "next_offset": len(results),
         "field_names": MOTOR_PAYOUT_FIELD_NAMES,
         "product_list": ProductMaster.objects.all().order_by("name"),
@@ -4365,6 +4499,7 @@ def motor_payout_rates(request):
         "make_model_class_list": get_dynamic_make_model_class_list(product),
         "all_makes_json": all_makes_json,
         "class_makes_mapping_json": class_makes_mapping_json,
+        "product_makes_mapping_json": product_makes_mapping_json,
 
         "make_class_mapping_json": json.dumps(NA_MAKE_MODEL_MAP),
         "all_make_classes_json": json.dumps(list(MakeModelClassMaster.objects.exclude(name__iexact="NA").values('id', 'name'))),
@@ -4727,14 +4862,14 @@ def _run_policy_lock_checker_search(request):
 def policy_lock_checker(request):
     results, has_searched, selected = _run_policy_lock_checker_search(request)
 
-    make_name_list = sorted({
-        item.strip()
-        for value in MakeModelMaster.objects.exclude(make_model_cluster__isnull=True)
-        .exclude(make_model_cluster="")
-        .values_list("make_model_cluster", flat=True)
-        for item in str(value).split(",")
-        if item.strip()
-    })
+    # Reuses the same product->makes mapping motor_payout_rates uses for its
+    # Product -> Make Name cascade, rather than recomputing an equivalent
+    # unfiltered make list here from scratch.
+    _, _, product_makes_mapping_json, make_name_list = get_make_mapping_context()
+
+    insurer_list = RateMaster.objects.exclude(is_deleted="YES").exclude(insurance_company="").values_list(
+        "insurance_company", flat=True
+    ).distinct().order_by("insurance_company")
 
     return render(request, "policy_lock_checker.html", {
         "data": results,
@@ -4745,6 +4880,8 @@ def policy_lock_checker(request):
         "fuel_list": FuelTypeMaster.objects.all().order_by("name"),
         "make_model_class_list": get_dynamic_make_model_class_list(selected["product"]),
         "make_name_list": make_name_list,
+        "product_makes_mapping_json": product_makes_mapping_json,
+        "insurer_list": insurer_list,
 
         "make_class_mapping_json": json.dumps(NA_MAKE_MODEL_MAP),
         "all_make_classes_json": json.dumps(list(MakeModelClassMaster.objects.exclude(name__iexact="NA").values('id', 'name'))),
@@ -6151,16 +6288,34 @@ def ticket_dashboard(request):
         if row['category'] in category_counts:
             category_counts[row['category']] = row['n']
 
+    type_counts = {code: 0 for code, _ in SupportTicket.TICKET_TYPE_CHOICES}
+    for row in qs.values('ticket_type').annotate(n=Count('id')):
+        if row['ticket_type'] in type_counts:
+            type_counts[row['ticket_type']] = row['n']
+
     total_tickets = qs.count()
 
     tickets = list(qs)
+    insurer_set = set()
     for ticket in tickets:
         ticket.motor_payout_rates_url = _build_motor_payout_rates_url(ticket)
+        # The ticket-modal Insurer dropdown saves into form_payload rather
+        # than a dedicated column (see create_ticket_api) — "Ticket Insurer"
+        # is the key health tickets use, since their search form already has
+        # its own "Insurer" filter captured under the plain "Insurer" key.
+        payload = ticket.form_payload or {}
+        ticket.insurer_value = payload.get("Insurer") or payload.get("Ticket Insurer") or ""
+        if ticket.insurer_value:
+            insurer_set.add(ticket.insurer_value)
+
+    insurer_filter_list = sorted(insurer_set)
 
     return render(request, "ticket_dashboard.html", {
         "tickets": tickets,
         "status_counts": status_counts,
         "category_counts": category_counts,
+        "type_counts": type_counts,
+        "insurer_filter_list": insurer_filter_list,
         "total_tickets": total_tickets,
     })
 
@@ -6171,12 +6326,16 @@ def create_ticket_api(request):
             remarks = data.get("remarks", "").strip()
             form_payload = data.get("form_payload", {})
             category = (data.get("category") or "MOTOR").strip().upper()
+            ticket_type = (data.get("ticket_type") or "").strip().upper()
 
             if not remarks:
                 return JsonResponse({"success": False, "message": "Remarks are required."})
 
             if category not in dict(SupportTicket.CATEGORY_CHOICES):
                 category = "MOTOR"
+
+            if ticket_type not in dict(SupportTicket.TICKET_TYPE_CHOICES):
+                ticket_type = ""
 
             # 1. Translate Product ID to Name
             if form_payload.get("Product") and str(form_payload["Product"]).isdigit():
@@ -6203,6 +6362,7 @@ def create_ticket_api(request):
                 remarks=remarks,
                 form_payload=form_payload,
                 category=category,
+                ticket_type=ticket_type,
             )
             return JsonResponse({"success": True, "ticket_id": ticket.id})
         except Exception as e:

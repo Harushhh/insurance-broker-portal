@@ -460,6 +460,25 @@
                         <i class="bi bi-info-circle"></i> The parameters currently entered in the search form will automatically be attached to this ticket.
                     </div>
                     <div class="mb-3">
+                        <label for="ticketType" class="form-label fw-bold">Ticket Type</label>
+                        <select id="ticketType" class="form-select">
+                            <option value="">Select...</option>
+                            <option value="WRONG_RATE">Wrong Rate</option>
+                            <option value="DOUBLE_RATE">Double Rate</option>
+                            <option value="MISSING_RATE">Missing Rate</option>
+                            <option value="OTHERS">Others</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="ticketInsurer" class="form-label fw-bold">Insurer</label>
+                        <select id="ticketInsurer" class="form-select">
+                            <option value="">Select...</option>
+                            {% for insurer in insurer_list %}
+                                <option value="{{ insurer }}">{{ insurer }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
                         <label for="ticketRemarks" class="form-label fw-bold">Remarks / Issue Details</label>
                         <textarea id="ticketRemarks" class="form-control" rows="4" placeholder="Please explain what is missing or incorrect with the current rates..."></textarea>
                     </div>
@@ -699,6 +718,21 @@
       .filter(opt => opt.value !== "" && opt.text.toUpperCase() !== "NA")
       .map(opt => ({ value: opt.value, text: opt.text }));
 
+    // Captured before TomSelect initializes below, same as allDbClasses above —
+    // this is the full server-rendered make list (make_name_list), used as the
+    // fallback when no product is selected yet.
+    const rawMakeSelect = document.querySelector('select[name="make_names"]');
+    const allDbMakes = Array.from(rawMakeSelect.options)
+      .filter(opt => opt.value !== "")
+      .map(opt => ({ value: opt.value, text: opt.text }));
+
+    // Captured before TomSelect initializes below — the full Sub Product list,
+    // used as the fallback when the selected product doesn't restrict it.
+    const rawSubProductSelect = document.querySelector('select[name="sub_product"]');
+    const allDbSubProducts = Array.from(rawSubProductSelect.options)
+      .filter(opt => opt.value !== "")
+      .map(opt => ({ value: opt.value, text: opt.text }));
+
     const productClassMap = {
         "TW": ["Scooter", "Bike"],
         "Private Car": ["Car"],
@@ -706,10 +740,19 @@
         "GCV 3W": ["Goods Carrying Rickshaw"],
         "PCV 3W": ["Passenger Carrying Rickshaw"],
         "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
-        "MISCD": ["MISCD-Tractor", "MISCD-Others"]
+        "MISCD": ["MISCD-Tractor", "MISCD-Others"],
+        "PCV 2W": ["PCV 2W"]
     };
 
+    // Same Product -> Make Name mapping used on the Motor Payout Rates page —
+    // keyed by product id, built server-side from RateMaster rows, since every
+    // product here stores its rows under one shared "NA" make_model_class and
+    // so can't be told apart by class alone.
+    const productMakesMapping = {{ product_makes_mapping_json|safe|default:"{}" }};
+
     const initialClassVal = "{{ selected.make_model_class|escapejs }}";
+    const initialMakeVal = "{{ selected.make_names|escapejs }}";
+    const initialSubProductVal = "{{ selected.sub_product|escapejs }}";
 
     // --- 2. INITIALIZE TOMSELECT ---
     document.querySelectorAll(".smart-dropdown").forEach(function (el) {
@@ -735,6 +778,8 @@
     // --- 3. DYNAMIC CLASS REBUILDING VIA TOMSELECT API ---
     const productTs = document.querySelector('select[name="product"]').tomselect;
     const classTs = document.querySelector('select[name="make_model_class"]').tomselect;
+    const makeNamesTs = document.querySelector('select[name="make_names"]').tomselect;
+    const subProductTs = document.querySelector('select[name="sub_product"]').tomselect;
 
     function getSelectedProductText() {
       const selectedProductId = productTs.getValue();
@@ -766,30 +811,78 @@
       }
     }
 
-    // --- 3b. CONDITIONALLY SHOW "EXACT SC" ONLY FOR PCV 2W/3W/4W ---
-    const EXACT_SC_PRODUCTS = ["PCV 2W", "PCV 3W", "PCV 4W"];
+    // --- 3c. MAKE NAME FILTERED BY PRODUCT (same mapping as Motor Payout Rates) ---
+    function updateMakeNames() {
+      const selectedProductId = productTs.getValue();
+      const currentMakeVal = makeNamesTs.getValue() || initialMakeVal;
+
+      makeNamesTs.clear(true);
+      makeNamesTs.clearOptions();
+
+      let makesToShow = allDbMakes;
+      if (selectedProductId && productMakesMapping[selectedProductId]) {
+          makesToShow = productMakesMapping[selectedProductId].map(m => ({ value: m, text: m }));
+      }
+
+      makesToShow.forEach(m => makeNamesTs.addOption(m));
+
+      if (currentMakeVal && makeNamesTs.options[currentMakeVal]) {
+          makeNamesTs.setValue(currentMakeVal, true);
+      }
+    }
+
+    // --- 3b. EXACT SC: hidden for every product except PCV 4W ---
+    // (updated to match the same rule as Motor Payout Rates — previously
+    // this also showed for PCV 2W/PCV 3W, which no longer applies)
+    const HIDE_SC_PRODUCTS = ["MISCD", "GCV 4W", "GCV 3W", "PCV 3W", "Private Car", "TW", "PCV 2W"];
     const scFieldGroup = document.getElementById("sc_field_group");
     const scInput = scFieldGroup.querySelector('input[name="sc"]');
 
     function updateScVisibility() {
       const productText = getSelectedProductText();
 
-      if (EXACT_SC_PRODUCTS.includes(productText)) {
-          scFieldGroup.style.display = "";
-          scInput.disabled = false;
-          scInput.required = true;
-      } else {
+      if (HIDE_SC_PRODUCTS.includes(productText)) {
           scFieldGroup.style.display = "none";
           scInput.disabled = true;
           scInput.required = false;
           scInput.value = "";
+      } else {
+          scFieldGroup.style.display = "";
+          scInput.disabled = false;
+          scInput.required = true;
+      }
+    }
+
+    // --- 3d. SUB PRODUCT: restricted to 1+1 / STP for these products (same rule as Motor Payout Rates) ---
+    const RESTRICT_SUBPRODUCT_PRODUCTS = ["MISCD", "GCV 4W", "GCV 3W", "PCV 3W", "PCV 2W", "PCV 4W"];
+    const ALLOWED_SUBPRODUCTS_WHEN_RESTRICTED = ["1+1", "STP"];
+
+    function updateSubProductOptions() {
+      const productText = getSelectedProductText();
+      const currentSubProductVal = subProductTs.getValue() || initialSubProductVal;
+
+      subProductTs.clear(true);
+      subProductTs.clearOptions();
+
+      const optionsToShow = RESTRICT_SUBPRODUCT_PRODUCTS.includes(productText)
+          ? allDbSubProducts.filter(sp => ALLOWED_SUBPRODUCTS_WHEN_RESTRICTED.includes(sp.text))
+          : allDbSubProducts;
+
+      optionsToShow.forEach(sp => subProductTs.addOption(sp));
+
+      if (currentSubProductVal && subProductTs.options[currentSubProductVal]) {
+          subProductTs.setValue(currentSubProductVal, true);
       }
     }
 
     productTs.on('change', updateClasses);
     productTs.on('change', updateScVisibility);
+    productTs.on('change', updateMakeNames);
+    productTs.on('change', updateSubProductOptions);
     updateClasses();
     updateScVisibility();
+    updateMakeNames();
+    updateSubProductOptions();
 
     // --- 4. STRICT DATE LOGIC (Disable locking for past dates) ---
     const dateInput = document.getElementById("target_date_input");
@@ -916,8 +1009,6 @@
     // the native validation bubble on a hidden element, so a plain
     // `required` attribute here would silently block submission with no
     // visible feedback for those fields.
-    const subProductTs = document.querySelector('select[name="sub_product"]').tomselect;
-    const makeNamesTs = document.querySelector('select[name="make_names"]').tomselect;
     const fuelTs = document.querySelector('select[name="fuel"]').tomselect;
 
     document.getElementById('mainSearchForm').addEventListener('submit', function (e) {
@@ -962,15 +1053,48 @@
     // --- 7. TICKETING SYSTEM LOGIC (100% BULLETPROOF DJANGO DICTIONARY) ---
     function openTicketModal() {
         document.getElementById('ticketModal').style.display = 'flex';
+
+        // Initialized lazily on first open (same reasoning as the other
+        // "smart-dropdown" TomSelects, just not auto-wired at page load
+        // since this control lives inside a modal that's still display:none
+        // at DOMContentLoaded time).
+        const insurerEl = document.getElementById('ticketInsurer');
+        if (!insurerEl.tomselect) {
+            new TomSelect(insurerEl, {
+                create: false,
+                maxItems: 1,
+                allowEmptyOption: true,
+                placeholder: 'Select...',
+                searchField: ['text'],
+                sortField: [{field: 'text', direction: 'asc'}]
+            });
+        }
     }
 
     function closeTicketModal() {
         document.getElementById('ticketModal').style.display = 'none';
         document.getElementById('ticketRemarks').value = '';
+        document.getElementById('ticketType').value = '';
+        const insurerTs = document.getElementById('ticketInsurer').tomselect;
+        if (insurerTs) {
+            insurerTs.clear(true);
+        } else {
+            document.getElementById('ticketInsurer').value = '';
+        }
     }
 
     async function submitTicket() {
+        const ticketType = document.getElementById('ticketType').value;
+        const ticketInsurer = document.getElementById('ticketInsurer').value;
         const remarks = document.getElementById('ticketRemarks').value.trim();
+        if (!ticketType) {
+            alert('Please select a ticket type before submitting.');
+            return;
+        }
+        if (!ticketInsurer) {
+            alert('Please select an insurer before submitting.');
+            return;
+        }
         if (!remarks) {
             alert('Please enter your remarks before submitting.');
             return;
@@ -1035,6 +1159,8 @@
             formPayload[formatKey(key)] = finalValue.trim();
         }
 
+        formPayload['Insurer'] = ticketInsurer;
+
         // 4. Send to Backend
         try {
             const response = await fetch('/api/create-ticket/', {
@@ -1046,7 +1172,8 @@
                 body: JSON.stringify({
                     remarks: remarks,
                     form_payload: formPayload,
-                    category: 'MOTOR'
+                    category: 'MOTOR',
+                    ticket_type: ticketType
                 })
             });
 

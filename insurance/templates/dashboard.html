@@ -84,7 +84,24 @@
     }
     .table-modern tbody tr:hover td { background-color: #f8fafc; }
     .cell-wrap { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 350px; line-height: 1.5; }
-    
+
+    /* Clickable group-name tokens in Display RTO List / New Vehicle Makes cells */
+    .cluster-chip { color: #2563eb; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+    .cluster-chip:hover { color: #1d4ed8; text-decoration-style: solid; }
+
+    /* Expanded cluster items shown inside the popup (editable) */
+    .cluster-item-chip {
+        display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px;
+        background: #f1f5f9; color: #334155; font-size: 12px; font-weight: 600;
+        border: 1px solid #e2e8f0;
+    }
+    .cluster-item-remove {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 16px; height: 16px; border-radius: 50%; cursor: pointer;
+        color: #94a3b8; font-size: 13px; line-height: 1;
+    }
+    .cluster-item-remove:hover { background: #fee2e2; color: #dc2626; }
+
     /* UI Overrides for Libraries */
     .select2-container--default .select2-selection--single {
         border: 1px solid #cbd5e1; border-radius: 8px; height: 40px; display: flex; align-items: center; background: #fff;
@@ -220,8 +237,26 @@
                         <input type="text" name="make_model_code" placeholder="e.g. Swift" value="{{ selected.make_model_code|default_if_none:'' }}" class="form-control-premium">
                     </div>
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
+                        <label class="text-overline">New Vehicle Makes</label>
+                        <select name="make_model_name" class="form-select-premium select2-searchable">
+                            <option value="">All</option>
+                            {% for m in make_model_name_list %}
+                                <option value="{{ m }}" {% if selected.make_model_name == m %}selected{% endif %}>{{ m }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">RTO Code</label>
                         <input type="text" name="rto_code" placeholder="e.g. MH03" value="{{ selected.rto_code|default_if_none:'' }}" class="form-control-premium">
+                    </div>
+                    <div class="col-12 col-md-4 col-lg-3 col-xl-2">
+                        <label class="text-overline">Display RTO List</label>
+                        <select name="rto_name" class="form-select-premium select2-searchable">
+                            <option value="">All</option>
+                            {% for r in rto_name_list %}
+                                <option value="{{ r }}" {% if selected.rto_name == r %}selected{% endif %}>{{ r }}</option>
+                            {% endfor %}
+                        </select>
                     </div>
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">Fuel</label>
@@ -364,6 +399,8 @@
                                                         <summary class="text-primary fw-medium" style="cursor:pointer; font-size:12px;">Show Remarks</summary>
                                                         <div class="mt-2 text-wrap">{{ val|display_value }}</div>
                                                     </details>
+                                                {% elif field == "display_rto_list" or field == "new_vehicle_makes" %}
+                                                    {% for token in val|split:"," %}<span class="cluster-chip" onclick="openClusterModal('{% if field == 'new_vehicle_makes' %}make{% else %}rto{% endif %}', '{{ token|escapejs }}')">{{ token }}</span>{% if not forloop.last %}, {% endif %}{% endfor %}
                                                 {% else %}
                                                     {{ val|display_value }}
                                                 {% endif %}
@@ -456,6 +493,31 @@
     </div>
 </form>
 
+<div class="modal fade" id="clusterModal" tabindex="-1" aria-labelledby="clusterModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content" style="border-radius: 16px; border: none; box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
+            <div class="modal-header border-0 pb-0 pt-4 px-4">
+                <h5 class="modal-title fw-bold" id="clusterModalLabel"><i class="bi bi-diagram-3 text-primary me-2"></i><span id="clusterModalTitle">Cluster Details</span></h5>
+                <button type="button" class="btn-close shadow-none" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body px-4 py-4" style="max-height: 60vh; overflow-y: auto;">
+                <div id="clusterModalLoading" class="text-muted" style="font-size:13px;">Loading...</div>
+                <div id="clusterModalError" class="text-danger" style="font-size:13px; display:none;"></div>
+                <div id="clusterModalItems" class="d-flex flex-wrap gap-2 mb-3"></div>
+                <div id="clusterModalAddRow" class="d-flex gap-2" style="display:none;">
+                    <input type="text" id="clusterModalNewItem" class="form-control-premium" placeholder="Type a value and press Enter to add..." onkeydown="if(event.key==='Enter'){event.preventDefault(); addClusterItem();}">
+                    <button type="button" class="btn-soft" onclick="addClusterItem()">Add</button>
+                </div>
+                <div id="clusterModalSaveStatus" class="mt-2" style="font-size:12px; display:none;"></div>
+            </div>
+            <div class="modal-footer border-0 pt-0 pb-4 px-4" id="clusterModalFooter" style="display:none;">
+                <button type="button" class="btn-soft" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn-gradient m-0" id="clusterModalSaveBtn" onclick="saveClusterChanges()" style="background: linear-gradient(135deg, #10b981, #059669);">Save Changes</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     $(document).ready(function () {
         // --- 1. Init Plugins ---
@@ -480,7 +542,7 @@
         });
 
         // --- 2. Advanced Filters Toggle ---
-        const hasAdvancedData = {% if selected.sub_product or selected.make_model_code or selected.fuel or selected.age_range or selected.cc_range or selected.sc_range or selected.is_zd or selected.is_cpa or selected.is_ncb or selected.is_deleted or selected.created_date or selected.updated_date %}true{% else %}false{% endif %};
+        const hasAdvancedData = {% if selected.sub_product or selected.make_model_code or selected.make_model_name or selected.rto_name or selected.fuel or selected.age_range or selected.cc_range or selected.sc_range or selected.is_zd or selected.is_cpa or selected.is_ncb or selected.is_deleted or selected.created_date or selected.updated_date %}true{% else %}false{% endif %};
         
         if(hasAdvancedData) {
             $('#advancedFilters').addClass('show');
@@ -501,12 +563,22 @@
             "GCV 3W": ["Goods Carrying Rickshaw"],
             "PCV 3W": ["Passenger Carrying Rickshaw"],
             "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
-            "MISCD": ["MISCD-Tractor", "MISCD-Others"]
+            "MISCD": ["MISCD-Tractor", "MISCD-Others"],
+            "PCV 2W": ["PCV 2W"]
         };
 
         const productSelect = $('select[name="product"]');
         const classSelect = $('select[name="make_model_class"]');
-        const allClassOptions = classSelect.find('option').clone();
+
+        // Clone all valid class options from DB, actively stripping out any "NA"
+        // option (both the hardcoded value="NA" placeholder and the real NA
+        // MakeModelClassMaster row get_dynamic_make_model_class_list() always
+        // includes) — mirrors motor_payout_rates.html's Product -> Make Model
+        // Class sync so the dropdown offers only the product's own class names.
+        const allClassOptions = classSelect.find('option').filter(function() {
+            return $(this).text().trim().toUpperCase() !== "NA" && $(this).val().toUpperCase() !== "NA";
+        }).clone();
+
         const initialClass = "{{ selected.make_model_class|escapejs }}";
 
         function updateClassDropdown() {
@@ -514,20 +586,35 @@
             const currentClassVal = classSelect.val() || initialClass;
 
             classSelect.empty();
-            classSelect.append(allClassOptions.filter(function () { return $(this).val() === "" || $(this).val() === "NA"; }));
+
+            // Add the default empty placeholder back
+            classSelect.append(allClassOptions.filter(function() {
+                return $(this).val() === "";
+            }));
 
             if (selectedProductText && selectedProductText !== "All" && productClassMap[selectedProductText]) {
                 const allowedClasses = productClassMap[selectedProductText];
-                classSelect.append(allClassOptions.filter(function () { return allowedClasses.includes($(this).text().trim()); }));
+
+                allowedClasses.forEach(function(clsName) {
+                    // Create an option where BOTH value and text are the string name (e.g. "Truck")
+                    const opt = new Option(clsName, clsName);
+                    if (clsName === currentClassVal) {
+                        opt.selected = true;
+                    }
+                    classSelect.append(opt);
+                });
             } else {
-                classSelect.append(allClassOptions.filter(function () { return $(this).val() !== "" && $(this).val() !== "NA"; }));
+                // If it's a standard product, populate the standard non-NA classes from DB
+                classSelect.append(allClassOptions.filter(function() {
+                    return $(this).val() !== "";
+                }));
+
+                // Preserve selection if the original ID is in the list
+                if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) {
+                    classSelect.val(currentClassVal);
+                }
             }
 
-            if (currentClassVal && classSelect.find(`option[value="${currentClassVal}"]`).length > 0) {
-                classSelect.val(currentClassVal);
-            } else {
-                classSelect.val('');
-            }
             classSelect.trigger('change.select2');
         }
 
@@ -602,6 +689,146 @@
 
         document.documentElement.style.setProperty('--tb-font', currentFont + 'px');
         document.documentElement.style.setProperty('--tb-pad', `${currentPadV}px ${currentPadH}px`);
+    }
+
+    // --- 8. Cluster Details Popup (Display RTO List / New Vehicle Makes) — view + edit ---
+    let currentClusterType = null;
+    let currentClusterName = null;
+    let currentClusterItems = [];
+
+    function renderClusterItems() {
+        const itemsEl = document.getElementById('clusterModalItems');
+        itemsEl.innerHTML = '';
+
+        if (!currentClusterItems.length) {
+            itemsEl.innerHTML = '<span class="text-muted" style="font-size:13px;">No cluster items yet — add one below.</span>';
+            return;
+        }
+
+        currentClusterItems.forEach(function (item, idx) {
+            const chip = document.createElement('span');
+            chip.className = 'cluster-item-chip';
+
+            const label = document.createElement('span');
+            label.textContent = item;
+            chip.appendChild(label);
+
+            const removeBtn = document.createElement('span');
+            removeBtn.className = 'cluster-item-remove';
+            removeBtn.textContent = '×';
+            removeBtn.title = 'Remove';
+            removeBtn.addEventListener('click', function () { removeClusterItem(idx); });
+            chip.appendChild(removeBtn);
+
+            itemsEl.appendChild(chip);
+        });
+    }
+
+    function removeClusterItem(idx) {
+        currentClusterItems.splice(idx, 1);
+        renderClusterItems();
+    }
+
+    function addClusterItem() {
+        const input = document.getElementById('clusterModalNewItem');
+        const val = input.value.trim();
+        if (!val) return;
+
+        const alreadyExists = currentClusterItems.some(function (x) { return x.toUpperCase() === val.toUpperCase(); });
+        if (!alreadyExists) {
+            currentClusterItems.push(val);
+            renderClusterItems();
+        }
+        input.value = '';
+        input.focus();
+    }
+
+    function openClusterModal(type, name) {
+        currentClusterType = type;
+        currentClusterName = name;
+        currentClusterItems = [];
+
+        const titleEl = document.getElementById('clusterModalTitle');
+        const loadingEl = document.getElementById('clusterModalLoading');
+        const errorEl = document.getElementById('clusterModalError');
+        const itemsEl = document.getElementById('clusterModalItems');
+        const addRow = document.getElementById('clusterModalAddRow');
+        const footer = document.getElementById('clusterModalFooter');
+        const statusEl = document.getElementById('clusterModalSaveStatus');
+
+        titleEl.textContent = (type === 'make' ? 'Vehicle Make Cluster: ' : 'RTO Cluster: ') + name;
+        loadingEl.style.display = '';
+        errorEl.style.display = 'none';
+        errorEl.textContent = '';
+        itemsEl.innerHTML = '';
+        addRow.style.display = 'none';
+        footer.style.display = 'none';
+        statusEl.style.display = 'none';
+        document.getElementById('clusterModalNewItem').value = '';
+
+        var myModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('clusterModal'));
+        myModal.show();
+
+        fetch('/api/cluster-details/?type=' + encodeURIComponent(type) + '&name=' + encodeURIComponent(name))
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                loadingEl.style.display = 'none';
+                if (!data.success) {
+                    errorEl.textContent = data.message || 'Could not load cluster details.';
+                    errorEl.style.display = '';
+                    return;
+                }
+                currentClusterItems = data.items.slice();
+                renderClusterItems();
+                addRow.style.display = 'flex';
+                footer.style.display = '';
+            })
+            .catch(function () {
+                loadingEl.style.display = 'none';
+                errorEl.textContent = 'A network error occurred while loading cluster details.';
+                errorEl.style.display = '';
+            });
+    }
+
+    function saveClusterChanges() {
+        const statusEl = document.getElementById('clusterModalSaveStatus');
+        const saveBtn = document.getElementById('clusterModalSaveBtn');
+
+        statusEl.style.display = '';
+        statusEl.className = 'mt-2 text-muted';
+        statusEl.textContent = 'Saving...';
+        saveBtn.disabled = true;
+
+        fetch('/api/cluster-details/update/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token }}'
+            },
+            body: JSON.stringify({
+                type: currentClusterType,
+                name: currentClusterName,
+                items: currentClusterItems
+            })
+        })
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                saveBtn.disabled = false;
+                if (!data.success) {
+                    statusEl.className = 'mt-2 text-danger';
+                    statusEl.textContent = data.message || 'Could not save changes.';
+                    return;
+                }
+                currentClusterItems = data.items.slice();
+                renderClusterItems();
+                statusEl.className = 'mt-2 text-success';
+                statusEl.textContent = 'Saved.';
+            })
+            .catch(function () {
+                saveBtn.disabled = false;
+                statusEl.className = 'mt-2 text-danger';
+                statusEl.textContent = 'A network error occurred while saving.';
+            });
     }
 </script>
 {% endblock %}

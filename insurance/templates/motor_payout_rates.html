@@ -129,12 +129,32 @@
     .btn-clear:hover { color: #0f172a; }
 
     /* Modern Table */
-    .table-responsive-custom { max-height: 60vh; overflow-y: auto; overflow-x: auto; border: 1px solid #e2e8f0; border-radius: var(--radius-inner); margin-top: 24px; }
-    .table-modern { width: 100%; border-collapse: separate; border-spacing: 0; min-width: max-content; }
-    .table-modern th { background: #f8fafc; color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 800; padding: 16px 24px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 10; white-space: nowrap; }
-    .table-modern td { padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; border-bottom: 1px solid #f1f5f9; vertical-align: middle; white-space: nowrap; transition: all 0.15s ease; font-weight: 500;}
+    .table-responsive-custom { max-height: 60vh; overflow-y: auto; overflow-x: hidden; border: 1px solid #e2e8f0; border-radius: var(--radius-inner); margin-top: 24px; }
+    .table-modern { width: 100%; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+    .table-modern th { background: #f8fafc; color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 800; padding: 16px 12px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 10; white-space: normal; word-wrap: break-word; }
+    .table-modern td { padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; border-bottom: 1px solid #f1f5f9; vertical-align: middle; white-space: normal; word-wrap: break-word; word-break: break-word; transition: all 0.15s ease; font-weight: 500;}
     .table-modern tbody tr:hover td { background-color: #f8fafc; }
-    .cell-wrap { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 400px; line-height: 1.5; }
+    .cell-wrap { line-height: 1.5; }
+
+    /* Each record now renders as a PI row + PO row, with the shared columns
+       (Display Group ID, Status, Insurance Company, Tariff Range, Add TNC)
+       row-spanning both — column widths come from the <colgroup> instead of
+       nth-child, since rowspan shifts cell indices on the PO row. */
+    /* Only the non-rowspan (Type/Rate/Flat Amount) cells sit between the PI
+       and PO lines of a record — the rowspan cells' own border-bottom (drawn
+       at the bottom of their full spanned height) is what separates records. */
+    .rate-row-pi td:nth-child(5), .rate-row-pi td:nth-child(6), .rate-row-pi td:nth-child(7) { border-bottom: none; }
+    .rate-row-po:not(.inactive-row) td { background-color: #fbfcfe; }
+    .rate-row-po:not(.inactive-row):hover td { background-color: #f1f5f9; }
+    .rate-row-pi:not(.inactive-row):hover td,
+    .rate-row-pi:not(.inactive-row):hover + .rate-row-po td { background-color: #f8fafc; }
+
+    .rate-type-badge {
+        display: inline-block; font-size: 10px; font-weight: 800; letter-spacing: 0.03em;
+        padding: 2px 7px; border-radius: 6px; margin-right: 8px; vertical-align: middle;
+    }
+    .badge-pi { background: rgba(37, 99, 235, 0.1); color: #2563eb; }
+    .badge-po { background: rgba(124, 58, 237, 0.1); color: #7c3aed; }
     
     .inactive-row td { background-color: #fff1f2 !important; color: #991b1b !important; }
     .table-modern tbody tr.inactive-row:hover td { background-color: #ffe4e6 !important; }
@@ -165,6 +185,25 @@
                     <div class="modal-body">
                         <div class="alert alert-info py-2 px-3 small border-0">
                             <i class="bi bi-info-circle"></i> The parameters currently entered in the search form will automatically be attached to this ticket.
+                        </div>
+                        <div class="mb-3">
+                            <label for="ticketType" class="form-label fw-bold">Ticket Type</label>
+                            <select id="ticketType" class="form-select">
+                                <option value="">Select...</option>
+                                <option value="WRONG_RATE">Wrong Rate</option>
+                                <option value="DOUBLE_RATE">Double Rate</option>
+                                <option value="MISSING_RATE">Missing Rate</option>
+                                <option value="OTHERS">Others</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="ticketInsurer" class="form-label fw-bold">Insurer</label>
+                            <select id="ticketInsurer" class="form-select">
+                                <option value="">Select...</option>
+                                {% for insurer in insurer_list %}
+                                    <option value="{{ insurer }}">{{ insurer }}</option>
+                                {% endfor %}
+                            </select>
                         </div>
                         <div class="mb-3">
                             <label for="ticketRemarks" class="form-label fw-bold">Remarks / Issue Details</label>
@@ -247,7 +286,7 @@
                     </select>
                 </div>
 
-                <div class="col-12 col-md-4 col-lg-3">
+                <div class="col-12 col-md-4 col-lg-3" id="scFieldGroup">
                     <label class="text-overline">Exact SC</label>
                     <input type="number" step="any" name="sc" placeholder="e.g. 4" value="{{ selected.sc|default_if_none:'' }}" class="form-control-saas">
                 </div>
@@ -325,6 +364,16 @@
             {% if data %}
                 <div class="table-responsive-custom">
                     <table class="table-modern">
+                        <colgroup>
+                            <col style="width:9%">
+                            <col style="width:10%">
+                            <col style="width:25%">
+                            <col style="width:10%">
+                            <col style="width:14%">
+                            <col style="width:8%">
+                            <col style="width:10%">
+                            <col style="width:14%">
+                        </colgroup>
                         <thead>
                             <tr>
                                 {% for field in field_names %}
@@ -373,23 +422,30 @@
             "GCV 3W": ["Goods Carrying Rickshaw"],
             "PCV 3W": ["Passenger Carrying Rickshaw"],
             "PCV 4W": ["Taxi", "School Bus", "Other Bus"],
-            "MISCD": ["MISCD-Tractor", "MISCD-Others"]
+            "MISCD": ["MISCD-Tractor", "MISCD-Others"],
+            "PCV 2W": ["PCV 2W"]
         };
 
         const classMakesMapping = {{ class_makes_mapping_json|safe|default:"{}" }};
+        const productMakesMapping = {{ product_makes_mapping_json|safe|default:"{}" }};
         const allMakes = {{ all_makes_json|safe|default:"[]" }};
         
         const productSelect = $('select[name="product"]');
         const classSelect = $('select[name="make_model_class"]');
         const makeSelect = $('select[name="make_names"]');
+        const subProductSelect = $('select[name="sub_product"]');
 
         // Clone all valid class options from DB, actively stripping out any rogue "NA" options
         const allClassOptions = classSelect.find('option').filter(function() {
             return $(this).text().trim().toUpperCase() !== "NA" && $(this).val().toUpperCase() !== "NA";
         }).clone();
-        
+
+        // Clone the full server-rendered Sub Product list before it's ever filtered
+        const allSubProductOptions = subProductSelect.find('option').clone();
+
         const initialClass = "{{ selected.make_model_class|escapejs }}";
         const selectedMake = "{{ selected.make_names|escapejs }}";
+        const initialSubProduct = "{{ selected.sub_product|escapejs }}";
 
         function updateClassDropdown() {
             const selectedProductText = productSelect.find('option:selected').text().trim();
@@ -430,30 +486,24 @@
         }
 
         function updateMakesDropdown() {
+            const selectedProductId = productSelect.val();
             const selectedClass = classSelect.val();
             makeSelect.empty();
             makeSelect.append(new Option('Select...', ''));
-            
+
+            // Make Name is keyed primarily off Product: every product in
+            // productClassMap stores its RateMaster rows under one shared
+            // "NA" make_model_class, so a class-keyed lookup can't tell one
+            // product's makes from another's. classMakesMapping is kept as a
+            // fallback for a class that does have its own real DB id.
             let makesToShow = allMakes;
-            
-            // If the selectedClass is a descriptive string (like "Truck"), map it to "NA" logic behind the scenes for Make mapping
-            let mappingKey = selectedClass;
-            let isStringClass = false;
-            
-            for (const [prod, classes] of Object.entries(productClassMap)) {
-                if (classes.includes(selectedClass)) {
-                    isStringClass = true;
-                    // Usually string classes map to the "NA" group in the DB for Make/Model relations
-                    // Assuming class_makes_mapping_json maps standard class IDs to their makes
-                    // We show all makes if no specific NA-ID map is passed, or you can tailor this further
-                    break;
-                }
-            }
-            
-            if (selectedClass && !isStringClass && classMakesMapping[selectedClass]) {
+
+            if (selectedProductId && productMakesMapping[selectedProductId]) {
+                makesToShow = productMakesMapping[selectedProductId];
+            } else if (selectedClass && classMakesMapping[selectedClass]) {
                 makesToShow = classMakesMapping[selectedClass];
             }
-            
+
             makesToShow.forEach(function(make) {
                 const opt = new Option(make, make);
                 if (make === selectedMake) opt.selected = true;
@@ -462,8 +512,60 @@
             makeSelect.trigger('change.select2');
         }
 
+        // --- EXACT SC: hidden for every product except PCV 4W ---
+        const HIDE_SC_PRODUCTS = ["MISCD", "GCV 4W", "GCV 3W", "PCV 3W", "Private Car", "TW", "PCV 2W"];
+        const scFieldGroup = document.getElementById('scFieldGroup');
+        const scInput = scFieldGroup.querySelector('input[name="sc"]');
+
+        function updateScVisibility() {
+            const selectedProductText = productSelect.find('option:selected').text().trim();
+            if (HIDE_SC_PRODUCTS.includes(selectedProductText)) {
+                scFieldGroup.style.display = 'none';
+                scInput.value = '';
+            } else {
+                scFieldGroup.style.display = '';
+            }
+        }
+
+        // --- SUB PRODUCT: restricted to 1+1 / STP for these products ---
+        const RESTRICT_SUBPRODUCT_PRODUCTS = ["MISCD", "GCV 4W", "GCV 3W", "PCV 3W", "PCV 2W", "PCV 4W"];
+        const ALLOWED_SUBPRODUCTS_WHEN_RESTRICTED = ["1+1", "STP"];
+
+        function updateSubProductDropdown() {
+            const selectedProductText = productSelect.find('option:selected').text().trim();
+            const currentSubProductVal = subProductSelect.val() || initialSubProduct;
+
+            subProductSelect.empty();
+
+            // Add the default empty placeholder back
+            subProductSelect.append(allSubProductOptions.filter(function() {
+                return $(this).val() === "";
+            }));
+
+            if (RESTRICT_SUBPRODUCT_PRODUCTS.includes(selectedProductText)) {
+                subProductSelect.append(allSubProductOptions.filter(function() {
+                    return ALLOWED_SUBPRODUCTS_WHEN_RESTRICTED.includes($(this).text().trim());
+                }));
+            } else {
+                subProductSelect.append(allSubProductOptions.filter(function() {
+                    return $(this).val() !== "";
+                }));
+            }
+
+            // Preserve selection only if it's still a valid option in the new list
+            if (currentSubProductVal && subProductSelect.find(`option[value="${currentSubProductVal}"]`).length > 0) {
+                subProductSelect.val(currentSubProductVal);
+            }
+
+            subProductSelect.trigger('change.select2');
+        }
+
         updateClassDropdown();
+        updateScVisibility();
+        updateSubProductDropdown();
         productSelect.on('change', updateClassDropdown);
+        productSelect.on('change', updateScVisibility);
+        productSelect.on('change', updateSubProductDropdown);
         classSelect.on('change', updateMakesDropdown);
     });
 
@@ -518,15 +620,40 @@
     // --- TICKETING SYSTEM LOGIC (same pattern as Policy Locker) ---
     function openTicketModal() {
         document.getElementById('ticketModal').style.display = 'flex';
+
+        // Initialized lazily on first open rather than at page load: Select2
+        // computes its width from the element's rendered size, which is 0
+        // while the modal is still display:none. dropdownParent keeps the
+        // search dropdown inside the modal's own stacking context so it
+        // doesn't render behind the modal's own z-index:9999 overlay.
+        if (!$('#ticketInsurer').data('select2')) {
+            $('#ticketInsurer').select2({
+                width: '100%',
+                placeholder: 'Select...',
+                dropdownParent: $('#ticketModal')
+            });
+        }
     }
 
     function closeTicketModal() {
         document.getElementById('ticketModal').style.display = 'none';
         document.getElementById('ticketRemarks').value = '';
+        document.getElementById('ticketType').value = '';
+        $('#ticketInsurer').val('').trigger('change');
     }
 
     async function submitTicket() {
+        const ticketType = document.getElementById('ticketType').value;
+        const ticketInsurer = document.getElementById('ticketInsurer').value;
         const remarks = document.getElementById('ticketRemarks').value.trim();
+        if (!ticketType) {
+            alert('Please select a ticket type before submitting.');
+            return;
+        }
+        if (!ticketInsurer) {
+            alert('Please select an insurer before submitting.');
+            return;
+        }
         if (!remarks) {
             alert('Please enter your remarks before submitting.');
             return;
@@ -590,6 +717,8 @@
             formPayload[formatKey(key)] = finalValue.trim();
         }
 
+        formPayload['Insurer'] = ticketInsurer;
+
         // 4. Send to Backend
         try {
             const response = await fetch('/api/create-ticket/', {
@@ -601,7 +730,8 @@
                 body: JSON.stringify({
                     remarks: remarks,
                     form_payload: formPayload,
-                    category: 'MOTOR'
+                    category: 'MOTOR',
+                    ticket_type: ticketType
                 })
             });
 

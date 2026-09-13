@@ -50,3 +50,10 @@ def replace(value, arg):
     if arg == '_':
         return str(value).replace('_', ' ')
     return str(value).replace(arg, '')
+
+
+@register.filter(name='split')
+def split(value, delimiter=','):
+    if value is None:
+        return []
+    return [x.strip() for x in str(value).split(delimiter) if x.strip()]

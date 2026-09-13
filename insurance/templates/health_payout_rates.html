@@ -112,6 +112,25 @@
                             <i class="bi bi-info-circle"></i> The parameters currently entered in the search form will automatically be attached to this ticket.
                         </div>
                         <div class="mb-3">
+                            <label for="ticketType" class="form-label fw-bold">Ticket Type</label>
+                            <select id="ticketType" class="form-select">
+                                <option value="">Select...</option>
+                                <option value="WRONG_RATE">Wrong Rate</option>
+                                <option value="DOUBLE_RATE">Double Rate</option>
+                                <option value="MISSING_RATE">Missing Rate</option>
+                                <option value="OTHERS">Others</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="ticketInsurer" class="form-label fw-bold">Insurer</label>
+                            <select id="ticketInsurer" class="form-select">
+                                <option value="">Select...</option>
+                                {% for insurer in insurer_list %}
+                                    <option value="{{ insurer }}">{{ insurer }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3">
                             <label for="ticketRemarks" class="form-label fw-bold">Remarks / Issue Details</label>
                             <textarea id="ticketRemarks" class="form-control" rows="4" placeholder="Please explain what is missing or incorrect with the current rates..."></textarea>
                         </div>
@@ -273,15 +292,40 @@
     // --- TICKETING SYSTEM LOGIC (same pattern as Motor's Quote Simulator) ---
     function openTicketModal() {
         document.getElementById('ticketModal').style.display = 'flex';
+
+        // Initialized lazily on first open rather than at page load: Select2
+        // computes its width from the element's rendered size, which is 0
+        // while the modal is still display:none. dropdownParent keeps the
+        // search dropdown inside the modal's own stacking context so it
+        // doesn't render behind the modal's own z-index:9999 overlay.
+        if (!$('#ticketInsurer').data('select2')) {
+            $('#ticketInsurer').select2({
+                width: '100%',
+                placeholder: 'Select...',
+                dropdownParent: $('#ticketModal')
+            });
+        }
     }
 
     function closeTicketModal() {
         document.getElementById('ticketModal').style.display = 'none';
         document.getElementById('ticketRemarks').value = '';
+        document.getElementById('ticketType').value = '';
+        $('#ticketInsurer').val('').trigger('change');
     }
 
     async function submitTicket() {
+        const ticketType = document.getElementById('ticketType').value;
+        const ticketInsurer = document.getElementById('ticketInsurer').value;
         const remarks = document.getElementById('ticketRemarks').value.trim();
+        if (!ticketType) {
+            alert('Please select a ticket type before submitting.');
+            return;
+        }
+        if (!ticketInsurer) {
+            alert('Please select an insurer before submitting.');
+            return;
+        }
         if (!remarks) {
             alert('Please enter your remarks before submitting.');
             return;
@@ -336,6 +380,11 @@
             formPayload[formatKey(key)] = collected[key];
         }
 
+        // Named distinctly from the search form's own multi-select "Insurer"
+        // filter (already captured above as formPayload['Insurer']) so this
+        // ticket-specific single choice doesn't overwrite that search context.
+        formPayload['Ticket Insurer'] = ticketInsurer;
+
         try {
             const response = await fetch('/api/create-ticket/', {
                 method: 'POST',
@@ -346,7 +395,8 @@
                 body: JSON.stringify({
                     remarks: remarks,
                     form_payload: formPayload,
-                    category: 'HEALTH'
+                    category: 'HEALTH',
+                    ticket_type: ticketType
                 })
             });
 
