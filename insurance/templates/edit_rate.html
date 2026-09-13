@@ -86,7 +86,7 @@ $(document).ready(function() {
         closeOnSelect: false,
         templateResult: formatResult,
         width: '100%',
-        
+
         // This sorting function pushes selected items to the top of the list!
         sorter: data => data.sort((a, b) => {
             if (a.selected == b.selected) {
@@ -95,14 +95,41 @@ $(document).ready(function() {
             return a.selected ? -1 : 1;
         })
     });
-    
+
+    // Once a field has more than a few selections, showing every pill inline makes the
+    // box (and page) grow huge. Past this threshold, collapse them into one summary chip;
+    // the full checklist is still there in the dropdown for viewing/editing.
+    var PILL_COLLAPSE_THRESHOLD = 3;
+
+    function updateSelectionSummary($select) {
+        var $rendered = $select.next('.select2-container').find('.select2-selection__rendered');
+        var $selectionBox = $select.next('.select2-container').find('.select2-selection--multiple');
+        $rendered.find('.select2-summary-chip').remove();
+
+        var count = ($select.val() || []).length;
+        if (count > PILL_COLLAPSE_THRESHOLD) {
+            $selectionBox.addClass('has-summary');
+            $rendered.prepend(
+                '<li class="select2-summary-chip">' + count + ' items selected — click to view/edit</li>'
+            );
+        } else {
+            $selectionBox.removeClass('has-summary');
+        }
+    }
+
     // Automatically re-sort the list instantly upon checking/unchecking a box
     $('.select2-multiple').on("select2:select select2:unselect", function (e) {
         var $select = $(this);
         $select.select2("close");
         $select.select2("open");
+        updateSelectionSummary($select);
     });
-    
+
+    // Collapse any fields that already have a long list selected on page load
+    $('.select2-multiple').each(function() {
+        updateSelectionSummary($(this));
+    });
+
     // Default select2 for anything else (like numbers/dates if any)
     $('select:not(.select2-multiple)').select2({
         width: '100%'
@@ -132,7 +159,7 @@ $(document).ready(function() {
     @media (max-width: 950px) { .form-grid { grid-template-columns: repeat(2, 1fr); } }
     @media (max-width: 650px) { .form-grid { grid-template-columns: 1fr; } }
 
-    .form-group { display: flex; flex-direction: column; }
+    .form-group { display: flex; flex-direction: column; min-width: 0; }
     .form-group label { font-size: 11.5px; font-weight: 800; color: #475569; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 0.5px; }
     .error-text { color: #ef4444; font-size: 12px; margin-top: 6px; font-weight: 600; background: #fef2f2; padding: 6px 8px; border-radius: 6px; border: 1px solid #fecaca; }
 
@@ -150,11 +177,21 @@ $(document).ready(function() {
         background-color: #f8fafc !important;
         cursor: pointer;
         display: flex;
-        flex-wrap: wrap; 
+        flex-wrap: wrap;
         align-items: center;
         transition: all 0.2s ease !important;
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
     }
-    
+
+    /* Let the single-select's truncated label actually shrink (flex item min-width:auto
+       would otherwise force it to its full unwrapped text width and defeat the ellipsis) */
+    .select2-container--default .select2-selection--single .select2-selection__rendered {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+
     .select2-container--default.select2-container--focus .select2-selection--multiple,
     .select2-container--default.select2-container--open .select2-selection--single {
         border-color: #2563eb !important;
@@ -175,13 +212,35 @@ $(document).ready(function() {
         font-size: 13px !important;
         font-weight: 600 !important;
         display: inline-flex;
-        flex-direction: row-reverse; 
+        flex-direction: row-reverse;
         align-items: center;
-        gap: 8px; 
+        gap: 8px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.02) !important;
         transition: all 0.2s ease;
+        max-width: 100%;
+        min-width: 0;
+        overflow-wrap: break-word;
+        word-break: break-word;
+        white-space: normal;
     }
     .select2-container--default .select2-selection--multiple .select2-selection__choice:hover { background-color: #f1f5f9 !important; border-color: #cbd5e1 !important; }
+
+    /* When collapsed, hide the individual pills — the summary chip below replaces them */
+    .select2-container--default .select2-selection--multiple.has-summary .select2-selection__choice { display: none; }
+
+    .select2-summary-chip {
+        display: inline-flex !important;
+        align-items: center;
+        background-color: #eff6ff !important;
+        border: 1px solid #bfdbfe !important;
+        border-radius: 8px !important;
+        color: #1d4ed8 !important;
+        padding: 6px 10px !important;
+        font-size: 13px !important;
+        font-weight: 700 !important;
+        list-style: none;
+        white-space: nowrap;
+    }
 
     /* The 'X' remove button */
     .select2-container--default .select2-selection--multiple .select2-selection__choice__remove { color: #94a3b8 !important; border: none !important; padding: 0 !important; font-weight: bold !important; font-size: 15px !important; margin: 0 !important; transition: color 0.15s ease !important; }
