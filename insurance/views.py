@@ -1037,6 +1037,16 @@ def api_upload_chunk(request):
                     # by regroup_rate_master.py instead of invisibly at import time.
                     existing_groups = {}
 
+                    # group_obj.id -> set of new_rto_list values already present for
+                    # that group, whether already committed to the DB (an earlier
+                    # chunk of this same upload, or a retried request resending a
+                    # chunk that already succeeded) or already staged earlier in
+                    # this same chunk's `rows`. Populated lazily per group the first
+                    # time a row lands in it -- see the skip check below, which is
+                    # what makes a row upload idempotent instead of blindly
+                    # inserting a fresh copy every time identical content is seen.
+                    existing_rto_by_group = {}
+
                     def get_ynn(val):
                         if not val: return ynn_map["na"]
                         v = str(val).strip().lower()
@@ -1174,6 +1184,25 @@ def api_upload_chunk(request):
                                 key_hash=key_hash, defaults={"key_text": key_text}
                             )
                             existing_groups[key_hash] = group_obj
+
+                        # Within one group, new_rto_list is what distinguishes one
+                        # rate row from another -- every other field is already
+                        # identical by construction (that's what put them in the
+                        # same group_hash). So a second row with the same
+                        # new_rto_list in the same group is never a legitimate
+                        # second rate rule, only a duplicate: the same source row
+                        # appearing twice in the file, the same chunk arriving
+                        # twice (client retry), or the whole upload being resent.
+                        # Skip it instead of inserting another exact copy.
+                        row_rto = row.get("new_rto_list") or None
+                        if group_obj.id not in existing_rto_by_group:
+                            existing_rto_by_group[group_obj.id] = set(
+                                RateMaster.objects.filter(group=group_obj)
+                                .values_list("new_rto_list", flat=True)
+                            )
+                        if row_rto in existing_rto_by_group[group_obj.id]:
+                            continue
+                        existing_rto_by_group[group_obj.id].add(row_rto)
 
                         instances_to_create.append(
                             RateMaster(

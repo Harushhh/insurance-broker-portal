@@ -425,3 +425,82 @@ class GridSummaryDateFilterTests(TestCase):
         ws = wb.active
         data_rows = list(ws.iter_rows(min_row=2, values_only=True))
         self.assertEqual(len(data_rows), 2)
+
+
+class ApiUploadChunkRateMasterDedupTests(TestCase):
+    """
+    Bulk Upload -> Rate Master (api_upload_chunk) used to insert a fresh
+    RateMaster row for every row it was handed with no check for an
+    identical row already existing in the same group -- so a source file
+    that listed the same rate line twice, the browser resending an
+    already-saved chunk, or a whole file getting re-uploaded all produced
+    exact-duplicate rows sharing one group_id. Confirmed in production:
+    108,516 duplicate rows across 21,532 groups (~14% of the table).
+
+    The fix makes the insert idempotent per (group, new_rto_list) -- see
+    existing_rto_by_group in api_upload_chunk's rate_master branch.
+    """
+
+    def setUp(self):
+        from insurance.models import RTOMaster
+
+        self.client = Client()
+        Group.objects.get_or_create(name="Can_Upload_CSV")
+        self.user = User.objects.create_user(username="uploader", password="a-strong-test-password-1")
+        self.user.groups.add(Group.objects.get(name="Can_Upload_CSV"))
+        self.client.force_login(self.user)
+
+        RTOMaster.objects.create(rto_name="MUMBAI")
+        RTOMaster.objects.create(rto_name="PUNE")
+
+    def _row(self, rto="MUMBAI", **overrides):
+        row = {
+            "insurance_company": "Acme General",
+            "new_rto_list": rto,
+            "from_date": "2026-01-01",
+            "to_date": "2026-12-31",
+            "pi_od_rate": "10",
+        }
+        row.update(overrides)
+        return row
+
+    def _upload(self, rows, upload_batch_id="batch-1"):
+        return self.client.post(
+            reverse("api_upload_chunk"),
+            data=json.dumps({
+                "target_table": "rate_master",
+                "rows": rows,
+                "upload_batch_id": upload_batch_id,
+                "dry_run": False,
+            }),
+            content_type="application/json",
+        )
+
+    def test_same_row_repeated_in_one_chunk_is_only_saved_once(self):
+        from insurance.models import RateMaster
+
+        response = self._upload([self._row(), self._row()])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(RateMaster.objects.count(), 1)
+
+    def test_same_chunk_resent_in_a_second_request_is_not_duplicated(self):
+        # Simulates a browser/network retry resending a chunk that already
+        # succeeded, or the whole file being uploaded twice -- same
+        # upload_batch_id both times, since that's what a single Upload
+        # click reuses across its chunks/passes (see upload.html).
+        from insurance.models import RateMaster
+
+        first = self._upload([self._row()])
+        second = self._upload([self._row()])
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(RateMaster.objects.count(), 1)
+
+    def test_genuinely_different_rtos_in_the_same_group_both_saved(self):
+        # Guards against the dedup check being too broad: two rows that
+        # differ only by new_rto_list are still two legitimate rows.
+        from insurance.models import RateMaster
+
+        response = self._upload([self._row(rto="MUMBAI"), self._row(rto="PUNE")])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(RateMaster.objects.count(), 2)
