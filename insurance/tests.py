@@ -504,3 +504,32 @@ class ApiUploadChunkRateMasterDedupTests(TestCase):
         response = self._upload([self._row(rto="MUMBAI"), self._row(rto="PUNE")])
         self.assertEqual(response.status_code, 200)
         self.assertEqual(RateMaster.objects.count(), 2)
+
+    def test_reuploading_content_that_is_already_active_does_not_create_a_duplicate(self):
+        # A *different* upload_batch_id simulates a genuinely separate upload
+        # session (e.g. exporting an existing grid and re-importing it
+        # unchanged) -- not a retry of the same one. Uploads always insert as
+        # INACTIVE, so "already active" here means some later, separate step
+        # turned this content live; re-uploading it shouldn't add a parallel
+        # copy of a rate that's already in effect.
+        from insurance.models import RateMaster
+
+        self._upload([self._row()], upload_batch_id="original-upload")
+        RateMaster.objects.update(status="ACTIVE")
+
+        response = self._upload([self._row()], upload_batch_id="a-completely-different-upload")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(RateMaster.objects.count(), 1)
+
+    def test_reuploading_when_existing_row_is_inactive_still_creates_a_new_one(self):
+        # The guard only matches ACTIVE, non-deleted rows -- content that was
+        # never activated (or was deliberately turned off) doesn't block a
+        # legitimate re-upload of that same content.
+        from insurance.models import RateMaster
+
+        self._upload([self._row()], upload_batch_id="original-upload")
+        self.assertEqual(RateMaster.objects.filter(status="INACTIVE").count(), 1)
+
+        response = self._upload([self._row()], upload_batch_id="a-completely-different-upload")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(RateMaster.objects.count(), 2)
