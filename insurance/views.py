@@ -7,8 +7,8 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.urls import reverse
 from django.template.loader import render_to_string
 from django.http import HttpResponse, JsonResponse
-from django.db.models import Q, F, Count, Sum, Case, When, Value, CharField
-from django.db.models.functions import Coalesce
+from django.db.models import Q, F, Count, Sum, Case, When, Value, CharField, FloatField
+from django.db.models.functions import Coalesce, Greatest
 from django.core.mail import send_mail
 from django.core.paginator import Paginator
 from django.core.cache import cache
@@ -2993,27 +2993,40 @@ def _rate_master_equality_error_counts():
     return [{"label": rule["label"], "count": rule["violations_fn"]().count()} for rule in EQUALITY_ERROR_RULES]
 
 
-# Pi vs Po rate rules — a RateMaster row is only valid when each Pi (incoming)
-# rate is strictly greater than its paired Po (payout) rate, and pi_type
-# exactly matches po_type. Same "unset never violates" convention as the
-# range/equality rules above — a row is only flagged once both sides of the
-# pair are populated.
+# Pi vs Po rate rules — a RateMaster row is only valid when its Pi (incoming)
+# rate exceeds its paired Po (payout) rate by exactly RATE_MASTER_PI_PO_MARGIN
+# (the broker's kept margin), and pi_type exactly matches po_type. Same
+# "unset never violates" convention as the range/equality rules above — a
+# row is only flagged once both sides of the pair are populated.
 #
-# A Pi rate of exactly 0 is a deliberate special case rather than a violation
-# of the "greater than" rule: it flips the rule to "Po must also be exactly
-# 0", since 0 can't have anything strictly less than it.
+# A Pi rate at or below the required margin (e.g. <= 7) is a deliberate
+# special case rather than a violation: there's no way to subtract a full
+# margin from a Pi that small without landing on a negative Po, so the rule
+# flips to "Po must be exactly 0" instead of "Pi - Po == margin" whenever
+# Pi <= required_margin.
+#
+# A raw negative gap (Po > Pi) is clamped to 0 before comparing against the
+# required margin, so it reads as "no margin" rather than a negative number.
+RATE_MASTER_PI_PO_MARGIN = 7
 
 
-def _rate_master_pi_po_rate_violations_qs(pi_field, po_field):
+def _rate_master_pi_po_rate_violations_qs(pi_field, po_field, required_margin=RATE_MASTER_PI_PO_MARGIN):
     """
-    RateMaster rows where pi_field/po_field are both set and break the pairing
-    rule: pi_field isn't strictly greater than po_field, EXCEPT when pi_field
-    is exactly 0 — there the rule flips to po_field must also be exactly 0.
+    RateMaster rows where pi_field/po_field are both set and break the margin
+    rule: Greatest(pi_field - po_field, 0) isn't exactly `required_margin`,
+    EXCEPT when pi_field <= required_margin -- there the rule flips to
+    po_field must be exactly 0 (can't subtract a full margin off a Pi that
+    small without going negative).
     """
     both_set = Q(**{f"{pi_field}__isnull": False, f"{po_field}__isnull": False})
-    pi_zero_bad = Q(**{pi_field: 0}) & ~Q(**{po_field: 0})
-    pi_nonzero_bad = ~Q(**{pi_field: 0}) & Q(**{f"{pi_field}__lte": F(po_field)})
-    return RateMaster.objects.filter(is_deleted="NO").filter(both_set & (pi_zero_bad | pi_nonzero_bad))
+    pi_le_margin_exempt = Q(**{f"{pi_field}__lte": required_margin, po_field: 0})
+    qs = (
+        RateMaster.objects.filter(is_deleted="NO")
+        .filter(both_set)
+        .exclude(pi_le_margin_exempt)
+        .annotate(margin=Greatest(F(pi_field) - F(po_field), Value(0.0), output_field=FloatField()))
+    )
+    return qs.exclude(margin=required_margin)
 
 
 def _rate_master_pi_po_type_violations_qs():
@@ -3030,17 +3043,17 @@ PI_PO_ERROR_RULES = [
     {
         "label": "Invalid OD Rate",
         "violations_fn": lambda: _rate_master_pi_po_rate_violations_qs("pi_od_rate", "po_od_rate"),
-        "columns": [("pi_od_rate", "Pi OD Rate"), ("po_od_rate", "Po OD Rate")],
+        "columns": [("pi_od_rate", "Pi OD Rate"), ("po_od_rate", "Po OD Rate"), ("margin", "Margin")],
     },
     {
         "label": "Invalid TP Rate",
         "violations_fn": lambda: _rate_master_pi_po_rate_violations_qs("pi_tp_rate", "po_tp_rate"),
-        "columns": [("pi_tp_rate", "Pi TP Rate"), ("po_tp_rate", "Po TP Rate")],
+        "columns": [("pi_tp_rate", "Pi TP Rate"), ("po_tp_rate", "Po TP Rate"), ("margin", "Margin")],
     },
     {
         "label": "Invalid NET Rate",
         "violations_fn": lambda: _rate_master_pi_po_rate_violations_qs("pi_net_rate", "po_net_rate"),
-        "columns": [("pi_net_rate", "Pi NET Rate"), ("po_net_rate", "Po NET Rate")],
+        "columns": [("pi_net_rate", "Pi NET Rate"), ("po_net_rate", "Po NET Rate"), ("margin", "Margin")],
     },
     {
         "label": "Pi/Po Type Mismatch",
@@ -3713,6 +3726,7 @@ def rate_master_health(request):
         "equality_rows_elided_range": equality_rows_elided_range,
         "pi_po_error_counts": pi_po_error_counts,
         "pi_po_error_total": sum(r["count"] for r in pi_po_error_counts),
+        "pi_po_margin": RATE_MASTER_PI_PO_MARGIN,
         "selected_pi_po_error": pi_po_error if selected_pi_po_rule else "",
         "selected_pi_po_rule": selected_pi_po_rule,
         "pi_po_rows_page_obj": pi_po_rows_page_obj,
@@ -3948,6 +3962,16 @@ def _build_health_rate_queryset(request):
 
 
 def health_rate_master(request):
+    # Fresh visit (no filters submitted yet, e.g. first load or the Reset
+    # link) defaults the Date Range filter to today so the grid opens on
+    # currently-valid rates instead of every historical row. Redirecting
+    # (rather than defaulting silently in the queryset) puts date_range in
+    # the URL itself, so pagination links and Export Excel -- which both
+    # just echo request.GET -- carry the same default forward.
+    if not request.GET:
+        today_str = timezone.localdate().isoformat()
+        return redirect(f"{reverse('health_rate_master')}?{urlencode({'date_range': f'{today_str} - {today_str}'})}")
+
     qs, selected = _build_health_rate_queryset(request)
 
     active_count = qs.filter(status="ACTIVE").count()

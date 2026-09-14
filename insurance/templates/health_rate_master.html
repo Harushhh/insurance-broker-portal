@@ -145,6 +145,10 @@
         <form method="GET" action="{% url 'health_rate_master' %}" id="healthFilterForm">
             <div class="row g-3 mb-3">
                 <div class="col-12 col-md-4 col-lg-3 col-xl-2">
+                    <label class="text-overline">Date Range</label>
+                    <input type="text" id="date_range" name="date_range" placeholder="Select Dates" value="{{ selected.date_range|default_if_none:'' }}" class="form-control-premium" autocomplete="off">
+                </div>
+                <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                     <label class="text-overline">Search / ID</label>
                     <input type="text" name="q" placeholder="Insurer, plan name, or ID (e.g. h-2183)" value="{{ selected.q|default_if_none:'' }}" class="form-control-premium">
                 </div>
@@ -208,10 +212,6 @@
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">Search by Pincode</label>
                         <input type="text" name="pincode" placeholder="e.g. 400001" value="{{ selected.pincode|default_if_none:'' }}" class="form-control-premium" title="Resolves to a zone via the Pincode Dashboard mapping">
-                    </div>
-                    <div class="col-12 col-md-4 col-lg-3 col-xl-2">
-                        <label class="text-overline">Date Range</label>
-                        <input type="text" id="date_range" name="date_range" placeholder="Select Dates" value="{{ selected.date_range|default_if_none:'' }}" class="form-control-premium" autocomplete="off">
                     </div>
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">Sum Insured Range</label>
@@ -398,7 +398,7 @@
         $('.select2-searchable').select2({ width: '100%', placeholder: "Search...", allowClear: true });
         $('.modal-select2').select2({ width: '100%', dropdownParent: $('#bulkModal') });
 
-        const hasAdvancedData = {% if selected.pincode_zone or selected.pincode or selected.date_range or selected.sum_insured_range or selected.age_range or selected.deductible_range or selected.is_deleted %}true{% else %}false{% endif %};
+        const hasAdvancedData = {% if selected.pincode_zone or selected.pincode or selected.sum_insured_range or selected.age_range or selected.deductible_range or selected.is_deleted %}true{% else %}false{% endif %};
         if (hasAdvancedData) {
             $('#advancedFilters').addClass('show');
             $('#toggleAdvancedBtn').html('<i class="bi bi-funnel-fill"></i> Hide Advanced Filters');

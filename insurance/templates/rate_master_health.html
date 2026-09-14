@@ -799,9 +799,11 @@
         <div class="p-4">
             <p class="text-muted mb-4" style="font-size: 14px; max-width: 760px;">
                 Pi (incoming) rates and pi_type must line up with their Po (payout) counterparts: each Pi rate
-                must be strictly greater than its paired Po rate — except when Pi is exactly 0, where Po must
-                also be exactly 0 — and pi_type must exactly match po_type. A row breaking one of these is a
-                data-entry error. Click a card to list the affected rows.
+                must exceed its paired Po rate by exactly a {{ pi_po_margin }}-point margin (a negative gap counts
+                as 0, so it's still flagged) — except when Pi is at or below {{ pi_po_margin }}, where Po must be
+                exactly 0 instead (a {{ pi_po_margin }}-point margin isn't possible without going negative) —
+                and pi_type must exactly match po_type. A row breaking one of these is a data-entry error. Click
+                a card to list the affected rows.
             </p>
 
             <div class="rmh-stat-grid">
@@ -812,11 +814,11 @@
                         <span class="label">{{ rule.label }}</span>
                         <span class="sub">
                             {% if rule.label == "Invalid OD Rate" %}
-                                Pi Od Rate is not greater than Po Od Rate
+                                Margin between Pi and Po OD Rate isn't exactly {{ pi_po_margin }}
                             {% elif rule.label == "Invalid TP Rate" %}
-                                Pi TP Rate is not greater than Po TP Rate
+                                Margin between Pi and Po TP Rate isn't exactly {{ pi_po_margin }}
                             {% elif rule.label == "Invalid NET Rate" %}
-                                Pi NET Rate is not greater than Po NET Rate
+                                Margin between Pi and Po NET Rate isn't exactly {{ pi_po_margin }}
                             {% else %}
                                 Pi Type does not exactly match Po Type
                             {% endif %}
