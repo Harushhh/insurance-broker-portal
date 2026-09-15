@@ -771,6 +771,17 @@ def get_rto_and_make_choices():
     return data
 
 
+# Rate fields that must never carry more than 2 decimal places — paise/cents-level
+# precision is meaningless for these payout rates and extra digits are almost
+# always a fat-fingered or pasted-in artifact. Enforced both on the single-record
+# edit form (RateForm.clean below) and on the bulk-update path (bulk_update_rates).
+RATE_DECIMAL_FIELDS = (
+    "pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5",
+    "pi_net_rate", "pi_flat_amount", "pi_vli",
+    "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount",
+)
+
+
 class RateForm(forms.ModelForm):
     product = forms.ModelChoiceField(
         queryset=ProductMaster.objects.none(),
@@ -824,6 +835,10 @@ class RateForm(forms.ModelForm):
     class Meta:
         model = RateMaster
         exclude = ["group", "created_at", "updated_at"]
+        widgets = {
+            field_name: forms.NumberInput(attrs={"step": "0.01"})
+            for field_name in RATE_DECIMAL_FIELDS
+        }
 
     def __init__(self, *args, **kwargs):
         super(RateForm, self).__init__(*args, **kwargs)
@@ -871,6 +886,14 @@ class RateForm(forms.ModelForm):
     def clean_new_vehicle_makes(self):
         data = self.cleaned_data.get("new_vehicle_makes")
         return ", ".join(data) if data else ""
+
+    def clean(self):
+        cleaned_data = super().clean()
+        for field_name in RATE_DECIMAL_FIELDS:
+            value = cleaned_data.get(field_name)
+            if value is not None:
+                cleaned_data[field_name] = round(value, 2)
+        return cleaned_data
 
 # =========================================================
 # UNIFIED HOME DASHBOARD
@@ -2741,6 +2764,8 @@ def bulk_update_rates(request):
             "sc_min", "sc_max", "po_od_rate", "po_tp_rate", "po_net_rate", "po_flat_amount"
         ]:
             parsed_value = float(new_value) if new_value else None
+            if parsed_value is not None and field_name in RATE_DECIMAL_FIELDS:
+                parsed_value = round(parsed_value, 2)
 
         # 4. Perform ultra-fast vectorized update to the DB
         records.update(**{field_name: parsed_value, "updated_at": timezone.now()})

@@ -727,3 +727,67 @@ class PurgeDeletedRateMasterCommandTests(TestCase):
 
         lock.refresh_from_db()
         self.assertIsNone(lock.source_rate)
+
+
+class RateDecimalRoundingTests(TestCase):
+    """
+    Dashboard rate fields (pi_od_rate, pi_tp_rate, pi_tp_2..5, pi_net_rate,
+    pi_flat_amount, pi_vli, po_od_rate, po_tp_rate, po_net_rate,
+    po_flat_amount) must never be saved with more than 2 decimal places,
+    whether set via the single-record Edit form or Bulk Update Selected.
+    """
+
+    def setUp(self):
+        from insurance.models import ProductMaster, RateGroup, RateMaster
+
+        self.client = Client()
+        Group.objects.get_or_create(name="Can_View_Dashboard")
+        self.user = User.objects.create_user(username="ops", password="a-strong-test-password-1")
+        self.user.groups.add(Group.objects.get(name="Can_View_Dashboard"))
+        self.client.force_login(self.user)
+
+        self.product = ProductMaster.objects.create(name="Private Car")
+        self.group = RateGroup.objects.create(key_hash="decimal-rounding-group")
+        self.record = RateMaster.objects.create(
+            group=self.group, product=self.product, insurance_company="Acme General",
+            status="ACTIVE", is_deleted="NO", pi_od_rate=10.0, po_od_rate=3.0,
+        )
+
+    def test_bulk_update_rounds_a_targeted_rate_field_to_two_decimals(self):
+        from insurance.models import RateMaster
+
+        self.client.post(reverse("bulk_update_rates"), {
+            "selected_groups": str(self.group.id),
+            "update_field": "pi_od_rate",
+            "update_value": "12.34567",
+        })
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.pi_od_rate, 12.35)
+
+    def test_bulk_update_does_not_round_unrelated_numeric_fields(self):
+        # tariff_min/max, cc_min/max, vehicle_age_min/max, sc_min/max are
+        # numeric too but were never in the two-decimal-place requirement.
+        from insurance.models import RateMaster
+
+        self.client.post(reverse("bulk_update_rates"), {
+            "selected_groups": str(self.group.id),
+            "update_field": "tariff_min",
+            "update_value": "12.34567",
+        })
+        self.record.refresh_from_db()
+        self.assertEqual(self.record.tariff_min, 12.34567)
+
+    def test_edit_form_rounds_rate_field_to_two_decimals(self):
+        from insurance.views import RateForm
+
+        form = RateForm(data={
+            "insurance_company": "Acme General",
+            "status": "ACTIVE",
+            "is_deleted": "NO",
+            "pi_od_rate": "12.3456",
+            "po_od_rate": "3.005",
+        }, instance=self.record, initial={"new_rto_list": [], "new_vehicle_makes": []})
+
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["pi_od_rate"], 12.35)
+        self.assertEqual(form.cleaned_data["po_od_rate"], 3.0)
