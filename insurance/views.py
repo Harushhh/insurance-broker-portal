@@ -8,7 +8,7 @@ from django.urls import reverse
 from django.template.loader import render_to_string
 from django.http import HttpResponse, JsonResponse
 from django.db.models import Q, F, Count, Sum, Case, When, Value, CharField, FloatField
-from django.db.models.functions import Coalesce, Greatest
+from django.db.models.functions import Coalesce, Greatest, Round
 from django.core.mail import send_mail
 from django.core.paginator import Paginator
 from django.core.cache import cache
@@ -3049,7 +3049,20 @@ def _rate_master_pi_po_rate_violations_qs(pi_field, po_field, required_margin=RA
         RateMaster.objects.filter(is_deleted="NO")
         .filter(both_set)
         .exclude(pi_le_margin_exempt)
-        .annotate(margin=Greatest(F(pi_field) - F(po_field), Value(0.0), output_field=FloatField()))
+        .annotate(
+            # Round to 2dp before comparing: pi_field/po_field are plain
+            # FloatFields (IEEE-754 doubles), so e.g. 19.65 - 12.65 lands on
+            # 6.999999999999998 rather than 7.0 in raw floating point --
+            # rounding avoids flagging a mathematically-exact margin as a
+            # violation purely from binary float representation error. Rates
+            # are limited to 2 decimal places on entry (see RATE_DECIMAL_FIELDS),
+            # so rounding the margin to the same precision never masks a real
+            # violation.
+            margin=Round(
+                Greatest(F(pi_field) - F(po_field), Value(0.0), output_field=FloatField()),
+                2,
+            )
+        )
     )
     return qs.exclude(margin=required_margin)
 

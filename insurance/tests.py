@@ -791,3 +791,48 @@ class RateDecimalRoundingTests(TestCase):
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["pi_od_rate"], 12.35)
         self.assertEqual(form.cleaned_data["po_od_rate"], 3.0)
+
+
+class PiPoMarginFloatPrecisionTests(TestCase):
+    """
+    Rate Master Health's "Pi vs Po Validation Errors" cards
+    (_rate_master_pi_po_rate_violations_qs) flag a row when Pi - Po isn't
+    exactly RATE_MASTER_PI_PO_MARGIN (7). pi_od_rate/po_od_rate etc. are
+    plain FloatFields (IEEE-754 doubles), so e.g. 19.65 - 12.65 computes to
+    6.999999999999998 in raw floating point rather than 7.0 -- a
+    mathematically exact margin was being flagged as a violation purely
+    from binary float representation error.
+    """
+
+    def setUp(self):
+        from insurance.models import ProductMaster, RateGroup, RateMaster
+
+        product = ProductMaster.objects.create(name="Private Car")
+        group = RateGroup.objects.create(key_hash="pi-po-float-precision-group")
+
+        # 19.65 - 12.65 == 7 mathematically, but not in raw IEEE-754 double
+        # arithmetic -- this is the exact pair reported as a false positive.
+        self.exact_margin_row = RateMaster.objects.create(
+            group=group, product=product, insurance_company="Acme General",
+            status="ACTIVE", is_deleted="NO", pi_od_rate=19.65, po_od_rate=12.65,
+        )
+        self.genuine_violation_row = RateMaster.objects.create(
+            group=group, product=product, insurance_company="Acme General",
+            status="ACTIVE", is_deleted="NO", pi_od_rate=20.0, po_od_rate=12.0,
+        )
+
+    def test_exact_margin_from_float_subtraction_is_not_flagged(self):
+        from insurance.views import _rate_master_pi_po_rate_violations_qs
+
+        flagged_ids = set(
+            _rate_master_pi_po_rate_violations_qs("pi_od_rate", "po_od_rate").values_list("id", flat=True)
+        )
+        self.assertNotIn(self.exact_margin_row.id, flagged_ids)
+
+    def test_a_genuinely_wrong_margin_is_still_flagged(self):
+        from insurance.views import _rate_master_pi_po_rate_violations_qs
+
+        flagged_ids = set(
+            _rate_master_pi_po_rate_violations_qs("pi_od_rate", "po_od_rate").values_list("id", flat=True)
+        )
+        self.assertIn(self.genuine_violation_row.id, flagged_ids)
