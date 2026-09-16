@@ -157,6 +157,10 @@ urlpatterns = [
     path("make-model-dashboard/", page_access_required("Can_View_Make_Model_Dashboard")(views.make_model_dashboard), name="make_model_dashboard"),
     path("missing-make-model/", page_access_required("Can_View_Missing_Make_Model")(views.missing_make_model), name="missing_make_model"),
     path("missing-make-model/add-to-master/", page_access_required("Can_View_Missing_Make_Model")(views.add_missing_make_model_to_master), name="add_missing_make_model_to_master"),
+    path("missing-make-model/bulk-add-to-master/", page_access_required("Can_View_Missing_Make_Model")(views.bulk_add_missing_make_model_to_master), name="bulk_add_missing_make_model_to_master"),
+    path("missing-make-model/mark-resolved/", page_access_required("Can_View_Missing_Make_Model")(views.mark_missing_make_model_resolved), name="mark_missing_make_model_resolved"),
+    path("missing-make-model/unmark-resolved/", page_access_required("Can_View_Missing_Make_Model")(views.unmark_missing_make_model_resolved), name="unmark_missing_make_model_resolved"),
+    path("missing-make-model/bulk-mark-resolved/", page_access_required("Can_View_Missing_Make_Model")(views.bulk_mark_missing_make_model_resolved), name="bulk_mark_missing_make_model_resolved"),
     path("missing-make-model/export/", page_access_required("Can_View_Missing_Make_Model")(views.export_missing_make_model_xlsx), name="export_missing_make_model_xlsx"),
     path("pincode-dashboard/", page_access_required("Can_View_Pincode_Dashboard")(views.pincode_dashboard), name="pincode_dashboard"),
 

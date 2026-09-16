@@ -327,6 +327,35 @@ class MakeModelMaster(models.Model):
         return self.make_model_name
 
 
+class MissingMakeModelManualResolution(models.Model):
+    """
+    Manual "mark as Resolved" override for the Missing Make/Model page --
+    for a group whose value was added to MakeModelMaster outside this page's
+    own Add to Master write path (edited directly on the Make/Model Master
+    dashboard, added via the bulk Rate Master importer, etc.), where the
+    live word-overlap re-check in views._annotate_make_model_resolution
+    might not pick it up on its own.
+
+    Keyed on exactly the same (value, product, sub_product, insurer,
+    vehicle_class) tuple views._missing_make_model_groups groups rows on --
+    every field already lowercased/stripped the same way that grouping key
+    is, so lookups there are a plain equality match.
+    """
+    value = models.CharField(max_length=500)
+    product = models.CharField(max_length=100, blank=True)
+    sub_product = models.CharField(max_length=100, blank=True)
+    insurer = models.CharField(max_length=150, blank=True)
+    vehicle_class = models.CharField(max_length=150, blank=True)
+    resolved_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    resolved_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("value", "product", "sub_product", "insurer", "vehicle_class")
+
+    def __str__(self):
+        return self.value
+
+
 class PincodeMaster(models.Model):
     """
     Health's equivalent of RTOMaster: maps a zone label — a HealthRateMaster.

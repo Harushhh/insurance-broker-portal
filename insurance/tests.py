@@ -1366,6 +1366,89 @@ class MissingMakeModelPageTests(MissingMakeModelAggregationTests):
         group = list(response.context["page_obj"])[0]
         self.assertFalse(group["resolved"])
 
+    def _mark(self, value, product="Two Wheeler", sub_product="Scooter", insurer="Acme General",
+              vehicle_class="", **overrides):
+        data = {
+            "mm_mark_value": value, "mm_mark_product": product, "mm_mark_sub_product": sub_product,
+            "mm_mark_insurer": insurer, "mm_mark_vehicle_class": vehicle_class,
+        }
+        data.update(overrides)
+        return self.client.post(reverse("mark_missing_make_model_resolved"), data)
+
+    def _unmark(self, value, product="Two Wheeler", sub_product="Scooter", insurer="Acme General",
+                vehicle_class="", **overrides):
+        data = {
+            "mm_mark_value": value, "mm_mark_product": product, "mm_mark_sub_product": sub_product,
+            "mm_mark_insurer": insurer, "mm_mark_vehicle_class": vehicle_class,
+        }
+        data.update(overrides)
+        return self.client.post(reverse("unmark_missing_make_model_resolved"), data)
+
+    def test_marking_a_row_resolved_manually_needs_no_cluster_write(self):
+        from insurance.models import MakeModelMaster, MissingMakeModelManualResolution
+        self._fail("YAMAHA", "ALPHA")
+        response = self._mark("yamaha alpha")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(MakeModelMaster.objects.count(), 0)
+        self.assertEqual(MissingMakeModelManualResolution.objects.count(), 1)
+
+        page = self.client.get(reverse("missing_make_model"), {"status": "all"})
+        group = list(page.context["page_obj"])[0]
+        self.assertTrue(group["resolved"])
+        self.assertTrue(group["resolved_manual"])
+        self.assertFalse(group["resolved_live"])
+
+    def test_marking_twice_is_idempotent(self):
+        from insurance.models import AuditLog, MissingMakeModelManualResolution
+        self._fail("YAMAHA", "ALPHA")
+        self._mark("yamaha alpha")
+        self._mark("yamaha alpha")
+        self.assertEqual(MissingMakeModelManualResolution.objects.count(), 1)
+        self.assertEqual(AuditLog.objects.filter(action="MAKE MODEL MANUALLY RESOLVED").count(), 1)
+
+    def test_unmarking_reverts_a_purely_manual_resolution(self):
+        from insurance.models import MissingMakeModelManualResolution
+        self._fail("YAMAHA", "ALPHA")
+        self._mark("yamaha alpha")
+        response = self._unmark("yamaha alpha")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(MissingMakeModelManualResolution.objects.count(), 0)
+
+        page = self.client.get(reverse("missing_make_model"), {"status": "all"})
+        group = list(page.context["page_obj"])[0]
+        self.assertFalse(group["resolved"])
+
+    def test_unmarking_does_not_undo_a_live_match(self):
+        # A row can be both live-resolved (real cluster match) and separately
+        # marked manually (e.g. by mistake, or before the live match existed).
+        # Undoing the manual mark must not hide a genuinely live-resolved row.
+        from insurance.models import MakeModelMaster, MissingMakeModelManualResolution
+        self._fail("YAMAHA", "ALPHA")
+        MakeModelMaster.objects.create(make_model_name="two_wheeler_all", make_model_cluster="YAMAHA ALPHA")
+        self._wire_active_rate("Acme General", "Two Wheeler", "Scooter", "two_wheeler_all")
+        self._mark("yamaha alpha")
+        self._unmark("yamaha alpha")
+        self.assertEqual(MissingMakeModelManualResolution.objects.count(), 0)
+
+        page = self.client.get(reverse("missing_make_model"), {"status": "all"})
+        group = list(page.context["page_obj"])[0]
+        self.assertTrue(group["resolved"])
+        self.assertTrue(group["resolved_live"])
+
+    def test_unmarking_a_row_that_was_never_marked_is_a_no_op(self):
+        from insurance.models import MissingMakeModelManualResolution
+        self._fail("YAMAHA", "ALPHA")
+        response = self._unmark("yamaha alpha")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(MissingMakeModelManualResolution.objects.count(), 0)
+
+    def test_marking_a_get_redirects_without_writing(self):
+        from insurance.models import MissingMakeModelManualResolution
+        self._fail("YAMAHA", "ALPHA")
+        response = self.client.get(reverse("mark_missing_make_model_resolved"))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(MissingMakeModelManualResolution.objects.count(), 0)
+
     def test_a_cluster_match_for_a_different_vehicle_class_is_not_resolved(self):
         # Same scoping bug again, this time on RULE 2b's own dimension: the
         # master group is wired for the right insurer/product/sub product, but
@@ -1648,3 +1731,165 @@ class AddMissingMakeModelToMasterTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.master.refresh_from_db()
         self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER")
+
+
+@override_settings(**MISSING_MM_OVERRIDES)
+class BulkMissingMakeModelActionsTests(TestCase):
+    """
+    Bulk select-and-assign ("Add Selected to Master") and bulk "Mark Selected
+    Resolved" -- the checkbox-driven versions of the single-row actions above,
+    for when several distinct Missing Make/Model rows should all get the same
+    treatment in one request.
+    """
+
+    def setUp(self):
+        from insurance.models import MakeModelMaster
+
+        self.client = Client()
+        Group.objects.get_or_create(name="Can_View_Missing_Make_Model")
+        self.user = User.objects.create_user(username="ops", password="a-strong-test-password-1")
+        self.user.groups.add(Group.objects.get(name="Can_View_Missing_Make_Model"))
+        self.client.force_login(self.user)
+
+        self.master = MakeModelMaster.objects.create(
+            make_model_name="two_wheeler_all", make_model_cluster="HONDA ACTIVA"
+        )
+        self.add_url = reverse("bulk_add_missing_make_model_to_master")
+        self.mark_url = reverse("bulk_mark_missing_make_model_resolved")
+
+    def _key(self, value, product="Two Wheeler", sub_product="Scooter", insurer="Acme General",
+             vehicle_class=""):
+        return json.dumps({
+            "value": value, "product": product, "sub_product": sub_product,
+            "insurer": insurer, "vehicle_class": vehicle_class,
+        })
+
+    def test_bulk_add_appends_every_selected_value_to_one_master(self):
+        response = self.client.post(self.add_url, {
+            "group_keys": [self._key("yamaha alpha"), self._key("tvs jupiter zx")],
+            "target": "existing", "master_id": str(self.master.id),
+        })
+        self.assertEqual(response.status_code, 302)
+        self.master.refresh_from_db()
+        self.assertIn("YAMAHA ALPHA", self.master.make_model_cluster)
+        self.assertIn("TVS JUPITER ZX", self.master.make_model_cluster)
+
+    def test_bulk_add_dedupes_a_repeated_value(self):
+        self.client.post(self.add_url, {
+            "group_keys": [self._key("yamaha alpha"), self._key("yamaha alpha")],
+            "target": "existing", "master_id": str(self.master.id),
+        })
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster.count("YAMAHA ALPHA"), 1)
+
+    def test_bulk_add_creates_a_new_master_row(self):
+        from insurance.models import MakeModelMaster
+        self.client.post(self.add_url, {
+            "group_keys": [self._key("tata nexon ev")],
+            "target": "new", "new_name": "private_car_ev",
+        })
+        created = MakeModelMaster.objects.get(make_model_name="private_car_ev")
+        self.assertEqual(created.make_model_cluster, "TATA NEXON EV")
+
+    def test_bulk_add_skips_a_value_that_already_resolves_elsewhere_without_force(self):
+        from insurance.models import MakeModelMaster
+        MakeModelMaster.objects.create(make_model_name="scooters", make_model_cluster="YAMAHA ALPHA")
+        self.client.post(self.add_url, {
+            "group_keys": [self._key("yamaha alpha"), self._key("tvs jupiter zx")],
+            "target": "existing", "master_id": str(self.master.id),
+        })
+        self.master.refresh_from_db()
+        self.assertNotIn("YAMAHA ALPHA", self.master.make_model_cluster)
+        self.assertIn("TVS JUPITER ZX", self.master.make_model_cluster)
+
+    def test_bulk_add_includes_a_skipped_value_with_force(self):
+        from insurance.models import MakeModelMaster
+        MakeModelMaster.objects.create(make_model_name="scooters", make_model_cluster="YAMAHA ALPHA")
+        self.client.post(self.add_url, {
+            "group_keys": [self._key("yamaha alpha")],
+            "target": "existing", "master_id": str(self.master.id), "force": "1",
+        })
+        self.master.refresh_from_db()
+        self.assertIn("YAMAHA ALPHA", self.master.make_model_cluster)
+
+    def test_bulk_add_with_no_selection_is_rejected(self):
+        response = self.client.post(self.add_url, {"target": "existing", "master_id": str(self.master.id)})
+        self.assertEqual(response.status_code, 302)
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA")
+
+    def test_bulk_add_a_get_redirects_without_writing(self):
+        response = self.client.get(self.add_url)
+        self.assertEqual(response.status_code, 302)
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA")
+
+    def test_bulk_add_writes_one_audit_log_entry(self):
+        from insurance.models import AuditLog
+        self.client.post(self.add_url, {
+            "group_keys": [self._key("yamaha alpha"), self._key("tvs jupiter zx")],
+            "target": "existing", "master_id": str(self.master.id),
+        })
+        entries = AuditLog.objects.filter(action="MAKE MODEL CLUSTER BULK ADD")
+        self.assertEqual(entries.count(), 1)
+        self.assertIn("2", entries.first().details)
+
+    def test_bulk_add_invalidates_the_rate_form_choices_cache(self):
+        from django.core.cache import cache
+        from insurance.views import RTO_MAKE_CHOICES_CACHE_KEY
+        cache.set(RTO_MAKE_CHOICES_CACHE_KEY, {"rtos": [], "makes": []}, 600)
+        self.client.post(self.add_url, {
+            "group_keys": [self._key("yamaha alpha")],
+            "target": "existing", "master_id": str(self.master.id),
+        })
+        self.assertIsNone(cache.get(RTO_MAKE_CHOICES_CACHE_KEY))
+
+    def test_bulk_mark_resolves_every_selected_row(self):
+        from insurance.models import MissingMakeModelManualResolution
+        response = self.client.post(self.mark_url, {
+            "group_keys": [self._key("yamaha alpha"), self._key("tata nexon ev", product="Private Car")],
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(MissingMakeModelManualResolution.objects.count(), 2)
+
+    def test_bulk_mark_is_idempotent_for_an_already_marked_row(self):
+        from insurance.models import MissingMakeModelManualResolution
+        self.client.post(self.mark_url, {"group_keys": [self._key("yamaha alpha")]})
+        self.client.post(self.mark_url, {"group_keys": [self._key("yamaha alpha")]})
+        self.assertEqual(MissingMakeModelManualResolution.objects.count(), 1)
+
+    def test_bulk_mark_with_no_selection_is_rejected(self):
+        from insurance.models import MissingMakeModelManualResolution
+        response = self.client.post(self.mark_url, {})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(MissingMakeModelManualResolution.objects.count(), 0)
+
+    def test_bulk_mark_a_get_redirects_without_writing(self):
+        from insurance.models import MissingMakeModelManualResolution
+        response = self.client.get(self.mark_url)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(MissingMakeModelManualResolution.objects.count(), 0)
+
+    def test_bulk_mark_writes_one_audit_log_entry(self):
+        from insurance.models import AuditLog
+        self.client.post(self.mark_url, {
+            "group_keys": [self._key("yamaha alpha"), self._key("tata nexon ev", product="Private Car")],
+        })
+        entries = AuditLog.objects.filter(action="MAKE MODEL MANUALLY RESOLVED")
+        self.assertEqual(entries.count(), 1)
+
+    def test_a_user_without_the_group_is_refused_on_every_new_endpoint(self):
+        from insurance.models import MissingMakeModelManualResolution
+        other = User.objects.create_user(username="nobody", password="a-strong-test-password-2")
+        client = Client()
+        client.force_login(other)
+        urls = [
+            self.add_url, self.mark_url,
+            reverse("mark_missing_make_model_resolved"), reverse("unmark_missing_make_model_resolved"),
+        ]
+        for url in urls:
+            response = client.post(url, {"group_keys": [self._key("yamaha alpha")]})
+            self.assertEqual(response.status_code, 403, url)
+        self.assertEqual(MissingMakeModelManualResolution.objects.count(), 0)
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA")

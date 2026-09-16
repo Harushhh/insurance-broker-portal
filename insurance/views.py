@@ -53,7 +53,7 @@ from .models import (
     ExtractionField, FieldSynonym, PolicyDocumentUpload, PolicyMISRecord,
     LockedPolicy, SupportTicket, MISFile, MappingConfiguration,
     HealthRateMaster, SpecialRateRequest, MISFailedRow,
-    RateOverlapScan, RateOverlapPair,
+    RateOverlapScan, RateOverlapPair, MissingMakeModelManualResolution,
 )
 
 # Import our Gemini AI utility and background logic engines
@@ -4099,6 +4099,16 @@ def _annotate_make_model_resolution(groups):
     Uses build_make_model_cluster_index rather than build_make_model_lookup:
     same match rule, but the master side is tokenized once for the whole request
     instead of once per distinct search term.
+
+    Also OR's in MissingMakeModelManualResolution: a value can be fixed by
+    editing MakeModelMaster somewhere other than this page's own Add to
+    Master action (the Make/Model Master dashboard directly, or the bulk
+    Rate Master importer), and the live re-check above might not pick that up
+    -- e.g. the edit used different wording than the MIS value shares 2+
+    words with. A manual mark covers that gap without requiring a cluster
+    write through here. g["resolved_manual"]/g["resolved_live"] let the
+    template tell the two apart (an "Unresolve" action only makes sense on a
+    purely-manual mark).
     """
     from .mapping_engine import build_make_model_cluster_index, resolve_make_model_with_index
 
@@ -4106,6 +4116,11 @@ def _annotate_make_model_resolution(groups):
         MakeModelMaster.objects.all(), "make_model_name", "make_model_cluster"
     )
     scope = _active_vehicle_make_scope()
+    manual = set(
+        MissingMakeModelManualResolution.objects.values_list(
+            "value", "product", "sub_product", "insurer", "vehicle_class"
+        )
+    )
     for g in groups:
         global_names = resolve_make_model_with_index(index, g["value"])
         bucket = scope.get(
@@ -4123,7 +4138,14 @@ def _annotate_make_model_resolution(groups):
             else:
                 scoped_makes = bucket["wildcard"] | bucket["by_class"].get(class_norm, set())
         names = sorted(name for name in global_names if name in scoped_makes)
-        g["resolved"] = bool(names)
+
+        group_key = (
+            g["value"], g["product"].strip().lower(), g["sub_product"].strip().lower(),
+            g["insurer"].strip().lower(), g["vehicle_class"].strip().lower(),
+        )
+        g["resolved_live"] = bool(names)
+        g["resolved_manual"] = group_key in manual
+        g["resolved"] = g["resolved_live"] or g["resolved_manual"]
         g["resolved_names"] = names
         # A generic make/model legitimately matches dozens of clusters (a real
         # "yamaha alpha" hits 45+), which would swamp the table cell. Same 5-name
@@ -4131,6 +4153,13 @@ def _annotate_make_model_resolution(groups):
         # the export still carries the full list.
         g["resolved_preview"] = names[:MISSING_MM_RESOLVED_PREVIEW]
         g["resolved_extra"] = max(0, len(names) - MISSING_MM_RESOLVED_PREVIEW)
+        # Carried on each row's bulk-select checkbox so the bulk actions know
+        # exactly which group a checked box refers to -- see
+        # bulk_add_missing_make_model_to_master / bulk_mark_missing_make_model_resolved.
+        g["group_key_json"] = json.dumps({
+            "value": g["value"], "product": g["product"], "sub_product": g["sub_product"],
+            "insurer": g["insurer"], "vehicle_class": g["vehicle_class"],
+        })
     return groups
 
 
@@ -4256,6 +4285,12 @@ def export_missing_make_model_xlsx(request):
     ])
 
     for g in rows:
+        if g["resolved_names"]:
+            resolved_by = ", ".join(g["resolved_names"])
+        elif g["resolved_manual"]:
+            resolved_by = "(marked resolved manually)"
+        else:
+            resolved_by = ""
         ws.append([
             "Resolved" if g["resolved"] else "Still missing",
             g["make"], g["model"], g["value"], g["vehicle_class"], g["product"],
@@ -4263,7 +4298,7 @@ def export_missing_make_model_xlsx(request):
             g["policy_count"], g["file_count"],
             g["first_seen"].strftime("%d %b %Y") if g["first_seen"] else "",
             g["last_seen"].strftime("%d %b %Y") if g["last_seen"] else "",
-            ", ".join(g["resolved_names"]),
+            resolved_by,
         ])
 
     response = HttpResponse(
@@ -4427,6 +4462,281 @@ def add_missing_make_model_to_master(request):
         + ", and new MIS uploads will map these policies. To undo, edit the cluster "
         "on the Make/Model Master page.",
     )
+    return _missing_make_model_redirect(request)
+
+
+@transaction.atomic
+def bulk_add_missing_make_model_to_master(request):
+    """
+    Bulk version of add_missing_make_model_to_master: appends every selected
+    row's failing value into ONE master row (existing or new) in a single
+    request -- for when several distinct Missing Make/Model rows genuinely
+    belong to the same vehicle group (e.g. many Activa variants all really
+    are 'two_wheeler_all'). POST-only; a GET just bounces back to the page.
+    """
+    if request.method != "POST":
+        return _missing_make_model_redirect(request)
+
+    from .mapping_engine import build_make_model_cluster_index, resolve_make_model_with_index
+
+    values = []
+    seen = set()
+    for raw in request.POST.getlist("group_keys"):
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        value = " ".join(str(parsed.get("value") or "").split())
+        if not value or value.lower() in seen:
+            continue
+        seen.add(value.lower())
+        values.append(value)
+
+    if not values:
+        messages.error(request, "Nothing was added: no rows were selected.")
+        return _missing_make_model_redirect(request)
+
+    target = (request.POST.get("target") or "").strip()
+    created = False
+
+    if target == "existing":
+        # select_for_update: the cluster append is a read-modify-write on a
+        # TextField, so two concurrent bulk adds would otherwise clobber
+        # each other -- locked once and appended to in a loop below.
+        master = (
+            MakeModelMaster.objects.select_for_update()
+            .filter(id=(request.POST.get("master_id") or "").strip())
+            .first()
+        )
+        if master is None:
+            messages.error(request, "Nothing was added: that Make/Model Master row no longer exists.")
+            return _missing_make_model_redirect(request)
+    elif target == "new":
+        name = (request.POST.get("new_name") or "").strip()
+        if not name:
+            messages.error(request, "Nothing was added: give the new Make/Model Master row a name.")
+            return _missing_make_model_redirect(request)
+        if len(name) > 150:
+            messages.error(request, "Nothing was added: that name is longer than 150 characters.")
+            return _missing_make_model_redirect(request)
+        if MakeModelMaster.objects.filter(make_model_name__iexact=name).exists():
+            messages.error(
+                request,
+                f"Nothing was added: '{name}' already exists - pick it from the dropdown instead.",
+            )
+            return _missing_make_model_redirect(request)
+        master = MakeModelMaster.objects.create(make_model_name=name)
+        created = True
+    else:
+        messages.error(request, "Nothing was added: pick an existing master row or name a new one.")
+        return _missing_make_model_redirect(request)
+
+    force = request.POST.get("force") == "1"
+    # Built once up front from the master table's state before this request's
+    # own appends below -- same "already resolves elsewhere" Double Rate Risk
+    # guard add_missing_make_model_to_master applies per value, just batched.
+    index = build_make_model_cluster_index(
+        MakeModelMaster.objects.all(), "make_model_name", "make_model_cluster"
+    )
+
+    added, skipped, no_op_count, had_comma = [], [], 0, False
+    for raw_value in values:
+        value = raw_value[:MISSING_MM_MAX_VALUE_LEN]
+        if "," in value:
+            had_comma = True
+            value = " ".join(value.replace(",", " ").split())
+        stored_value = value.upper()
+
+        already = resolve_make_model_with_index(index, value)
+        if already and not force:
+            skipped.append(stored_value)
+            continue
+        if _append_make_model_cluster_item(master, stored_value):
+            added.append(stored_value)
+        else:
+            no_op_count += 1
+
+    if added:
+        master.save(update_fields=None if created else ["make_model_cluster"])
+
+    AuditLog.objects.create(
+        user=request.user,
+        action="MAKE MODEL CLUSTER BULK ADD",
+        details=(
+            f"Added {len(added)} value(s) to MakeModelMaster '{master.make_model_name}' "
+            f"(id {master.id}) from the Missing Make/Model page: "
+            f"{', '.join(added[:10])}" + (f" (+{len(added) - 10} more)" if len(added) > 10 else "") + "."
+            + (" Created this master row." if created else "")
+            + (f" {no_op_count} value(s) were already present." if no_op_count else "")
+            + (f" {len(skipped)} value(s) skipped (already match another cluster): "
+               f"{', '.join(skipped[:10])}." if skipped else "")
+            + (" Comma(s) in submitted value(s) were replaced with spaces." if had_comma else "")
+        ),
+    )
+    cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
+
+    if added:
+        messages.success(
+            request,
+            f"{len(added)} value(s) added to '{master.make_model_name}'. They now resolve, and new "
+            f"MIS uploads will map these policies."
+            + (f" {no_op_count} were already there." if no_op_count else "")
+            + (f" {len(skipped)} skipped - already match another cluster; re-select them and tick "
+               f"\"Add anyway\" to include them." if skipped else ""),
+        )
+    elif skipped:
+        messages.warning(
+            request,
+            f"Nothing was added - all {len(skipped)} selected value(s) already match another cluster. "
+            f"Re-select them and tick \"Add anyway\" if that is intended.",
+        )
+    else:
+        messages.info(request, f"Nothing to add - all selected values are already in '{master.make_model_name}'.")
+    return _missing_make_model_redirect(request)
+
+
+def _missing_make_model_manual_key_from_post(data, prefix=""):
+    """
+    (value, product, sub_product, insurer, vehicle_class) parsed off a dict,
+    lowercased/stripped to match _missing_make_model_groups' own group key
+    exactly -- so equality lookups against MissingMakeModelManualResolution
+    and against a live group's key both just work.
+
+    `prefix` is needed for the single-row mark/unmark forms: they share the
+    page's main <form>, which already carries top-level "insurer" / "product"
+    fields for filter preservation on redirect (see MISSING_MM_FILTER_KEYS),
+    so the per-row fields these actions read are named mm_mark_* in the
+    template to avoid colliding with those. The bulk action instead reads a
+    self-contained JSON blob per selected row (no collision risk), so it
+    calls this with prefix="" against the parsed dict's own plain keys.
+    """
+    def get(key):
+        return data.get(f"{prefix}{key}") or ""
+
+    return (
+        " ".join(get("value").split()).lower(),
+        get("product").strip().lower(),
+        get("sub_product").strip().lower(),
+        get("insurer").strip().lower(),
+        get("vehicle_class").strip().lower(),
+    )
+
+
+def mark_missing_make_model_resolved(request):
+    """
+    Manual override: mark one Missing Make/Model row Resolved without writing
+    to MakeModelMaster through this page -- for a value already fixed by
+    editing the Make/Model Master dashboard directly, or through the bulk
+    Rate Master importer, that the live re-check hasn't (yet) picked up.
+    POST-only; a GET just bounces back to the page.
+    """
+    if request.method != "POST":
+        return _missing_make_model_redirect(request)
+
+    value, product, sub_product, insurer, vehicle_class = _missing_make_model_manual_key_from_post(request.POST, prefix="mm_mark_")
+    if not value:
+        messages.error(request, "Nothing was marked resolved: no value was submitted.")
+        return _missing_make_model_redirect(request)
+
+    _, created = MissingMakeModelManualResolution.objects.get_or_create(
+        value=value, product=product, sub_product=sub_product,
+        insurer=insurer, vehicle_class=vehicle_class,
+        defaults={"resolved_by": request.user},
+    )
+
+    if created:
+        try:
+            policy_count = int(request.POST.get("policy_count") or 0)
+        except ValueError:
+            policy_count = 0
+        AuditLog.objects.create(
+            user=request.user,
+            action="MAKE MODEL MANUALLY RESOLVED",
+            details=(
+                f"Marked '{value}' (product={product or '-'}, sub_product={sub_product or '-'}, "
+                f"insurer={insurer or '-'}, vehicle_class={vehicle_class or '-'}) Resolved on the "
+                f"Missing Make/Model page without a cluster write."
+                + (f" {policy_count} affected MIS policy row(s) reported by the page." if policy_count else "")
+            ),
+        )
+        messages.success(request, f"'{value}' marked Resolved.")
+    else:
+        messages.info(request, f"'{value}' was already marked Resolved.")
+    return _missing_make_model_redirect(request)
+
+
+def unmark_missing_make_model_resolved(request):
+    """Undo a manual Resolved mark. POST-only; a GET just bounces back to the page."""
+    if request.method != "POST":
+        return _missing_make_model_redirect(request)
+
+    value, product, sub_product, insurer, vehicle_class = _missing_make_model_manual_key_from_post(request.POST, prefix="mm_mark_")
+    deleted, _ = MissingMakeModelManualResolution.objects.filter(
+        value=value, product=product, sub_product=sub_product,
+        insurer=insurer, vehicle_class=vehicle_class,
+    ).delete()
+
+    if deleted:
+        AuditLog.objects.create(
+            user=request.user,
+            action="MAKE MODEL MANUAL RESOLUTION UNDONE",
+            details=f"Un-marked '{value}' as Resolved on the Missing Make/Model page.",
+        )
+        messages.success(request, f"'{value}' is no longer marked Resolved.")
+    else:
+        messages.info(request, f"'{value}' was not manually marked Resolved.")
+    return _missing_make_model_redirect(request)
+
+
+@transaction.atomic
+def bulk_mark_missing_make_model_resolved(request):
+    """Bulk version of mark_missing_make_model_resolved for several selected rows at once."""
+    if request.method != "POST":
+        return _missing_make_model_redirect(request)
+
+    keys = []
+    seen = set()
+    for raw in request.POST.getlist("group_keys"):
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        key = _missing_make_model_manual_key_from_post(parsed)
+        if key[0] and key not in seen:
+            seen.add(key)
+            keys.append(key)
+
+    if not keys:
+        messages.error(request, "Nothing was marked resolved: no rows were selected.")
+        return _missing_make_model_redirect(request)
+
+    created_count = 0
+    for value, product, sub_product, insurer, vehicle_class in keys:
+        _, created = MissingMakeModelManualResolution.objects.get_or_create(
+            value=value, product=product, sub_product=sub_product,
+            insurer=insurer, vehicle_class=vehicle_class,
+            defaults={"resolved_by": request.user},
+        )
+        if created:
+            created_count += 1
+
+    if created_count:
+        AuditLog.objects.create(
+            user=request.user,
+            action="MAKE MODEL MANUALLY RESOLVED",
+            details=(
+                f"Marked {created_count} Missing Make/Model row(s) Resolved in bulk without a cluster "
+                f"write: {', '.join(k[0] for k in keys[:10])}"
+                + (f" (+{len(keys) - 10} more)" if len(keys) > 10 else "") + "."
+            ),
+        )
+        messages.success(
+            request,
+            f"{created_count} row(s) marked Resolved."
+            + (f" {len(keys) - created_count} were already marked." if len(keys) > created_count else ""),
+        )
+    else:
+        messages.info(request, "All selected rows were already marked Resolved.")
     return _missing_make_model_redirect(request)
 
 
