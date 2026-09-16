@@ -193,7 +193,6 @@
 <input type="hidden" name="date_from" value="{{ selected.date_from }}">
 <input type="hidden" name="date_to" value="{{ selected.date_to }}">
 <input type="hidden" name="page" value="{{ page_obj.number }}">
-<input type="hidden" name="make_model_value" id="mmValueInput">
 <input type="hidden" name="policy_count" id="mmCountInput">
 <!-- Distinct mm_mark_* names: this form already carries top-level "insurer" /
      "product" fields for filter preservation on redirect, so the per-row
@@ -364,9 +363,17 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body p-4">
+                <div class="mb-3">
+                    <label class="text-overline">Failing value</label>
+                    <input type="text" name="make_model_value" id="mmValueInput" class="form-control-premium" maxlength="500">
+                    <div class="mm-sub" id="mmValueEditHint">
+                        This is what gets written into the cluster(s) — fix it here first if the source MIS text
+                        is malformed (e.g. a duplicated make/model), then save.
+                    </div>
+                    <div class="mm-sub" id="mmBulkValueSummary" hidden></div>
+                </div>
                 <p class="mb-3" style="font-size: 13px; color: #475569;">
-                    Adding <span class="mm-value" id="mmValueLabel"></span>
-                    <span class="text-muted">— affects <strong id="mmCountLabel">0</strong> policy row(s).</span>
+                    Affects <strong id="mmCountLabel">0</strong> policy row(s).
                 </p>
 
                 <div class="mb-3">
@@ -374,7 +381,7 @@
                     <div class="form-check">
                         <input class="form-check-input" type="radio" name="target" value="existing" id="mmTargetExisting" checked>
                         <label class="form-check-label" for="mmTargetExisting" style="font-size: 13px;">
-                            Add to an existing Make/Model Master row
+                            Add to existing Make/Model Master row(s)
                         </label>
                     </div>
                     <div class="form-check">
@@ -386,13 +393,13 @@
                 </div>
 
                 <div class="mb-3" id="mmExistingWrap">
-                    <label class="text-overline">Make/Model Master Row</label>
-                    <select name="master_id" id="mmMasterSelect" class="form-select-premium modal-select2">
+                    <label class="text-overline">Make/Model Master Row(s)</label>
+                    <select name="master_id" id="mmMasterSelect" class="form-select-premium modal-select2" multiple>
                         {% for m in master_rows %}
                             <option value="{{ m.id }}">{{ m.make_model_name }}</option>
                         {% endfor %}
                     </select>
-                    <div class="mm-sub">The value is appended to this row's cluster; existing entries are untouched.</div>
+                    <div class="mm-sub">Pick one or more — the value is appended to every selected row's cluster; existing entries are untouched.</div>
                 </div>
 
                 <div class="mb-3" id="mmNewWrap" hidden>
@@ -438,6 +445,13 @@
         var btn = event.relatedTarget;
         if (!btn) return;
         var submitBtn = document.getElementById('mmSubmitBtn');
+        var valueInput = document.getElementById('mmValueInput');
+        var editHint = document.getElementById('mmValueEditHint');
+        var bulkSummary = document.getElementById('mmBulkValueSummary');
+
+        // Stale picks from a previous open (a different row, or a previous
+        // bulk selection) must not silently carry over into this one.
+        $('#mmMasterSelect').val(null).trigger('change');
 
         if (btn.getAttribute('data-bulk') === '1') {
             var checked = Array.from(document.querySelectorAll('.mm-row-checkbox:checked'));
@@ -449,9 +463,16 @@
             var count = checked.reduce(function (sum, cb) { return sum + (parseInt(cb.getAttribute('data-count'), 10) || 0); }, 0);
             var anyResolved = checked.some(function (cb) { return cb.getAttribute('data-resolved-live') === '1'; });
 
-            document.getElementById('mmValueInput').value = '';
+            // Bulk covers several distinct failing values at once, so there's
+            // no single string here to edit -- each is added exactly as it
+            // was matched. Editing a bulk selection is single-row only.
+            valueInput.value = '';
+            valueInput.hidden = true;
+            valueInput.disabled = true;
+            editHint.hidden = true;
+            bulkSummary.hidden = false;
+            bulkSummary.textContent = checked.length + ' selected value(s) will be added as matched (not editable in bulk).';
             document.getElementById('mmCountInput').value = count;
-            document.getElementById('mmValueLabel').textContent = checked.length + ' selected value(s)';
             document.getElementById('mmCountLabel').textContent = count;
             document.getElementById('mmForceWrap').hidden = !anyResolved;
             document.getElementById('mmForce').checked = false;
@@ -462,9 +483,12 @@
             var singleCount = btn.getAttribute('data-count') || '0';
             var resolved = btn.getAttribute('data-resolved') === '1';
 
-            document.getElementById('mmValueInput').value = value;
+            valueInput.value = value;
+            valueInput.hidden = false;
+            valueInput.disabled = false;
+            editHint.hidden = false;
+            bulkSummary.hidden = true;
             document.getElementById('mmCountInput').value = singleCount;
-            document.getElementById('mmValueLabel').textContent = value;
             document.getElementById('mmCountLabel').textContent = singleCount;
             // The server refuses an already-resolving value unless force is set —
             // only offer the override on the rows where it can actually apply.

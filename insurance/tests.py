@@ -1666,6 +1666,47 @@ class AddMissingMakeModelToMasterTests(TestCase):
         self.master.refresh_from_db()
         self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER")
 
+    def test_a_value_can_be_added_to_multiple_existing_masters_at_once(self):
+        from insurance.models import MakeModelMaster
+        other = MakeModelMaster.objects.create(make_model_name="private_car_all", make_model_cluster="TATA NEXON")
+        self._post(master_id=[str(self.master.id), str(other.id)])
+        self.master.refresh_from_db()
+        other.refresh_from_db()
+        self.assertIn("YAMAHA ALPHA", self.master.make_model_cluster)
+        self.assertIn("YAMAHA ALPHA", other.make_model_cluster)
+
+    def test_multi_master_add_writes_one_audit_log_entry_naming_both(self):
+        from insurance.models import AuditLog, MakeModelMaster
+        other = MakeModelMaster.objects.create(make_model_name="private_car_all", make_model_cluster="TATA NEXON")
+        self._post(master_id=[str(self.master.id), str(other.id)])
+        entry = AuditLog.objects.get(action="MAKE MODEL CLUSTER ADD")
+        self.assertIn("two_wheeler_all", entry.details)
+        self.assertIn("private_car_all", entry.details)
+
+    def test_multi_master_add_skips_a_row_where_it_is_already_present(self):
+        from insurance.models import MakeModelMaster
+        self.master.make_model_cluster = "HONDA ACTIVA, YAMAHA ALPHA"
+        self.master.save()
+        other = MakeModelMaster.objects.create(make_model_name="private_car_all", make_model_cluster="TATA NEXON")
+        self._post(force="1", master_id=[str(self.master.id), str(other.id)])
+        self.master.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, YAMAHA ALPHA")
+        self.assertIn("YAMAHA ALPHA", other.make_model_cluster)
+
+    def test_a_value_already_in_every_selected_master_is_a_no_op(self):
+        from insurance.models import AuditLog, MakeModelMaster
+        self.master.make_model_cluster = "HONDA ACTIVA, YAMAHA ALPHA"
+        self.master.save()
+        other = MakeModelMaster.objects.create(make_model_name="private_car_all", make_model_cluster="YAMAHA ALPHA")
+        self._post(force="1", master_id=[str(self.master.id), str(other.id)])
+        self.assertFalse(AuditLog.objects.filter(action="MAKE MODEL CLUSTER ADD").exists())
+
+    def test_an_id_that_matches_nothing_among_several_is_silently_dropped(self):
+        self._post(master_id=[str(self.master.id), "999999"])
+        self.master.refresh_from_db()
+        self.assertIn("YAMAHA ALPHA", self.master.make_model_cluster)
+
     def test_an_unknown_target_is_rejected(self):
         self._post(target="")
         self.master.refresh_from_db()
@@ -1790,6 +1831,18 @@ class BulkMissingMakeModelActionsTests(TestCase):
         })
         created = MakeModelMaster.objects.get(make_model_name="private_car_ev")
         self.assertEqual(created.make_model_cluster, "TATA NEXON EV")
+
+    def test_bulk_add_to_multiple_existing_masters_at_once(self):
+        from insurance.models import MakeModelMaster
+        other = MakeModelMaster.objects.create(make_model_name="private_car_all", make_model_cluster="TATA NEXON")
+        self.client.post(self.add_url, {
+            "group_keys": [self._key("yamaha alpha")],
+            "target": "existing", "master_id": [str(self.master.id), str(other.id)],
+        })
+        self.master.refresh_from_db()
+        other.refresh_from_db()
+        self.assertIn("YAMAHA ALPHA", self.master.make_model_cluster)
+        self.assertIn("YAMAHA ALPHA", other.make_model_cluster)
 
     def test_bulk_add_skips_a_value_that_already_resolves_elsewhere_without_force(self):
         from insurance.models import MakeModelMaster

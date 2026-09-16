@@ -4390,14 +4390,17 @@ def add_missing_make_model_to_master(request):
 
     if target == "existing":
         # select_for_update: the cluster append is a read-modify-write on a
-        # TextField, so two concurrent adds would otherwise clobber each other.
-        master = (
-            MakeModelMaster.objects.select_for_update()
-            .filter(id=(request.POST.get("master_id") or "").strip())
-            .first()
+        # TextField, so two concurrent adds would otherwise clobber each
+        # other. Multi-select: the same value can go into several clusters
+        # in one request (e.g. it genuinely belongs to more than one
+        # vehicle group), ordered so the audit log/success message read
+        # predictably rather than in whatever order the DB returns them.
+        ids = [i.strip() for i in request.POST.getlist("master_id") if i.strip()]
+        masters = list(
+            MakeModelMaster.objects.select_for_update().filter(id__in=ids).order_by("make_model_name")
         )
-        if master is None:
-            messages.error(request, "Nothing was added: that Make/Model Master row no longer exists.")
+        if not masters:
+            messages.error(request, "Nothing was added: pick at least one Make/Model Master row.")
             return _missing_make_model_redirect(request)
     elif target == "new":
         name = (request.POST.get("new_name") or "").strip()
@@ -4415,7 +4418,7 @@ def add_missing_make_model_to_master(request):
                 f"Nothing was added: '{name}' already exists - pick it from the dropdown instead.",
             )
             return _missing_make_model_redirect(request)
-        master = MakeModelMaster.objects.create(make_model_name=name)
+        masters = [MakeModelMaster.objects.create(make_model_name=name)]
         created = True
     else:
         messages.error(request, "Nothing was added: pick an existing master row or name a new one.")
@@ -4425,30 +4428,41 @@ def add_missing_make_model_to_master(request):
     # casing provably can't change matching -- which makes this purely a
     # legibility choice, and importer-sourced clusters all read as upper case.
     stored_value = value.upper()
-    changed = _append_make_model_cluster_item(master, stored_value)
-    if not changed and not created:
-        messages.info(
-            request,
-            f"'{stored_value}' is already in '{master.make_model_name}' - nothing to change.",
+    changed_masters, unchanged_masters = [], []
+    for master in masters:
+        # created is only ever True for the single-row "new" target, so this
+        # is never ambiguous about which master it refers to.
+        if _append_make_model_cluster_item(master, stored_value):
+            master.save(update_fields=None if created else ["make_model_cluster"])
+            changed_masters.append(master)
+        else:
+            unchanged_masters.append(master)
+
+    if not changed_masters:
+        where = (
+            "every selected row" if len(unchanged_masters) > 1
+            else f"'{unchanged_masters[0].make_model_name}'"
         )
+        messages.info(request, f"'{stored_value}' is already in {where} - nothing to change.")
         return _missing_make_model_redirect(request)
-    master.save(update_fields=None if created else ["make_model_cluster"])
 
     try:
         policy_count = int(request.POST.get("policy_count") or 0)
     except ValueError:
         policy_count = 0
 
+    names = ", ".join(f"'{m.make_model_name}'" for m in changed_masters)
     AuditLog.objects.create(
         user=request.user,
         action="MAKE MODEL CLUSTER ADD",
         details=(
-            f"Added '{stored_value}' to MakeModelMaster '{master.make_model_name}' "
-            f"(id {master.id}) from the Missing Make/Model page."
+            f"Added '{stored_value}' to MakeModelMaster {names} "
+            f"(id(s) {', '.join(str(m.id) for m in changed_masters)}) from the Missing Make/Model page."
             + (" Created this master row." if created else "")
             + (f" {policy_count} affected MIS policy row(s) reported by the page." if policy_count else "")
             + (" Comma(s) in the submitted value were replaced with spaces." if had_comma else "")
             + (" Added despite already matching another cluster (forced)." if already else "")
+            + (f" Already present in {len(unchanged_masters)} other selected row(s)." if unchanged_masters else "")
         ),
     )
     # Mirrors api_upload_chunk: every write to these master tables busts the key
@@ -4457,9 +4471,9 @@ def add_missing_make_model_to_master(request):
 
     messages.success(
         request,
-        f"'{stored_value}' added to '{master.make_model_name}'. It now resolves"
+        f"'{stored_value}' added to {names}. It now resolves"
         + (f" - {policy_count} historical failure(s) are marked Resolved" if policy_count else "")
-        + ", and new MIS uploads will map these policies. To undo, edit the cluster "
+        + ", and new MIS uploads will map these policies. To undo, edit the cluster(s) "
         "on the Make/Model Master page.",
     )
     return _missing_make_model_redirect(request)
@@ -4503,13 +4517,13 @@ def bulk_add_missing_make_model_to_master(request):
         # select_for_update: the cluster append is a read-modify-write on a
         # TextField, so two concurrent bulk adds would otherwise clobber
         # each other -- locked once and appended to in a loop below.
-        master = (
-            MakeModelMaster.objects.select_for_update()
-            .filter(id=(request.POST.get("master_id") or "").strip())
-            .first()
+        # Multi-select: every selected value goes into every selected master.
+        ids = [i.strip() for i in request.POST.getlist("master_id") if i.strip()]
+        masters = list(
+            MakeModelMaster.objects.select_for_update().filter(id__in=ids).order_by("make_model_name")
         )
-        if master is None:
-            messages.error(request, "Nothing was added: that Make/Model Master row no longer exists.")
+        if not masters:
+            messages.error(request, "Nothing was added: pick at least one Make/Model Master row.")
             return _missing_make_model_redirect(request)
     elif target == "new":
         name = (request.POST.get("new_name") or "").strip()
@@ -4525,7 +4539,7 @@ def bulk_add_missing_make_model_to_master(request):
                 f"Nothing was added: '{name}' already exists - pick it from the dropdown instead.",
             )
             return _missing_make_model_redirect(request)
-        master = MakeModelMaster.objects.create(make_model_name=name)
+        masters = [MakeModelMaster.objects.create(make_model_name=name)]
         created = True
     else:
         messages.error(request, "Nothing was added: pick an existing master row or name a new one.")
@@ -4540,6 +4554,7 @@ def bulk_add_missing_make_model_to_master(request):
     )
 
     added, skipped, no_op_count, had_comma = [], [], 0, False
+    touched_masters = set()
     for raw_value in values:
         value = raw_value[:MISSING_MM_MAX_VALUE_LEN]
         if "," in value:
@@ -4551,23 +4566,30 @@ def bulk_add_missing_make_model_to_master(request):
         if already and not force:
             skipped.append(stored_value)
             continue
-        if _append_make_model_cluster_item(master, stored_value):
+        value_added = False
+        for master in masters:
+            if _append_make_model_cluster_item(master, stored_value):
+                value_added = True
+                touched_masters.add(master.id)
+        if value_added:
             added.append(stored_value)
         else:
             no_op_count += 1
 
-    if added:
-        master.save(update_fields=None if created else ["make_model_cluster"])
+    for master in masters:
+        if master.id in touched_masters:
+            master.save(update_fields=None if created else ["make_model_cluster"])
 
+    master_names = ", ".join(f"'{m.make_model_name}'" for m in masters)
     AuditLog.objects.create(
         user=request.user,
         action="MAKE MODEL CLUSTER BULK ADD",
         details=(
-            f"Added {len(added)} value(s) to MakeModelMaster '{master.make_model_name}' "
-            f"(id {master.id}) from the Missing Make/Model page: "
+            f"Added {len(added)} value(s) to MakeModelMaster {master_names} "
+            f"from the Missing Make/Model page: "
             f"{', '.join(added[:10])}" + (f" (+{len(added) - 10} more)" if len(added) > 10 else "") + "."
             + (" Created this master row." if created else "")
-            + (f" {no_op_count} value(s) were already present." if no_op_count else "")
+            + (f" {no_op_count} value(s) were already present in every selected row." if no_op_count else "")
             + (f" {len(skipped)} value(s) skipped (already match another cluster): "
                f"{', '.join(skipped[:10])}." if skipped else "")
             + (" Comma(s) in submitted value(s) were replaced with spaces." if had_comma else "")
@@ -4578,7 +4600,7 @@ def bulk_add_missing_make_model_to_master(request):
     if added:
         messages.success(
             request,
-            f"{len(added)} value(s) added to '{master.make_model_name}'. They now resolve, and new "
+            f"{len(added)} value(s) added to {master_names}. They now resolve, and new "
             f"MIS uploads will map these policies."
             + (f" {no_op_count} were already there." if no_op_count else "")
             + (f" {len(skipped)} skipped - already match another cluster; re-select them and tick "
@@ -4591,7 +4613,7 @@ def bulk_add_missing_make_model_to_master(request):
             f"Re-select them and tick \"Add anyway\" if that is intended.",
         )
     else:
-        messages.info(request, f"Nothing to add - all selected values are already in '{master.make_model_name}'.")
+        messages.info(request, f"Nothing to add - all selected values are already in {master_names}.")
     return _missing_make_model_redirect(request)
 
 
