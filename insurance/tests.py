@@ -1280,16 +1280,75 @@ class MissingMakeModelAggregationTests(TestCase):
 class MissingMakeModelPageTests(MissingMakeModelAggregationTests):
     """The page itself: resolution status, filters, export."""
 
+    def _wire_active_rate(self, insurer, product, sub_product, make_name):
+        """
+        An ACTIVE, non-deleted Rate Master row that lists `make_name` in its
+        new_vehicle_makes cluster for (insurer, product, sub_product) -- Step 2
+        of RULE 5a's chain, and what _active_vehicle_make_scope reads.
+        """
+        from insurance.models import ProductMaster, RateMaster, SubProductMaster
+        product_obj, _ = ProductMaster.objects.get_or_create(name=product)
+        sub_product_obj, _ = SubProductMaster.objects.get_or_create(name=sub_product)
+        return RateMaster.objects.create(
+            insurance_company=insurer, product=product_obj, sub_product=sub_product_obj,
+            new_vehicle_makes=make_name, status="ACTIVE", is_deleted="NO",
+        )
+
     def test_a_value_already_in_a_cluster_is_marked_resolved(self):
         from insurance.models import MakeModelMaster
         self._fail("YAMAHA", "ALPHA")
         MakeModelMaster.objects.create(
             make_model_name="two_wheeler_all", make_model_cluster="HONDA ACTIVA, YAMAHA ALPHA"
         )
+        # Resolution requires an ACTIVE rate row for the SAME insurer/product/
+        # sub product to actually reference the matched master group (Step 2) --
+        # a bare Step-1 word-overlap match is not enough. See
+        # test_a_cluster_match_unused_by_this_insurer_is_not_resolved.
+        self._wire_active_rate("Acme General", "Two Wheeler", "Scooter", "two_wheeler_all")
         response = self.client.get(reverse("missing_make_model"), {"status": "all"})
         group = list(response.context["page_obj"])[0]
         self.assertTrue(group["resolved"])
         self.assertEqual(group["resolved_names"], ["two_wheeler_all"])
+
+    def test_a_cluster_match_unused_by_this_insurer_is_not_resolved(self):
+        # Reported live-site bug: a Liberty / Private Car / SAOD failure fuzzy-
+        # matched (Step 1, word-overlap only) a MakeModelMaster group that
+        # Liberty's own grids never reference in new_vehicle_makes -- only some
+        # OTHER insurer's grid used it. That must not count as Resolved, since
+        # reprocessing wouldn't actually map the policy; it would just trade
+        # this failure for "resolved to master group(s) [...] but no candidate
+        # rate row".
+        self._fail("HYUNDAI", "ER/SX 1.2 CNG MT-SUV", product="Private Car",
+                    sub_product="SAOD", insurer="Liberty General")
+        from insurance.models import MakeModelMaster
+        MakeModelMaster.objects.create(
+            make_model_name="royal_sep26_hyundai_group",
+            make_model_cluster="HYUNDAI ER/SX 1.2 CNG MT-SUV",
+        )
+        # Wired to a different insurer entirely -- Liberty's own grid never
+        # lists this master group.
+        self._wire_active_rate("Royal Sundaram", "Private Car", "SAOD", "royal_sep26_hyundai_group")
+
+        response = self.client.get(reverse("missing_make_model"), {"status": "all"})
+        group = list(response.context["page_obj"])[0]
+        self.assertFalse(group["resolved"])
+        self.assertEqual(group["resolved_names"], [])
+
+    def test_a_cluster_match_unused_by_this_product_is_not_resolved(self):
+        # Same scoping bug, but split on product/sub product instead of
+        # insurer: the master group is wired for this insurer under a
+        # different product, so it still doesn't fix THIS group.
+        self._fail("HYUNDAI", "ER/SX 1.2 CNG MT-SUV", product="Private Car",
+                    sub_product="SAOD", insurer="Liberty General")
+        from insurance.models import MakeModelMaster
+        MakeModelMaster.objects.create(
+            make_model_name="hyundai_group", make_model_cluster="HYUNDAI ER/SX 1.2 CNG MT-SUV"
+        )
+        self._wire_active_rate("Liberty General", "Private Car", "Comprehensive", "hyundai_group")
+
+        response = self.client.get(reverse("missing_make_model"), {"status": "all"})
+        group = list(response.context["page_obj"])[0]
+        self.assertFalse(group["resolved"])
 
     def test_default_status_filter_hides_resolved_rows(self):
         from insurance.models import MakeModelMaster
@@ -1298,6 +1357,7 @@ class MissingMakeModelPageTests(MissingMakeModelAggregationTests):
         MakeModelMaster.objects.create(
             make_model_name="two_wheeler_all", make_model_cluster="YAMAHA ALPHA"
         )
+        self._wire_active_rate("Acme General", "Two Wheeler", "Scooter", "two_wheeler_all")
         response = self.client.get(reverse("missing_make_model"))
         self.assertEqual(response.context["selected"]["status"], "missing")
         self.assertEqual([g["value"] for g in response.context["page_obj"]], ["tata nexon ev"])

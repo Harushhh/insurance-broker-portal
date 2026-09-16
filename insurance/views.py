@@ -4020,14 +4020,62 @@ def _missing_make_model_groups(date_from=None, date_to=None):
     return out
 
 
+def _active_vehicle_make_scope():
+    """
+    {(insurer, product, sub product) lowercased: set of lowercased
+    new_vehicle_makes cluster items} built from every ACTIVE, non-deleted
+    RateMaster row.
+
+    MakeModelMaster carries no insurer of its own -- the same cluster name can
+    be wired into one insurer's grids and not another's. This is Step 2 of
+    RULE 5a's two-step chain (mirrors check_resolved_cluster_match), re-run
+    here so _annotate_make_model_resolution below can tell a global Step-1
+    word-overlap match apart from one this specific insurer/product actually
+    uses.
+    """
+    scope = {}
+    rows = (
+        RateMaster.objects.filter(status="ACTIVE", is_deleted="NO")
+        .exclude(new_vehicle_makes__isnull=True)
+        .exclude(new_vehicle_makes="")
+        .values_list("insurance_company", "product__name", "sub_product__name", "new_vehicle_makes")
+        .iterator(chunk_size=2000)
+    )
+    for insurer, product, sub_product, cluster in rows:
+        key = (
+            (insurer or "").strip().lower(),
+            (product or "").strip().lower(),
+            (sub_product or "").strip().lower(),
+        )
+        items = scope.setdefault(key, set())
+        for item in cluster.split(","):
+            item = item.strip().lower()
+            if item:
+                items.add(item)
+    return scope
+
+
 def _annotate_make_model_resolution(groups):
     """
-    Mark which aggregated values now match a MakeModelMaster cluster.
+    Mark which aggregated values now match a MakeModelMaster cluster that the
+    group's OWN insurer + product + sub product actually uses.
 
     MISFailedRow is historical -- rows are only rewritten when their MIS file is
     reprocessed -- so adding a value to the master today changes nothing about
     yesterday's failed rows. Without this re-check against the LIVE master the
     page would be a write-only log that never shrinks as work gets done.
+
+    Scoped, not global: MakeModelMaster has no insurer column, so a value can
+    share 2+ words with SOME cluster entry that belongs to a master group no
+    Rate Master row for THIS insurer/product/sub product ever references (real
+    example: a Liberty / Private Car / SAOD failure resolving, word-overlap
+    only, to a master group used solely by a different insurer's grid).
+    Marking that "Resolved" would be a false positive -- reprocessing would not
+    map the policy, it would just trade this failure for the sibling "resolved
+    to master group(s) [...] but no candidate rate row" one. So resolution here
+    is Step 1 (build_make_model_cluster_index / resolve_make_model_with_index,
+    global) AND-ed with Step 2 (_active_vehicle_make_scope, scoped) -- the same
+    two-step chain RULE 5a itself runs, just re-run live against today's data.
 
     Uses build_make_model_cluster_index rather than build_make_model_lookup:
     same match rule, but the master side is tokenized once for the whole request
@@ -4038,8 +4086,14 @@ def _annotate_make_model_resolution(groups):
     index = build_make_model_cluster_index(
         MakeModelMaster.objects.all(), "make_model_name", "make_model_cluster"
     )
+    scope = _active_vehicle_make_scope()
     for g in groups:
-        names = sorted(resolve_make_model_with_index(index, g["value"]))
+        global_names = resolve_make_model_with_index(index, g["value"])
+        scoped_makes = scope.get(
+            (g["insurer"].strip().lower(), g["product"].strip().lower(), g["sub_product"].strip().lower()),
+            set(),
+        )
+        names = sorted(name for name in global_names if name in scoped_makes)
         g["resolved"] = bool(names)
         g["resolved_names"] = names
         # A generic make/model legitimately matches dozens of clusters (a real
