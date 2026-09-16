@@ -206,6 +206,7 @@
                         <th>Make</th>
                         <th>Model</th>
                         <th>Value The Engine Matched On</th>
+                        <th>Vehicle Class</th>
                         <th>Product</th>
                         <th>Insurer</th>
                         <th>Policies</th>
@@ -229,6 +230,7 @@
                             <td><strong>{{ g.make|default:"—" }}</strong></td>
                             <td>{{ g.model|default:"—" }}</td>
                             <td><span class="mm-value">{{ g.value }}</span></td>
+                            <td>{{ g.vehicle_class|default:"—" }}</td>
                             <td>
                                 {{ g.product|default:"—" }}
                                 {% if g.sub_product %}<div class="mm-sub">{{ g.sub_product }}</div>{% endif %}

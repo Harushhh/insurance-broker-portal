@@ -3868,6 +3868,7 @@ MISSING_MM_KEY_MODEL = "policy: model"
 MISSING_MM_KEY_PRODUCT = "policy: vehproduct"
 MISSING_MM_KEY_SUB_PRODUCT = "policy: sub product"
 MISSING_MM_KEY_INSURER = "policy: insurance company"
+MISSING_MM_KEY_VEHICLE_CLASS = "policy: vehicle class"
 
 # Longest value this page will write into a cluster. make_model_cluster is a
 # TextField so there's no hard limit -- this is a sanity bound against a pasted
@@ -3910,7 +3911,7 @@ def _missing_make_model_groups(date_from=None, date_to=None):
     """
     Every MIS policy row that failed RULE 5a because its "make + model" string
     matched no MakeModelMaster cluster entry, grouped into one entry per
-    distinct (failing value, product, sub product, insurer).
+    distinct (failing value, product, sub product, insurer, vehicle class).
 
     Mirrors _rate_master_grid_summary_qs's role for the Grid Summary tab, but
     the grouping can't be done in the database: product/sub-product live inside
@@ -3970,6 +3971,7 @@ def _missing_make_model_groups(date_from=None, date_to=None):
         product = p.get(MISSING_MM_KEY_PRODUCT, "")
         sub_product = p.get(MISSING_MM_KEY_SUB_PRODUCT, "")
         insurer = (insurer_col or p.get(MISSING_MM_KEY_INSURER, "") or "").strip()
+        vehicle_class = p.get(MISSING_MM_KEY_VEHICLE_CLASS, "")
 
         # Keyed on `value` (parsed from the reason), not on the payload's make
         # and model. `value` IS lower(make + " " + model) -- it's literally the
@@ -3978,13 +3980,19 @@ def _missing_make_model_groups(date_from=None, date_to=None):
         # lossy: _extract_failed_rows_from_df skips NaN cells entirely, so a
         # policy with a blank model has no 'Policy: model' key at all while the
         # engine still saw the make. Payload make/model are display-only.
-        key = (value, product.lower(), sub_product.lower(), insurer.lower())
+        #
+        # vehicle_class is in the key alongside product/sub_product for the same
+        # reason sub_product is: RULE 2b (vehicle class) narrows current_grid
+        # before RULE 5a runs, so whether a given MakeModelMaster group actually
+        # fixes this failure depends on it too -- see
+        # _active_vehicle_make_scope.
+        key = (value, product.lower(), sub_product.lower(), insurer.lower(), vehicle_class.lower())
         g = groups.get(key)
         if g is None:
             g = groups[key] = {
                 "value": value,
                 "make": "", "model": "",
-                "product": "", "sub_product": "", "insurer": "",
+                "product": "", "sub_product": "", "insurer": "", "vehicle_class": "",
                 "policy_count": 0,
                 "file_ids": set(),
                 "first_seen": uploaded_at,
@@ -3998,7 +4006,7 @@ def _missing_make_model_groups(date_from=None, date_to=None):
         # choice.
         for field, raw in (("make", make), ("model", model),
                            ("product", product), ("sub_product", sub_product),
-                           ("insurer", insurer)):
+                           ("insurer", insurer), ("vehicle_class", vehicle_class)):
             if not g[field] and raw:
                 g[field] = raw
         if uploaded_at and (not g["first_seen"] or uploaded_at < g["first_seen"]):
@@ -4022,36 +4030,46 @@ def _missing_make_model_groups(date_from=None, date_to=None):
 
 def _active_vehicle_make_scope():
     """
-    {(insurer, product, sub product) lowercased: set of lowercased
-    new_vehicle_makes cluster items} built from every ACTIVE, non-deleted
-    RateMaster row.
+    (insurer, product, sub product) lowercased -> {
+        "wildcard": lowercased new_vehicle_makes items from ACTIVE rows whose
+                    make_model_class is blank/NA,
+        "by_class": {vehicle class lowercased: lowercased new_vehicle_makes
+                     items} for rows with a specific class,
+    }
 
-    MakeModelMaster carries no insurer of its own -- the same cluster name can
-    be wired into one insurer's grids and not another's. This is Step 2 of
-    RULE 5a's two-step chain (mirrors check_resolved_cluster_match), re-run
-    here so _annotate_make_model_resolution below can tell a global Step-1
-    word-overlap match apart from one this specific insurer/product actually
-    uses.
+    MakeModelMaster carries no insurer or vehicle-class of its own -- the same
+    cluster name can be wired into one insurer/product's grids and not
+    another's, and RULE 2b narrows current_grid by vehicle class before RULE
+    5a runs. This is Steps 2b+2 of that chain (mirrors match_vehicle_class's
+    direct-match + NA-wildcard rule, then check_resolved_cluster_match),
+    re-run here so _annotate_make_model_resolution below can tell a global
+    Step-1 word-overlap match apart from one this specific insurer / product /
+    vehicle class actually uses.
     """
     scope = {}
     rows = (
         RateMaster.objects.filter(status="ACTIVE", is_deleted="NO")
         .exclude(new_vehicle_makes__isnull=True)
         .exclude(new_vehicle_makes="")
-        .values_list("insurance_company", "product__name", "sub_product__name", "new_vehicle_makes")
+        .values_list("insurance_company", "product__name", "sub_product__name",
+                     "make_model_class__name", "new_vehicle_makes")
         .iterator(chunk_size=2000)
     )
-    for insurer, product, sub_product, cluster in rows:
+    for insurer, product, sub_product, vehicle_class, cluster in rows:
         key = (
             (insurer or "").strip().lower(),
             (product or "").strip().lower(),
             (sub_product or "").strip().lower(),
         )
-        items = scope.setdefault(key, set())
-        for item in cluster.split(","):
-            item = item.strip().lower()
-            if item:
-                items.add(item)
+        bucket = scope.setdefault(key, {"wildcard": set(), "by_class": {}})
+        items = {item.strip().lower() for item in cluster.split(",") if item.strip()}
+        if not items:
+            continue
+        class_norm = (vehicle_class or "").strip().lower()
+        if not class_norm or class_norm == "na":
+            bucket["wildcard"].update(items)
+        else:
+            bucket["by_class"].setdefault(class_norm, set()).update(items)
     return scope
 
 
@@ -4065,17 +4083,18 @@ def _annotate_make_model_resolution(groups):
     yesterday's failed rows. Without this re-check against the LIVE master the
     page would be a write-only log that never shrinks as work gets done.
 
-    Scoped, not global: MakeModelMaster has no insurer column, so a value can
-    share 2+ words with SOME cluster entry that belongs to a master group no
-    Rate Master row for THIS insurer/product/sub product ever references (real
-    example: a Liberty / Private Car / SAOD failure resolving, word-overlap
-    only, to a master group used solely by a different insurer's grid).
-    Marking that "Resolved" would be a false positive -- reprocessing would not
-    map the policy, it would just trade this failure for the sibling "resolved
-    to master group(s) [...] but no candidate rate row" one. So resolution here
-    is Step 1 (build_make_model_cluster_index / resolve_make_model_with_index,
-    global) AND-ed with Step 2 (_active_vehicle_make_scope, scoped) -- the same
-    two-step chain RULE 5a itself runs, just re-run live against today's data.
+    Scoped, not global: MakeModelMaster has no insurer or vehicle-class column,
+    so a value can share 2+ words with SOME cluster entry that belongs to a
+    master group no Rate Master row for THIS insurer/product/sub
+    product/vehicle class ever references (real example: a Liberty / Private
+    Car / SAOD failure resolving, word-overlap only, to a master group used
+    solely by a different insurer's grid). Marking that "Resolved" would be a
+    false positive -- reprocessing would not map the policy, it would just
+    trade this failure for the sibling "resolved to master group(s) [...] but
+    no candidate rate row" one. So resolution here is Step 1
+    (build_make_model_cluster_index / resolve_make_model_with_index, global)
+    AND-ed with Steps 2b+2 (_active_vehicle_make_scope, scoped) -- the same
+    chain RULE 5a itself runs, just re-run live against today's data.
 
     Uses build_make_model_cluster_index rather than build_make_model_lookup:
     same match rule, but the master side is tokenized once for the whole request
@@ -4089,10 +4108,20 @@ def _annotate_make_model_resolution(groups):
     scope = _active_vehicle_make_scope()
     for g in groups:
         global_names = resolve_make_model_with_index(index, g["value"])
-        scoped_makes = scope.get(
-            (g["insurer"].strip().lower(), g["product"].strip().lower(), g["sub_product"].strip().lower()),
-            set(),
+        bucket = scope.get(
+            (g["insurer"].strip().lower(), g["product"].strip().lower(), g["sub_product"].strip().lower())
         )
+        if bucket is None:
+            scoped_makes = set()
+        else:
+            class_norm = g["vehicle_class"].strip().lower()
+            if not class_norm:
+                # Blank MIS vehicle class -- match_vehicle_class's
+                # mis_class_is_blank branch only lets NA-wildcard rows pass in
+                # this case, so only wildcard makes count here too.
+                scoped_makes = bucket["wildcard"]
+            else:
+                scoped_makes = bucket["wildcard"] | bucket["by_class"].get(class_norm, set())
         names = sorted(name for name in global_names if name in scoped_makes)
         g["resolved"] = bool(names)
         g["resolved_names"] = names
@@ -4221,14 +4250,16 @@ def export_missing_make_model_xlsx(request):
     ws = wb.active
     ws.title = "Missing Make Model"
     ws.append([
-        "STATUS", "MAKE", "MODEL", "FAILING VALUE", "PRODUCT", "SUB PRODUCT",
-        "INSURER", "POLICIES", "MIS FILES", "FIRST SEEN", "LAST SEEN", "RESOLVED BY",
+        "STATUS", "MAKE", "MODEL", "FAILING VALUE", "VEHICLE CLASS", "PRODUCT",
+        "SUB PRODUCT", "INSURER", "POLICIES", "MIS FILES", "FIRST SEEN", "LAST SEEN",
+        "RESOLVED BY",
     ])
 
     for g in rows:
         ws.append([
             "Resolved" if g["resolved"] else "Still missing",
-            g["make"], g["model"], g["value"], g["product"], g["sub_product"], g["insurer"],
+            g["make"], g["model"], g["value"], g["vehicle_class"], g["product"],
+            g["sub_product"], g["insurer"],
             g["policy_count"], g["file_count"],
             g["first_seen"].strftime("%d %b %Y") if g["first_seen"] else "",
             g["last_seen"].strftime("%d %b %Y") if g["last_seen"] else "",

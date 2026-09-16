@@ -1153,8 +1153,8 @@ class MissingMakeModelAggregationTests(TestCase):
         self._row_id = 0
 
     def _fail(self, make, model, product="Two Wheeler", sub_product="Scooter",
-              insurer="Acme General", reason=None, status_key="NO_MATCH", payload=None,
-              mis_file=None):
+              insurer="Acme General", vehicle_class="", reason=None, status_key="NO_MATCH",
+              payload=None, mis_file=None):
         """One MISFailedRow shaped the way mapping_engine writes them."""
         from insurance.models import MISFailedRow
         self._row_id += 1
@@ -1167,6 +1167,8 @@ class MissingMakeModelAggregationTests(TestCase):
                 "Policy: sub product": sub_product,
                 "Policy: insurance company": insurer,
             }
+            if vehicle_class:
+                payload["Policy: vehicle class"] = vehicle_class
         return MISFailedRow.objects.create(
             mis_file=mis_file or self.mis_file,
             row_id=self._row_id,
@@ -1225,6 +1227,14 @@ class MissingMakeModelAggregationTests(TestCase):
         self._fail("YAMAHA", "ALPHA", product="GCV", sub_product="4W")
         self.assertEqual(len(self._groups()), 2)
 
+    def test_distinct_vehicle_class_splits_the_group(self):
+        # Same reasoning as sub product: RULE 2b (vehicle class) narrows
+        # current_grid before RULE 5a runs, so whether a master group actually
+        # fixes this failure can depend on vehicle class too.
+        self._fail("YAMAHA", "ALPHA", vehicle_class="Bike")
+        self._fail("YAMAHA", "ALPHA", vehicle_class="Scooter")
+        self.assertEqual(len(self._groups()), 2)
+
     def test_blank_model_payload_key_is_tolerated(self):
         # _extract_failed_rows_from_df skips NaN cells entirely, so a policy
         # with no model has no 'Policy: model' key at all - while the engine
@@ -1280,18 +1290,24 @@ class MissingMakeModelAggregationTests(TestCase):
 class MissingMakeModelPageTests(MissingMakeModelAggregationTests):
     """The page itself: resolution status, filters, export."""
 
-    def _wire_active_rate(self, insurer, product, sub_product, make_name):
+    def _wire_active_rate(self, insurer, product, sub_product, make_name, vehicle_class=None):
         """
         An ACTIVE, non-deleted Rate Master row that lists `make_name` in its
         new_vehicle_makes cluster for (insurer, product, sub_product) -- Step 2
         of RULE 5a's chain, and what _active_vehicle_make_scope reads.
+        vehicle_class=None leaves make_model_class unset, i.e. RULE 2b's
+        NA-wildcard row (matches any MIS vehicle class).
         """
-        from insurance.models import ProductMaster, RateMaster, SubProductMaster
+        from insurance.models import MakeModelClassMaster, ProductMaster, RateMaster, SubProductMaster
         product_obj, _ = ProductMaster.objects.get_or_create(name=product)
         sub_product_obj, _ = SubProductMaster.objects.get_or_create(name=sub_product)
+        class_obj = None
+        if vehicle_class:
+            class_obj, _ = MakeModelClassMaster.objects.get_or_create(name=vehicle_class)
         return RateMaster.objects.create(
             insurance_company=insurer, product=product_obj, sub_product=sub_product_obj,
-            new_vehicle_makes=make_name, status="ACTIVE", is_deleted="NO",
+            make_model_class=class_obj, new_vehicle_makes=make_name,
+            status="ACTIVE", is_deleted="NO",
         )
 
     def test_a_value_already_in_a_cluster_is_marked_resolved(self):
@@ -1349,6 +1365,51 @@ class MissingMakeModelPageTests(MissingMakeModelAggregationTests):
         response = self.client.get(reverse("missing_make_model"), {"status": "all"})
         group = list(response.context["page_obj"])[0]
         self.assertFalse(group["resolved"])
+
+    def test_a_cluster_match_for_a_different_vehicle_class_is_not_resolved(self):
+        # Same scoping bug again, this time on RULE 2b's own dimension: the
+        # master group is wired for the right insurer/product/sub product, but
+        # under a DIFFERENT, specific vehicle class (not NA-wildcard) -- so it
+        # still doesn't fix a "Bike" failure.
+        self._fail("YAMAHA", "ALPHA", vehicle_class="Bike")
+        from insurance.models import MakeModelMaster
+        MakeModelMaster.objects.create(
+            make_model_name="two_wheeler_all", make_model_cluster="YAMAHA ALPHA"
+        )
+        self._wire_active_rate("Acme General", "Two Wheeler", "Scooter", "two_wheeler_all",
+                                vehicle_class="Scooter")
+
+        response = self.client.get(reverse("missing_make_model"), {"status": "all"})
+        group = list(response.context["page_obj"])[0]
+        self.assertFalse(group["resolved"])
+
+    def test_an_exact_vehicle_class_match_is_resolved(self):
+        self._fail("YAMAHA", "ALPHA", vehicle_class="Bike")
+        from insurance.models import MakeModelMaster
+        MakeModelMaster.objects.create(
+            make_model_name="two_wheeler_all", make_model_cluster="YAMAHA ALPHA"
+        )
+        self._wire_active_rate("Acme General", "Two Wheeler", "Scooter", "two_wheeler_all",
+                                vehicle_class="Bike")
+
+        response = self.client.get(reverse("missing_make_model"), {"status": "all"})
+        group = list(response.context["page_obj"])[0]
+        self.assertTrue(group["resolved"])
+
+    def test_a_na_wildcard_rate_row_resolves_any_vehicle_class(self):
+        # match_vehicle_class treats a blank/NA make_model_class as a wildcard
+        # that passes regardless of the MIS row's class -- _active_vehicle_
+        # make_scope must honour that too, not just an exact class match.
+        self._fail("YAMAHA", "ALPHA", vehicle_class="Bike")
+        from insurance.models import MakeModelMaster
+        MakeModelMaster.objects.create(
+            make_model_name="two_wheeler_all", make_model_cluster="YAMAHA ALPHA"
+        )
+        self._wire_active_rate("Acme General", "Two Wheeler", "Scooter", "two_wheeler_all")
+
+        response = self.client.get(reverse("missing_make_model"), {"status": "all"})
+        group = list(response.context["page_obj"])[0]
+        self.assertTrue(group["resolved"])
 
     def test_default_status_filter_hides_resolved_rows(self):
         from insurance.models import MakeModelMaster
