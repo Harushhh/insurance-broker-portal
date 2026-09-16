@@ -88,6 +88,7 @@ PAGE_GROUPS = [
     "Can_Upload_CSV",
     "Can_View_RTO_Dashboard",
     "Can_View_Make_Model_Dashboard",
+    "Can_View_Missing_Make_Model",
     "Can_View_Audit_Log",
     "Can_View_Grid_Management",
     "Can_View_Alias_Management",
@@ -2809,6 +2810,10 @@ def _split_payload_summary(payload):
     to the first few payload entries if none of the target fields are present
     (e.g. a Health row with no vehicle columns), so the summary is never blank
     while payload itself has data.
+
+    Substring matching is deliberate here and is why this can't share code with
+    _normalized_payload (used by the Missing Make/Model page), which needs an
+    exact normalized-key lookup of known columns.
     """
     items = [(k, v) for k, v in (payload or {}).items() if v not in (None, "")]
 
@@ -3842,6 +3847,503 @@ def export_grid_summary_xlsx(request):
     response["Content-Disposition"] = 'attachment; filename="grid_summary_export.xlsx"'
     wb.save(response)
     return response
+
+# -------------------------
+# MISSING MAKE/MODEL
+# -------------------------
+# The single most actionable slice of Rate Master Health: MIS policy rows that
+# failed RULE 5a because their "make + model" string matched NO MakeModelMaster
+# cluster entry at all. Every one of those is fixed by adding that value to a
+# master cluster -- unlike the sibling Rule 5a failure ("resolved to master
+# group(s) [...] but no candidate rate row lists that group"), which is a gap in
+# the rate grid, or the blank-make/model variant, which is a source-data
+# problem. Only the first is in scope here; see the reason prefix constant.
+
+MISSING_MAKE_MODEL_BATCH_SIZE = 50
+
+# Payload keys the aggregation reads, already normalized the way
+# _normalized_payload normalizes MISFailedRow.payload's own keys.
+MISSING_MM_KEY_MAKE = "policy: vehicle make"
+MISSING_MM_KEY_MODEL = "policy: model"
+MISSING_MM_KEY_PRODUCT = "policy: vehproduct"
+MISSING_MM_KEY_SUB_PRODUCT = "policy: sub product"
+MISSING_MM_KEY_INSURER = "policy: insurance company"
+
+# Longest value this page will write into a cluster. make_model_cluster is a
+# TextField so there's no hard limit -- this is a sanity bound against a pasted
+# essay reaching the master table through the Add to Master form.
+MISSING_MM_MAX_VALUE_LEN = 500
+
+# How many matching master group names a Resolved row lists before collapsing
+# to "+N more" — same preview length RULE 5a uses in its own reason text.
+MISSING_MM_RESOLVED_PREVIEW = 5
+
+MISSING_MM_FILTER_KEYS = ("insurer", "product", "status", "q", "date_from", "date_to", "page")
+
+
+def _normalized_payload(payload):
+    """
+    {stripped-lowercased header: stringified value} for one MISFailedRow.
+
+    MISFailedRow.payload's keys are the uploaded file's OWN header text --
+    mapping_engine._extract_failed_rows_from_df locates each column with
+    _find_column (case/whitespace-insensitive) but then keys the payload by the
+    original header. So a DB-level JSON lookup (payload__"Policy: vehproduct")
+    would silently miss every file whose header read "Policy: VehProduct", and
+    the grouping below has to happen in Python instead.
+
+    Matching is strip+lower EXACT compare, mirroring _find_column -- deliberately
+    not substring, or 'Policy: model' would collide with 'Policy: product name'
+    and 'Policy: plan name'. That is also why this can't share code with
+    _split_payload_summary, which matches key *fragments* on purpose so it can
+    pick "the most identifying field present" out of an unknown header set.
+    """
+    out = {}
+    for k, v in (payload or {}).items():
+        if v is None:
+            continue
+        out[str(k).strip().lower()] = str(v).strip()
+    return out
+
+
+def _missing_make_model_groups(date_from=None, date_to=None):
+    """
+    Every MIS policy row that failed RULE 5a because its "make + model" string
+    matched no MakeModelMaster cluster entry, grouped into one entry per
+    distinct (failing value, product, sub product, insurer).
+
+    Mirrors _rate_master_grid_summary_qs's role for the Grid Summary tab, but
+    the grouping can't be done in the database: product/sub-product live inside
+    MISFailedRow.payload under the source file's own header casing (see
+    _normalized_payload). Only the date filter is pushed down to SQL, since that
+    genuinely reduces how much JSON is dragged into Python; insurer / product /
+    search / status are group-level attributes applied by the caller, so doing
+    them here would mean a second pass just to build the filter dropdowns.
+
+    Returns a list of dicts sorted by policy_count desc, then value.
+    """
+    from .mapping_engine import (
+        MAKE_MODEL_UNRESOLVED_REASON_PREFIX,
+        MAKE_MODEL_UNRESOLVED_VALUE_PATTERN,
+        MAKE_MODEL_UNRESOLVED_VALUE_SUFFIX,
+    )
+
+    # Both halves are needed. The prefix anchors the rule (RULE 5a) and rules
+    # out the blank-make/model variant; the suffix is what separates this from
+    # the "resolved to master group(s) [...] but no candidate rate row" sibling,
+    # which opens with the same text and only diverges after the value. The
+    # regex below re-checks the pair per row, so this filter is a narrowing, not
+    # the correctness boundary.
+    qs = MISFailedRow.objects.filter(
+        status_key="NO_MATCH",
+        failure_reason__startswith=MAKE_MODEL_UNRESOLVED_REASON_PREFIX,
+        failure_reason__contains=MAKE_MODEL_UNRESOLVED_VALUE_SUFFIX,
+    )
+    if date_from:
+        qs = qs.filter(mis_file__created_at__date__gte=date_from)
+    if date_to:
+        qs = qs.filter(mis_file__created_at__date__lte=date_to)
+
+    # order_by("id") only so the "first non-blank wins" display rule below is
+    # deterministic across requests -- a group's displayed casing must not flip
+    # around between page loads. .values_list + .iterator keeps this to plain
+    # tuples and one chunk of rows in memory rather than 20k model instances.
+    rows = (
+        qs.order_by("id")
+        .values_list("failure_reason", "payload", "insurer",
+                     "mis_file__created_at", "mis_file_id")
+        .iterator(chunk_size=2000)
+    )
+
+    groups = {}
+    for failure_reason, payload, insurer_col, uploaded_at, mis_file_id in rows:
+        m = MAKE_MODEL_UNRESOLVED_VALUE_PATTERN.match(failure_reason or "")
+        if not m:
+            continue                      # defensive: the reason text drifted
+        value = " ".join((m.group(1) or "").split())
+        if not value:
+            continue                      # nothing actionable to add
+
+        p = _normalized_payload(payload)
+        make = p.get(MISSING_MM_KEY_MAKE, "")
+        model = p.get(MISSING_MM_KEY_MODEL, "")
+        product = p.get(MISSING_MM_KEY_PRODUCT, "")
+        sub_product = p.get(MISSING_MM_KEY_SUB_PRODUCT, "")
+        insurer = (insurer_col or p.get(MISSING_MM_KEY_INSURER, "") or "").strip()
+
+        # Keyed on `value` (parsed from the reason), not on the payload's make
+        # and model. `value` IS lower(make + " " + model) -- it's literally the
+        # string resolve_make was called with and failed on, and the string that
+        # has to go into the cluster to fix it. Rebuilding it from payload is
+        # lossy: _extract_failed_rows_from_df skips NaN cells entirely, so a
+        # policy with a blank model has no 'Policy: model' key at all while the
+        # engine still saw the make. Payload make/model are display-only.
+        key = (value, product.lower(), sub_product.lower(), insurer.lower())
+        g = groups.get(key)
+        if g is None:
+            g = groups[key] = {
+                "value": value,
+                "make": "", "model": "",
+                "product": "", "sub_product": "", "insurer": "",
+                "policy_count": 0,
+                "file_ids": set(),
+                "first_seen": uploaded_at,
+                "last_seen": uploaded_at,
+            }
+        g["policy_count"] += 1
+        g["file_ids"].add(mis_file_id)
+        # First non-blank original-cased value wins for every display field:
+        # rows in a group can disagree on casing, and on whether a field was
+        # present at all, so "first non-blank, oldest row first" is the stable
+        # choice.
+        for field, raw in (("make", make), ("model", model),
+                           ("product", product), ("sub_product", sub_product),
+                           ("insurer", insurer)):
+            if not g[field] and raw:
+                g[field] = raw
+        if uploaded_at and (not g["first_seen"] or uploaded_at < g["first_seen"]):
+            g["first_seen"] = uploaded_at
+        if uploaded_at and (not g["last_seen"] or uploaded_at > g["last_seen"]):
+            g["last_seen"] = uploaded_at
+
+    out = []
+    for g in groups.values():
+        g["file_count"] = len(g.pop("file_ids"))
+        # Every display field can legitimately be blank (the MIS cell was NaN,
+        # so the key was never written). Fall back to the parsed value for make
+        # so a row is never entirely unlabelled; the rest render as an em-dash.
+        if not g["make"] and not g["model"]:
+            g["make"] = g["value"]
+        out.append(g)
+
+    out.sort(key=lambda g: (-g["policy_count"], g["value"]))
+    return out
+
+
+def _annotate_make_model_resolution(groups):
+    """
+    Mark which aggregated values now match a MakeModelMaster cluster.
+
+    MISFailedRow is historical -- rows are only rewritten when their MIS file is
+    reprocessed -- so adding a value to the master today changes nothing about
+    yesterday's failed rows. Without this re-check against the LIVE master the
+    page would be a write-only log that never shrinks as work gets done.
+
+    Uses build_make_model_cluster_index rather than build_make_model_lookup:
+    same match rule, but the master side is tokenized once for the whole request
+    instead of once per distinct search term.
+    """
+    from .mapping_engine import build_make_model_cluster_index, resolve_make_model_with_index
+
+    index = build_make_model_cluster_index(
+        MakeModelMaster.objects.all(), "make_model_name", "make_model_cluster"
+    )
+    for g in groups:
+        names = sorted(resolve_make_model_with_index(index, g["value"]))
+        g["resolved"] = bool(names)
+        g["resolved_names"] = names
+        # A generic make/model legitimately matches dozens of clusters (a real
+        # "yamaha alpha" hits 45+), which would swamp the table cell. Same 5-name
+        # preview RULE 5a's own "resolved to master group(s) [...]" message uses;
+        # the export still carries the full list.
+        g["resolved_preview"] = names[:MISSING_MM_RESOLVED_PREVIEW]
+        g["resolved_extra"] = max(0, len(names) - MISSING_MM_RESOLVED_PREVIEW)
+    return groups
+
+
+def _filter_missing_make_model(groups, insurer="", product="", status="missing", q=""):
+    """
+    Group-level filters for the Missing Make/Model page. Pure function over the
+    _missing_make_model_groups output so it can be tested without HTTP, and it
+    preserves the incoming sort order (policy_count desc) rather than re-sorting.
+    """
+    q_norm = q.strip().lower()
+    out = []
+    for g in groups:
+        if insurer and g["insurer"] != insurer:
+            continue
+        if product and g["product"] != product:
+            continue
+        if status == "missing" and g["resolved"]:
+            continue
+        if status == "resolved" and not g["resolved"]:
+            continue
+        if q_norm and q_norm not in f'{g["value"]} {g["make"]} {g["model"]}'.lower():
+            continue
+        out.append(g)
+    return out
+
+
+def _missing_make_model_selection(request):
+    """Parses the page's filter params off a GET or POST, tolerating bad dates."""
+    src = request.POST if request.method == "POST" else request.GET
+    raw = {k: (src.get(k) or "").strip() for k in MISSING_MM_FILTER_KEYS}
+    if raw["status"] not in ("missing", "resolved", "all"):
+        raw["status"] = "missing"
+
+    dates = {}
+    for key in ("date_from", "date_to"):
+        dates[key] = None
+        if raw[key]:
+            try:
+                dates[key] = datetime.strptime(raw[key], "%Y-%m-%d").date()
+            except ValueError:
+                raw[key] = ""     # same "ignore an unparseable date" tolerance
+    return raw, dates                 # rate_master_health's own filters apply
+
+
+def _missing_make_model_redirect(request):
+    """
+    Back to the page with its filters intact. Rebuilt from the KNOWN filter
+    params rather than a posted `next=` or HTTP_REFERER, same as
+    _overlap_redirect -- there's no open-redirect surface this way.
+    """
+    raw, _ = _missing_make_model_selection(request)
+    params = {k: v for k, v in raw.items() if v}
+    url = reverse("missing_make_model")
+    return redirect(f"{url}?{urlencode(params)}" if params else url)
+
+
+def missing_make_model(request):
+    _sync_unsynced_mis_files()          # same backfill rate_master_health does
+
+    raw, dates = _missing_make_model_selection(request)
+
+    groups = _missing_make_model_groups(date_from=dates["date_from"], date_to=dates["date_to"])
+    _annotate_make_model_resolution(groups)
+
+    # Dropdown options come from the unfiltered aggregate, so applying a filter
+    # never removes its own option from the list.
+    insurer_list = sorted({g["insurer"] for g in groups if g["insurer"]})
+    product_list = sorted({g["product"] for g in groups if g["product"]})
+
+    total_all = len(groups)
+    total_missing = sum(1 for g in groups if not g["resolved"])
+
+    rows = _filter_missing_make_model(groups, raw["insurer"], raw["product"], raw["status"], raw["q"])
+
+    paginator = Paginator(rows, MISSING_MAKE_MODEL_BATCH_SIZE)
+    try:
+        page_number = int(raw["page"] or 1)
+    except ValueError:
+        page_number = 1
+    page_obj = paginator.get_page(page_number)
+    elided_page_range = list(paginator.get_elided_page_range(page_obj.number, on_each_side=1, on_ends=1))
+
+    from .mapping_engine import MAKE_MODEL_MIN_WORD_MATCH
+
+    return render(request, "missing_make_model.html", {
+        "page_obj": page_obj,
+        "elided_page_range": elided_page_range,
+        "total": paginator.count,
+        "total_all": total_all,
+        "total_missing": total_missing,
+        "total_resolved": total_all - total_missing,
+        "total_policies": sum(g["policy_count"] for g in groups),
+        "policies_shown": sum(g["policy_count"] for g in rows),
+        "insurer_list": insurer_list,
+        "product_list": product_list,
+        "master_rows": list(
+            MakeModelMaster.objects.order_by("make_model_name").values("id", "make_model_name")
+        ),
+        "min_word_match": MAKE_MODEL_MIN_WORD_MATCH,
+        "selected": raw,
+    })
+
+
+def export_missing_make_model_xlsx(request):
+    """
+    Same aggregate as the Missing Make/Model page. Honours every content filter
+    (insurer / product / status / search / dates) but ignores `page`, since that
+    only controls the on-screen table's pagination -- same convention
+    export_grid_summary_xlsx documents.
+    """
+    raw, dates = _missing_make_model_selection(request)
+    groups = _missing_make_model_groups(date_from=dates["date_from"], date_to=dates["date_to"])
+    _annotate_make_model_resolution(groups)
+    rows = _filter_missing_make_model(groups, raw["insurer"], raw["product"], raw["status"], raw["q"])
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Missing Make Model"
+    ws.append([
+        "STATUS", "MAKE", "MODEL", "FAILING VALUE", "PRODUCT", "SUB PRODUCT",
+        "INSURER", "POLICIES", "MIS FILES", "FIRST SEEN", "LAST SEEN", "RESOLVED BY",
+    ])
+
+    for g in rows:
+        ws.append([
+            "Resolved" if g["resolved"] else "Still missing",
+            g["make"], g["model"], g["value"], g["product"], g["sub_product"], g["insurer"],
+            g["policy_count"], g["file_count"],
+            g["first_seen"].strftime("%d %b %Y") if g["first_seen"] else "",
+            g["last_seen"].strftime("%d %b %Y") if g["last_seen"] else "",
+            ", ".join(g["resolved_names"]),
+        ])
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = 'attachment; filename="missing_make_model.xlsx"'
+    wb.save(response)
+    return response
+
+
+def _append_make_model_cluster_item(master, value):
+    """
+    Append one item to MakeModelMaster.make_model_cluster.
+
+    The cluster is a comma-separated list that fuzzy_match_make_model splits and
+    .strip().upper()s item by item, so separator whitespace and stored casing
+    are both cosmetic to matching. The existing text is therefore preserved
+    verbatim -- a minimal, reviewable diff on the Make/Model Master dashboard --
+    and only ", " + the new item is appended.
+
+    Returns True if the cluster changed, False if an equivalent item was already
+    present.
+    """
+    existing = master.make_model_cluster or ""
+    items = [x.strip() for x in existing.split(",") if x.strip()]
+    if any(item.upper() == value.upper() for item in items):
+        return False
+    trimmed = existing.rstrip().rstrip(",").rstrip()
+    master.make_model_cluster = f"{trimmed}, {value}" if trimmed else value
+    return True
+
+
+@transaction.atomic
+def add_missing_make_model_to_master(request):
+    """
+    The one write path into MakeModelMaster.make_model_cluster outside the bulk
+    importer (api_upload_chunk). POST-only; a GET just bounces back to the page,
+    same shape as deactivate_rate_group.
+    """
+    if request.method != "POST":
+        return _missing_make_model_redirect(request)
+
+    from .mapping_engine import build_make_model_cluster_index, resolve_make_model_with_index
+
+    value = " ".join((request.POST.get("make_model_value") or "").split())
+    if not value:
+        messages.error(request, "Nothing was added: no make/model value was submitted.")
+        return _missing_make_model_redirect(request)
+
+    # A comma would split the appended text into two cluster items, and
+    # fuzzy_match_make_model matches per item -- a 1-word item can never reach
+    # MAKE_MODEL_MIN_WORD_MATCH, so the append would be silently useless.
+    had_comma = "," in value
+    if had_comma:
+        value = " ".join(value.replace(",", " ").split())
+
+    if len(value) > MISSING_MM_MAX_VALUE_LEN:
+        messages.error(
+            request,
+            f"Nothing was added: that make/model value is longer than "
+            f"{MISSING_MM_MAX_VALUE_LEN} characters.",
+        )
+        return _missing_make_model_redirect(request)
+
+    # The real hazard of this page: a second cluster containing the same words
+    # makes these policies resolve to TWO master groups, turning them into
+    # MULTIPLE MATCHES instead of fixing them -- the same Double Rate Risk the
+    # Overlaps tab flags and deactivate_rate_group refuses to auto-fix. The
+    # default status=missing filter already hides resolved rows, but the server
+    # must not rely on the UI for that.
+    already = resolve_make_model_with_index(
+        build_make_model_cluster_index(
+            MakeModelMaster.objects.all(), "make_model_name", "make_model_cluster"
+        ),
+        value,
+    )
+    if already and request.POST.get("force") != "1":
+        messages.warning(
+            request,
+            f"'{value}' was not added - it already matches master group(s) "
+            f"[{', '.join(sorted(already))}]. Adding it again would make these policies "
+            f"resolve to two groups, which turns them into MULTIPLE MATCHES instead of "
+            f"fixing them. Re-open the dialog and tick \"Add anyway\" if that is intended.",
+        )
+        return _missing_make_model_redirect(request)
+
+    target = (request.POST.get("target") or "").strip()
+    created = False
+
+    if target == "existing":
+        # select_for_update: the cluster append is a read-modify-write on a
+        # TextField, so two concurrent adds would otherwise clobber each other.
+        master = (
+            MakeModelMaster.objects.select_for_update()
+            .filter(id=(request.POST.get("master_id") or "").strip())
+            .first()
+        )
+        if master is None:
+            messages.error(request, "Nothing was added: that Make/Model Master row no longer exists.")
+            return _missing_make_model_redirect(request)
+    elif target == "new":
+        name = (request.POST.get("new_name") or "").strip()
+        if not name:
+            messages.error(request, "Nothing was added: give the new Make/Model Master row a name.")
+            return _missing_make_model_redirect(request)
+        if len(name) > 150:
+            messages.error(request, "Nothing was added: that name is longer than 150 characters.")
+            return _missing_make_model_redirect(request)
+        # make_model_name is unique=True, which is exact-case -- pre-check with
+        # iexact so a case variant gets this message instead of an IntegrityError.
+        if MakeModelMaster.objects.filter(make_model_name__iexact=name).exists():
+            messages.error(
+                request,
+                f"Nothing was added: '{name}' already exists - pick it from the dropdown instead.",
+            )
+            return _missing_make_model_redirect(request)
+        master = MakeModelMaster.objects.create(make_model_name=name)
+        created = True
+    else:
+        messages.error(request, "Nothing was added: pick an existing master row or name a new one.")
+        return _missing_make_model_redirect(request)
+
+    # Stored upper-cased: fuzzy_match_make_model upper-cases BOTH sides, so
+    # casing provably can't change matching -- which makes this purely a
+    # legibility choice, and importer-sourced clusters all read as upper case.
+    stored_value = value.upper()
+    changed = _append_make_model_cluster_item(master, stored_value)
+    if not changed and not created:
+        messages.info(
+            request,
+            f"'{stored_value}' is already in '{master.make_model_name}' - nothing to change.",
+        )
+        return _missing_make_model_redirect(request)
+    master.save(update_fields=None if created else ["make_model_cluster"])
+
+    try:
+        policy_count = int(request.POST.get("policy_count") or 0)
+    except ValueError:
+        policy_count = 0
+
+    AuditLog.objects.create(
+        user=request.user,
+        action="MAKE MODEL CLUSTER ADD",
+        details=(
+            f"Added '{stored_value}' to MakeModelMaster '{master.make_model_name}' "
+            f"(id {master.id}) from the Missing Make/Model page."
+            + (" Created this master row." if created else "")
+            + (f" {policy_count} affected MIS policy row(s) reported by the page." if policy_count else "")
+            + (" Comma(s) in the submitted value were replaced with spaces." if had_comma else "")
+            + (" Added despite already matching another cluster (forced)." if already else "")
+        ),
+    )
+    # Mirrors api_upload_chunk: every write to these master tables busts the key
+    # get_rto_and_make_choices caches the rate forms' dropdowns under.
+    cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
+
+    messages.success(
+        request,
+        f"'{stored_value}' added to '{master.make_model_name}'. It now resolves"
+        + (f" - {policy_count} historical failure(s) are marked Resolved" if policy_count else "")
+        + ", and new MIS uploads will map these policies. To undo, edit the cluster "
+        "on the Make/Model Master page.",
+    )
+    return _missing_make_model_redirect(request)
+
 
 # -------------------------
 # HEALTH RATE MASTER

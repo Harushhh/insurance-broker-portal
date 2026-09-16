@@ -20,6 +20,43 @@ CATEGORICAL_FUZZY_THRESHOLD = 75
 MAKE_MODEL_MIN_WORD_MATCH = 2     # Rule 5a: min words the MIS "make + model" string
                                   # must share with a MakeModelMaster cluster entry
 
+# The failed_on label and the exact detail sentence RULE 5a emits when a MIS
+# "make + model" string matches no MakeModelMaster cluster entry at all.
+# Named here rather than inlined at the RULE 5a block because the Missing
+# Make/Model page filters MISFailedRow.failure_reason on this exact text — the
+# two must never drift, and the text below must stay byte-identical to what
+# already-stored failure_reason rows contain (see the constants test).
+MAKE_MODEL_RULE_LABEL = 'Policy: vehicle make / model'
+MAKE_MODEL_UNRESOLVED_VALUE_PREFIX = "Vehicle make/model '"
+MAKE_MODEL_UNRESOLVED_VALUE_SUFFIX = "' did not share at least "
+
+
+def make_model_unresolved_detail(value):
+    """The RULE 5a 'no MakeModelMaster cluster matched at all' detail sentence."""
+    return (
+        f"{MAKE_MODEL_UNRESOLVED_VALUE_PREFIX}{value}{MAKE_MODEL_UNRESOLVED_VALUE_SUFFIX}"
+        f"{MAKE_MODEL_MIN_WORD_MATCH} words with any MakeModelMaster cluster "
+        f"entry — add it to MakeModelMaster or check the MIS value."
+    )
+
+
+# Assembled exactly the way process_mis_mapping assembles a NO MATCH reason:
+#     reason = f"Failed on: {first_label} — {first_detail}"
+# Every RULE block is guarded by `if not current_grid.empty`, and a rule only
+# appends when it *just* emptied the grid, so failed_on never holds more than
+# one entry. That makes this a true PREFIX of the stored reason rather than
+# just a substring, which is what lets the page filter on __startswith.
+#
+# The prefix alone is NOT enough to identify this variant, though: RULE 5a's
+# sibling "resolved to master group(s) [...] but no candidate rate row" detail
+# opens with the same "Vehicle make/model '<value>'" text, and only diverges
+# after the value. Selecting this variant means prefix AND
+# MAKE_MODEL_UNRESOLVED_VALUE_SUFFIX — which is exactly the pair
+# MAKE_MODEL_UNRESOLVED_VALUE_PATTERN below anchors between.
+MAKE_MODEL_UNRESOLVED_REASON_PREFIX = (
+    f"Failed on: {MAKE_MODEL_RULE_LABEL} — {MAKE_MODEL_UNRESOLVED_VALUE_PREFIX}"
+)
+
 # Health plan names have no separate master table (unlike RTO/Make-Model) —
 # the MIS value is fuzzy-matched directly against the Health Grid row's own
 # comma-separated plan_names cluster, after normalizing '+' -> 'plus' and
@@ -404,6 +441,74 @@ def build_make_model_lookup(master_qs, name_field, cluster_field, min_shared_wor
     return resolve
 
 
+def build_make_model_cluster_index(master_qs, name_field, cluster_field):
+    """
+    Inverted word index over every MakeModelMaster cluster item, for callers
+    that resolve MANY search terms against the SAME master snapshot — the
+    Missing Make/Model page re-checks every aggregated failing value against
+    the live master on each request.
+
+    build_make_model_lookup caches per search TERM, but for a term it has not
+    seen it walks all ~500 master rows and re-tokenizes their entire cluster
+    strings — on real data that is ~145k cluster items, i.e. ~30ms per new
+    term, which a page resolving hundreds of distinct values cannot afford.
+
+    Inverting it costs the same single pass to build but turns each lookup
+    into a walk of only the items that actually contain one of the search
+    term's words. The match DECISION is unchanged: because the search side is
+    a set of distinct words and each item contributes each of its distinct
+    words once, the number of postings an item is hit through is exactly
+    |search_words ∩ item_words| — the same quantity fuzzy_match_make_model
+    compares against min_shared_words, over the same _normalize_model_words
+    tokens, still per individual cluster item so two items can't combine. A
+    test asserts the two agree.
+
+    Returns an opaque structure for resolve_make_model_with_index.
+    """
+    item_names = []                      # item index -> owning master name
+    postings = {}                        # word -> [item index, ...]
+    for name, cluster in master_qs.values_list(name_field, cluster_field):
+        if not cluster:
+            continue
+        name_lowered = str(name).strip().lower()
+        for item in str(cluster).split(","):
+            item = item.strip()
+            if not item:
+                continue
+            words = _normalize_model_words(item.upper())
+            if not words:
+                continue
+            item_index = len(item_names)
+            item_names.append(name_lowered)
+            for word in words:
+                postings.setdefault(word, []).append(item_index)
+    return (item_names, postings)
+
+
+def resolve_make_model_with_index(index, search_term, min_shared_words=MAKE_MODEL_MIN_WORD_MATCH):
+    """
+    Set of master names whose cluster matches search_term — the
+    build_make_model_cluster_index counterpart of build_make_model_lookup's
+    resolve(). Same semantics, including the "search term with fewer than
+    min_shared_words words can never match" rule.
+    """
+    if not search_term:
+        return set()
+    search_words = _normalize_model_words(str(search_term).strip().upper())
+    if len(search_words) < min_shared_words:
+        return set()
+
+    item_names, postings = index
+    hits = Counter()
+    for word in search_words:
+        hits.update(postings.get(word, ()))
+    return {
+        item_names[item_index]
+        for item_index, shared in hits.items()
+        if shared >= min_shared_words
+    }
+
+
 # Two numbers jammed together with a slash (e.g. "6702/47500" = CC/GVW for a
 # commercial vehicle). The old digit-only regex silently concatenated both
 # into one nonsense integer ("670247500") instead of a real CC value — this
@@ -551,6 +656,17 @@ def _normalize_health_business_type(value):
 _QUOTED_VALUE_PATTERN = re.compile(r"'([^']*)'")
 _FAILED_ON_PATTERN = re.compile(r"^Failed on:\s*([^—]+)—\s*(.*)$")
 _GROUP_IDS_PATTERN = re.compile(r"Matching Group IDs:\s*(.*)$")
+
+# Pulls the failing make/model back out of a stored failure_reason, for the
+# Missing Make/Model page. Deliberately NOT _QUOTED_VALUE_PATTERN: that stops
+# at the first apostrophe, so a value like "bmw 3's series" would come back
+# truncated to "bmw 3". The non-greedy group instead runs to the first
+# occurrence of the suffix marker, which is specific enough that an embedded
+# apostrophe is harmless.
+MAKE_MODEL_UNRESOLVED_VALUE_PATTERN = re.compile(
+    r"^" + re.escape(MAKE_MODEL_UNRESOLVED_REASON_PREFIX) + r"(.*?)"
+    + re.escape(MAKE_MODEL_UNRESOLVED_VALUE_SUFFIX)
+)
 
 
 def _extract_gap_key(detail: str) -> str:
@@ -1572,11 +1688,7 @@ def process_mis_mapping(mis_file_id):
                 else:
                     resolved_make_names = resolve_make(val_make_model)
                     if not resolved_make_names:
-                        detail = (
-                            f"Vehicle make/model '{val_make_model}' did not share at least "
-                            f"{MAKE_MODEL_MIN_WORD_MATCH} words with any MakeModelMaster cluster "
-                            f"entry — add it to MakeModelMaster or check the MIS value."
-                        )
+                        detail = make_model_unresolved_detail(val_make_model)
                     else:
                         preview = ", ".join(sorted(resolved_make_names)[:5])
                         detail = (
@@ -1590,7 +1702,7 @@ def process_mis_mapping(mis_file_id):
 
                 current_grid = current_grid[rule_mask]
                 if current_grid.empty:
-                    failed_on.append(('Policy: vehicle make / model', detail))
+                    failed_on.append((MAKE_MODEL_RULE_LABEL, detail))
 
             # --- RULE 5b: RTO — two-step master lookup ---
             # _mis_rto is already normalized (normalize_rto_code): spaces/hyphens

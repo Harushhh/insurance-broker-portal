@@ -421,7 +421,7 @@
                 </li>
                 {% endif %}
 
-                {% if 'Can_View_Dashboard' in nav_pages or 'Can_View_RTO_Dashboard' in nav_pages or 'Can_View_Make_Model_Dashboard' in nav_pages or 'Can_View_Pincode_Dashboard' in nav_pages or 'Can_Upload_CSV' in nav_pages %}
+                {% if 'Can_View_Dashboard' in nav_pages or 'Can_View_RTO_Dashboard' in nav_pages or 'Can_View_Make_Model_Dashboard' in nav_pages or 'Can_View_Missing_Make_Model' in nav_pages or 'Can_View_Pincode_Dashboard' in nav_pages or 'Can_Upload_CSV' in nav_pages %}
                 <li class="nav-title">Master Data</li>
                 {% endif %}
                 {% if 'Can_View_Dashboard' in nav_pages %}
@@ -449,6 +449,13 @@
                 <li class="nav-item">
                     <a href="{% url 'make_model_dashboard' %}" class="nav-link {% if request.path == '/make-model-dashboard/' %}active{% endif %}">
                         <i class="bi bi-car-front-fill"></i> Make/Model Master
+                    </a>
+                </li>
+                {% endif %}
+                {% if 'Can_View_Missing_Make_Model' in nav_pages %}
+                <li class="nav-item">
+                    <a href="{% url 'missing_make_model' %}" class="nav-link {% if request.path == '/missing-make-model/' %}active{% endif %}">
+                        <i class="bi bi-exclamation-diamond-fill"></i> Missing Make/Model
                     </a>
                 </li>
                 {% endif %}

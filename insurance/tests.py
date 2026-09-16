@@ -984,3 +984,546 @@ class PiPoMarginFloatPrecisionTests(TestCase):
             _rate_master_pi_po_rate_violations_qs("pi_od_rate", "po_od_rate").values_list("id", flat=True)
         )
         self.assertIn(self.genuine_violation_row.id, flagged_ids)
+
+
+# Storage/cache overrides every Missing Make/Model test needs: MISFile carries
+# a FileField, and the Add to Master write path calls cache.delete(), which
+# would otherwise hit the (uncreated) DatabaseCache table.
+MISSING_MM_OVERRIDES = dict(
+    STORAGES={
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+    },
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
+)
+
+
+def _make_model_reason(value):
+    """The exact NO MATCH reason RULE 5a writes for an unresolvable make/model."""
+    from insurance.mapping_engine import MAKE_MODEL_RULE_LABEL, make_model_unresolved_detail
+    return f"Failed on: {MAKE_MODEL_RULE_LABEL} — {make_model_unresolved_detail(value)}"
+
+
+class MakeModelFailureReasonConstantsTests(TestCase):
+    """
+    The Missing Make/Model page filters MISFailedRow.failure_reason on text the
+    mapping engine wrote, sometimes months earlier. These guard the contract
+    between the two: the message must stay byte-identical, the prefix must
+    genuinely be a prefix, and the scope must stay narrowed to the one Rule 5a
+    variant that adding to MakeModelMaster actually fixes.
+    """
+
+    def test_detail_text_is_byte_identical_to_the_historical_literal(self):
+        # Hard-coded on purpose: this is what already-stored failure_reason rows
+        # contain. If refactoring changes so much as a space, every historical
+        # row silently drops off the page - so this literal must not be
+        # regenerated from the constants it is checking.
+        from insurance.mapping_engine import make_model_unresolved_detail
+        self.assertEqual(
+            make_model_unresolved_detail("yamaha alpha"),
+            "Vehicle make/model 'yamaha alpha' did not share at least 2 words with any "
+            "MakeModelMaster cluster entry — add it to MakeModelMaster or check the MIS value.",
+        )
+
+    def test_reason_prefix_matches_what_the_engine_builds(self):
+        from insurance.mapping_engine import MAKE_MODEL_UNRESOLVED_REASON_PREFIX
+        self.assertTrue(
+            _make_model_reason("tata nexon ev").startswith(MAKE_MODEL_UNRESOLVED_REASON_PREFIX)
+        )
+
+    def test_value_pattern_round_trips_including_an_apostrophe(self):
+        from insurance.mapping_engine import MAKE_MODEL_UNRESOLVED_VALUE_PATTERN
+        for value in ["yamaha alpha", "bmw 3's series", "tata nexon ev", "maruti eeco(2012 - 2017)"]:
+            match = MAKE_MODEL_UNRESOLVED_VALUE_PATTERN.match(_make_model_reason(value))
+            self.assertIsNotNone(match, value)
+            self.assertEqual(match.group(1), value)
+
+    def test_the_generic_quoted_value_pattern_would_truncate_an_apostrophe(self):
+        # Documents why MAKE_MODEL_UNRESOLVED_VALUE_PATTERN exists at all, so a
+        # future "simplification" back to _QUOTED_VALUE_PATTERN fails loudly
+        # instead of silently splitting one make/model into two page rows.
+        from insurance.mapping_engine import _QUOTED_VALUE_PATTERN
+        reason = _make_model_reason("bmw 3's series")
+        self.assertEqual(_QUOTED_VALUE_PATTERN.search(reason).group(1), "bmw 3")
+
+    def test_the_other_rule_5a_variants_are_out_of_scope(self):
+        # Neither of these is fixed by adding to MakeModelMaster: the first is a
+        # gap in the rate grid, the second is missing source data. Note the
+        # first one DOES share the reason prefix - it opens with the same
+        # "Vehicle make/model '<value>'" text and only diverges after the value.
+        # That is why the page's filter needs the suffix marker as well, and why
+        # this test asserts on the full pattern rather than the prefix alone.
+        from insurance.mapping_engine import (
+            MAKE_MODEL_RULE_LABEL, MAKE_MODEL_UNRESOLVED_REASON_PREFIX,
+            MAKE_MODEL_UNRESOLVED_VALUE_PATTERN, MAKE_MODEL_UNRESOLVED_VALUE_SUFFIX,
+        )
+        resolved_but_uncovered = (
+            f"Failed on: {MAKE_MODEL_RULE_LABEL} — Vehicle make/model 'yamaha alpha' resolved to "
+            f"master group(s) [two_wheeler_all], but no remaining candidate rate row lists that "
+            f"group in its vehicle-make cluster."
+        )
+        blank = (
+            f"Failed on: {MAKE_MODEL_RULE_LABEL} — Vehicle make/model is blank on this policy, and "
+            f"no remaining candidate rate row allows a blank vehicle-make cluster."
+        )
+        for reason in (resolved_but_uncovered, blank):
+            self.assertIsNone(MAKE_MODEL_UNRESOLVED_VALUE_PATTERN.match(reason))
+            self.assertFalse(
+                reason.startswith(MAKE_MODEL_UNRESOLVED_REASON_PREFIX)
+                and MAKE_MODEL_UNRESOLVED_VALUE_SUFFIX in reason
+            )
+        # The blank variant is excluded by the prefix alone; the sibling is not.
+        self.assertFalse(blank.startswith(MAKE_MODEL_UNRESOLVED_REASON_PREFIX))
+        self.assertTrue(resolved_but_uncovered.startswith(MAKE_MODEL_UNRESOLVED_REASON_PREFIX))
+
+    def test_the_coverage_gap_parser_still_splits_the_refactored_reason(self):
+        # _FAILED_ON_PATTERN stops at the FIRST em-dash; the detail sentence
+        # contains a second one. build_coverage_gap_summary depends on that.
+        from insurance.mapping_engine import _FAILED_ON_PATTERN, MAKE_MODEL_RULE_LABEL
+        match = _FAILED_ON_PATTERN.match(_make_model_reason("yamaha alpha"))
+        self.assertEqual(match.group(1).strip(), MAKE_MODEL_RULE_LABEL)
+        self.assertTrue(match.group(2).startswith("Vehicle make/model 'yamaha alpha'"))
+
+
+class MakeModelClusterIndexTests(TestCase):
+    """
+    build_make_model_cluster_index/resolve_make_model_with_index is a second
+    implementation of Rule 5a's match decision, kept only because it hoists the
+    master-side tokenization out of the per-term loop. It must never disagree
+    with the engine's own fuzzy_match_make_model.
+    """
+
+    def test_index_agrees_with_fuzzy_match_make_model(self):
+        from insurance.mapping_engine import (
+            build_make_model_cluster_index, fuzzy_match_make_model, resolve_make_model_with_index,
+        )
+        from insurance.models import MakeModelMaster
+
+        cases = [
+            ("HONDA ACTIVA, TVS JUPITER", "yamaha alpha", False),
+            ("HONDA ACTIVA, TVS JUPITER", "honda activa", True),
+            ("HONDA ACTIVA6G", "honda activa 6g", True),      # digit-glue split
+            ("HONDA CITY-1.5", "honda city 1.5", True),       # hyphen split
+            ("HONDA ACTIVA, TVS JUPITER", "honda", False),    # <2 words can't match
+            ("HONDA ACTIVA, TVS JUPITER", "honda jupiter", False),  # per-item, no cross-combining
+            ("TATA NEXON EV PRIME", "tata nexon ev", True),
+        ]
+        for cluster, term, expected in cases:
+            with self.subTest(cluster=cluster, term=term):
+                MakeModelMaster.objects.all().delete()
+                MakeModelMaster.objects.create(make_model_name="grp", make_model_cluster=cluster)
+                index = build_make_model_cluster_index(
+                    MakeModelMaster.objects.all(), "make_model_name", "make_model_cluster"
+                )
+                via_index = bool(resolve_make_model_with_index(index, term))
+                via_engine = fuzzy_match_make_model(term, cluster)
+                self.assertEqual(via_index, via_engine)
+                self.assertEqual(via_index, expected)
+
+    def test_rows_without_a_cluster_are_skipped(self):
+        from insurance.mapping_engine import (
+            build_make_model_cluster_index, resolve_make_model_with_index,
+        )
+        from insurance.models import MakeModelMaster
+        MakeModelMaster.objects.create(make_model_name="empty", make_model_cluster="")
+        MakeModelMaster.objects.create(make_model_name="null", make_model_cluster=None)
+        MakeModelMaster.objects.create(make_model_name="commas", make_model_cluster=" , , ")
+        index = build_make_model_cluster_index(
+            MakeModelMaster.objects.all(), "make_model_name", "make_model_cluster"
+        )
+        # A master with nothing indexable must never resolve anything —
+        # asserted through the public behaviour rather than the index's shape.
+        self.assertEqual(resolve_make_model_with_index(index, "yamaha alpha"), set())
+
+
+@override_settings(**MISSING_MM_OVERRIDES)
+class MissingMakeModelAggregationTests(TestCase):
+    """Missing Make/Model's grouping of MISFailedRow into one row per gap."""
+
+    def setUp(self):
+        from insurance.models import MISFile
+
+        self.client = Client()
+        Group.objects.get_or_create(name="Can_View_Missing_Make_Model")
+        self.user = User.objects.create_user(username="ops", password="a-strong-test-password-1")
+        self.user.groups.add(Group.objects.get(name="Can_View_Missing_Make_Model"))
+        self.client.force_login(self.user)
+
+        self.mis_file = MISFile.objects.create(status="COMPLETED", uploaded_file="mis/jan.xlsx")
+        self._row_id = 0
+
+    def _fail(self, make, model, product="Two Wheeler", sub_product="Scooter",
+              insurer="Acme General", reason=None, status_key="NO_MATCH", payload=None,
+              mis_file=None):
+        """One MISFailedRow shaped the way mapping_engine writes them."""
+        from insurance.models import MISFailedRow
+        self._row_id += 1
+        value = f"{make} {model}".strip().lower()
+        if payload is None:
+            payload = {
+                "Policy: vehicle make": make,
+                "Policy: model": model,
+                "Policy: vehproduct": product,
+                "Policy: sub product": sub_product,
+                "Policy: insurance company": insurer,
+            }
+        return MISFailedRow.objects.create(
+            mis_file=mis_file or self.mis_file,
+            row_id=self._row_id,
+            status_key=status_key,
+            mapping_status="❌ NO MATCH",
+            failure_reason=reason if reason is not None else _make_model_reason(value),
+            insurer=insurer,
+            payload=payload,
+        )
+
+    def _groups(self):
+        from insurance.views import _missing_make_model_groups
+        return _missing_make_model_groups()
+
+    def test_casing_variants_collapse_into_one_row(self):
+        self._fail("YAMAHA", "ALPHA")
+        self._fail("yamaha", "alpha")
+        groups = self._groups()
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["value"], "yamaha alpha")
+        self.assertEqual(groups[0]["policy_count"], 2)
+        # First non-blank, oldest row first - so display casing is stable.
+        self.assertEqual(groups[0]["make"], "YAMAHA")
+
+    def test_payload_keys_are_read_case_insensitively(self):
+        # payload keys are the uploaded file's own header text, so casing varies
+        # between files and a DB-level JSON lookup would miss these.
+        self._fail("TATA", "NEXON EV", payload={
+            "Policy: Vehicle Make": "TATA",
+            "policy: model": "NEXON EV",
+            "POLICY: VEHPRODUCT": "Private Car",
+            "  Policy: Sub Product  ": "Hatchback",
+        })
+        groups = self._groups()
+        self.assertEqual(groups[0]["make"], "TATA")
+        self.assertEqual(groups[0]["model"], "NEXON EV")
+        self.assertEqual(groups[0]["product"], "Private Car")
+        self.assertEqual(groups[0]["sub_product"], "Hatchback")
+
+    def test_distinct_product_splits_the_group(self):
+        self._fail("YAMAHA", "ALPHA", product="Two Wheeler")
+        self._fail("YAMAHA", "ALPHA", product="GCV")
+        self.assertEqual(len(self._groups()), 2)
+
+    def test_distinct_insurer_splits_the_group(self):
+        self._fail("YAMAHA", "ALPHA", insurer="Acme General")
+        self._fail("YAMAHA", "ALPHA", insurer="Zenith Insurance")
+        self.assertEqual(len(self._groups()), 2)
+
+    def test_distinct_sub_product_splits_the_group(self):
+        # Pins the deliberate choice to key on sub product as well as product,
+        # because the right cluster to add a make/model to depends on both. If
+        # that ever turns out to fragment the page too much, this is the single
+        # test that says so.
+        self._fail("YAMAHA", "ALPHA", product="GCV", sub_product="3W")
+        self._fail("YAMAHA", "ALPHA", product="GCV", sub_product="4W")
+        self.assertEqual(len(self._groups()), 2)
+
+    def test_blank_model_payload_key_is_tolerated(self):
+        # _extract_failed_rows_from_df skips NaN cells entirely, so a policy
+        # with no model has no 'Policy: model' key at all - while the engine
+        # still saw (and reported) the make.
+        self._fail("YAMAHA", "", payload={"Policy: vehicle make": "YAMAHA"})
+        groups = self._groups()
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["value"], "yamaha")
+        self.assertEqual(groups[0]["model"], "")
+
+    def test_a_row_with_no_make_or_model_payload_still_shows_the_failing_value(self):
+        self._fail("YAMAHA", "ALPHA", payload={"Policy: vehproduct": "Two Wheeler"})
+        self.assertEqual(self._groups()[0]["make"], "yamaha alpha")
+
+    def test_other_failure_reasons_are_excluded(self):
+        from insurance.mapping_engine import MAKE_MODEL_RULE_LABEL
+        self._fail("YAMAHA", "ALPHA")                      # in scope
+        self._fail("TATA", "NEXON", reason=(               # Rule 5b, out of scope
+            "Failed on: Policy: rto no — RTO 'HR51' resolved to master group(s) [allindia], but "
+            "no remaining candidate rate row lists that group in its RTO cluster."
+        ))
+        self._fail("HONDA", "CITY", reason=(               # sibling 5a, out of scope
+            f"Failed on: {MAKE_MODEL_RULE_LABEL} — Vehicle make/model 'honda city' resolved to "
+            f"master group(s) [private_car_all], but no remaining candidate rate row lists that "
+            f"group in its vehicle-make cluster."
+        ))
+        groups = self._groups()
+        self.assertEqual(len(groups), 1)
+        self.assertEqual(groups[0]["value"], "yamaha alpha")
+
+    def test_multiple_matches_rows_are_excluded(self):
+        self._fail("YAMAHA", "ALPHA", status_key="MULTIPLE_MATCHES")
+        self.assertEqual(self._groups(), [])
+
+    def test_policy_count_and_file_count(self):
+        from insurance.models import MISFile
+        other_file = MISFile.objects.create(status="COMPLETED", uploaded_file="mis/feb.xlsx")
+        self._fail("YAMAHA", "ALPHA")
+        self._fail("YAMAHA", "ALPHA")
+        self._fail("YAMAHA", "ALPHA", mis_file=other_file)
+        group = self._groups()[0]
+        self.assertEqual(group["policy_count"], 3)
+        self.assertEqual(group["file_count"], 2)
+
+    def test_rows_are_sorted_by_policy_count(self):
+        self._fail("TATA", "NEXON EV")
+        self._fail("YAMAHA", "ALPHA")
+        self._fail("YAMAHA", "ALPHA")
+        self.assertEqual([g["value"] for g in self._groups()], ["yamaha alpha", "tata nexon ev"])
+
+
+@override_settings(**MISSING_MM_OVERRIDES)
+class MissingMakeModelPageTests(MissingMakeModelAggregationTests):
+    """The page itself: resolution status, filters, export."""
+
+    def test_a_value_already_in_a_cluster_is_marked_resolved(self):
+        from insurance.models import MakeModelMaster
+        self._fail("YAMAHA", "ALPHA")
+        MakeModelMaster.objects.create(
+            make_model_name="two_wheeler_all", make_model_cluster="HONDA ACTIVA, YAMAHA ALPHA"
+        )
+        response = self.client.get(reverse("missing_make_model"), {"status": "all"})
+        group = list(response.context["page_obj"])[0]
+        self.assertTrue(group["resolved"])
+        self.assertEqual(group["resolved_names"], ["two_wheeler_all"])
+
+    def test_default_status_filter_hides_resolved_rows(self):
+        from insurance.models import MakeModelMaster
+        self._fail("YAMAHA", "ALPHA")
+        self._fail("TATA", "NEXON EV")
+        MakeModelMaster.objects.create(
+            make_model_name="two_wheeler_all", make_model_cluster="YAMAHA ALPHA"
+        )
+        response = self.client.get(reverse("missing_make_model"))
+        self.assertEqual(response.context["selected"]["status"], "missing")
+        self.assertEqual([g["value"] for g in response.context["page_obj"]], ["tata nexon ev"])
+        self.assertEqual(response.context["total_missing"], 1)
+        self.assertEqual(response.context["total_resolved"], 1)
+
+        resolved_only = self.client.get(reverse("missing_make_model"), {"status": "resolved"})
+        self.assertEqual([g["value"] for g in resolved_only.context["page_obj"]], ["yamaha alpha"])
+
+        everything = self.client.get(reverse("missing_make_model"), {"status": "all"})
+        self.assertEqual(len(list(everything.context["page_obj"])), 2)
+
+    def test_insurer_product_and_search_filters(self):
+        self._fail("YAMAHA", "ALPHA", product="Two Wheeler", insurer="Acme General")
+        self._fail("TATA", "NEXON EV", product="Private Car", insurer="Zenith Insurance")
+
+        by_insurer = self.client.get(reverse("missing_make_model"), {"insurer": "Zenith Insurance"})
+        self.assertEqual([g["value"] for g in by_insurer.context["page_obj"]], ["tata nexon ev"])
+
+        by_product = self.client.get(reverse("missing_make_model"), {"product": "Two Wheeler"})
+        self.assertEqual([g["value"] for g in by_product.context["page_obj"]], ["yamaha alpha"])
+
+        by_search = self.client.get(reverse("missing_make_model"), {"q": "NEXON"})
+        self.assertEqual([g["value"] for g in by_search.context["page_obj"]], ["tata nexon ev"])
+
+    def test_filter_dropdowns_are_built_from_the_unfiltered_aggregate(self):
+        # Applying a filter must not remove its own option from the list.
+        self._fail("YAMAHA", "ALPHA", product="Two Wheeler", insurer="Acme General")
+        self._fail("TATA", "NEXON EV", product="Private Car", insurer="Zenith Insurance")
+        response = self.client.get(reverse("missing_make_model"), {"insurer": "Zenith Insurance"})
+        self.assertEqual(response.context["insurer_list"], ["Acme General", "Zenith Insurance"])
+        self.assertEqual(response.context["product_list"], ["Private Car", "Two Wheeler"])
+
+    def test_an_invalid_date_is_ignored_rather_than_erroring(self):
+        self._fail("YAMAHA", "ALPHA")
+        response = self.client.get(reverse("missing_make_model"), {"date_from": "not-a-date"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total_all"], 1)
+        self.assertEqual(response.context["selected"]["date_from"], "")
+
+    def test_export_honours_filters_and_ignores_pagination(self):
+        self._fail("YAMAHA", "ALPHA", insurer="Acme General")
+        self._fail("TATA", "NEXON EV", insurer="Zenith Insurance")
+        response = self.client.get(
+            reverse("export_missing_make_model_xlsx"),
+            {"insurer": "Zenith Insurance", "page": "99"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("missing_make_model.xlsx", response["Content-Disposition"])
+
+        import io
+        from openpyxl import load_workbook
+        rows = list(load_workbook(io.BytesIO(response.content)).active.values)
+        self.assertEqual(len(rows), 2)                     # header + the one match
+        self.assertEqual(rows[1][3], "tata nexon ev")
+
+    def test_a_user_without_the_group_is_refused(self):
+        other = User.objects.create_user(username="nobody", password="a-strong-test-password-2")
+        client = Client()
+        client.force_login(other)
+        self.assertEqual(client.get(reverse("missing_make_model")).status_code, 403)
+
+
+@override_settings(**MISSING_MM_OVERRIDES)
+class AddMissingMakeModelToMasterTests(TestCase):
+    """The one write path into MakeModelMaster.make_model_cluster outside the importer."""
+
+    def setUp(self):
+        from insurance.models import MakeModelMaster
+
+        self.client = Client()
+        Group.objects.get_or_create(name="Can_View_Missing_Make_Model")
+        self.user = User.objects.create_user(username="ops", password="a-strong-test-password-1")
+        self.user.groups.add(Group.objects.get(name="Can_View_Missing_Make_Model"))
+        self.client.force_login(self.user)
+
+        self.master = MakeModelMaster.objects.create(
+            make_model_name="two_wheeler_all", make_model_cluster="HONDA ACTIVA, TVS JUPITER"
+        )
+        self.url = reverse("add_missing_make_model_to_master")
+
+    def _post(self, **overrides):
+        data = {
+            "make_model_value": "yamaha alpha",
+            "target": "existing",
+            "master_id": str(self.master.id),
+        }
+        data.update(overrides)
+        return self.client.post(self.url, data)
+
+    def test_appends_to_an_existing_cluster_preserving_existing_text(self):
+        response = self._post()
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER, YAMAHA ALPHA")
+        self.assertEqual(response.status_code, 302)
+
+    def test_the_value_is_stored_upper_cased(self):
+        # fuzzy_match_make_model upper-cases both sides, so casing can't change
+        # matching - it is stored upper only to read like its neighbours.
+        self._post(make_model_value="tata nexon ev")
+        self.master.refresh_from_db()
+        self.assertTrue(self.master.make_model_cluster.endswith("TATA NEXON EV"))
+
+    def test_the_appended_value_actually_resolves_afterwards(self):
+        from insurance.mapping_engine import fuzzy_match_make_model
+        self._post()
+        self.master.refresh_from_db()
+        self.assertTrue(fuzzy_match_make_model("yamaha alpha", self.master.make_model_cluster))
+
+    def test_a_duplicate_item_is_a_no_op(self):
+        from insurance.models import AuditLog
+        self.master.make_model_cluster = "HONDA ACTIVA, YAMAHA ALPHA"
+        self.master.save()
+        self._post(force="1")                       # force past the already-resolves guard
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, YAMAHA ALPHA")
+        self.assertFalse(AuditLog.objects.filter(action="MAKE MODEL CLUSTER ADD").exists())
+
+    def test_a_trailing_comma_does_not_produce_a_double_separator(self):
+        self.master.make_model_cluster = "HONDA ACTIVA, "
+        self.master.save()
+        self._post()
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, YAMAHA ALPHA")
+
+    def test_creates_a_new_master_row(self):
+        from insurance.models import MakeModelMaster
+        self._post(target="new", new_name="private_car_ev", make_model_value="tata nexon ev")
+        created = MakeModelMaster.objects.get(make_model_name="private_car_ev")
+        self.assertEqual(created.make_model_cluster, "TATA NEXON EV")
+
+    def test_a_duplicate_new_name_is_rejected_case_insensitively(self):
+        from insurance.models import MakeModelMaster
+        self._post(target="new", new_name="TWO_WHEELER_ALL")
+        self.assertEqual(MakeModelMaster.objects.count(), 1)
+
+    def test_a_blank_new_name_is_rejected(self):
+        from insurance.models import MakeModelMaster
+        self._post(target="new", new_name="   ")
+        self.assertEqual(MakeModelMaster.objects.count(), 1)
+
+    def test_a_comma_in_the_value_is_replaced_with_a_space(self):
+        # A comma would split the append into two cluster items, and a 1-word
+        # item can never reach the 2-shared-word threshold.
+        self._post(make_model_value="yamaha, alpha")
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER, YAMAHA ALPHA")
+
+    def test_an_empty_value_is_rejected(self):
+        self._post(make_model_value="   ")
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER")
+
+    def test_an_overlong_value_is_rejected(self):
+        self._post(make_model_value="a b " * 200)
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER")
+
+    def test_a_missing_master_row_is_rejected(self):
+        response = self._post(master_id="999999")
+        self.assertEqual(response.status_code, 302)
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER")
+
+    def test_an_unknown_target_is_rejected(self):
+        self._post(target="")
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER")
+
+    def test_an_already_resolving_value_is_refused_without_force(self):
+        # Adding it to a SECOND cluster would make these policies resolve to two
+        # master groups - MULTIPLE MATCHES instead of a fix.
+        from insurance.models import MakeModelMaster
+        other = MakeModelMaster.objects.create(
+            make_model_name="scooters", make_model_cluster="YAMAHA ALPHA"
+        )
+        self._post()
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER")
+        other.refresh_from_db()
+        self.assertEqual(other.make_model_cluster, "YAMAHA ALPHA")
+
+    def test_an_already_resolving_value_is_accepted_with_force(self):
+        from insurance.models import MakeModelMaster
+        MakeModelMaster.objects.create(make_model_name="scooters", make_model_cluster="YAMAHA ALPHA")
+        self._post(force="1")
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER, YAMAHA ALPHA")
+
+    def test_an_audit_log_entry_is_written(self):
+        from insurance.models import AuditLog
+        self._post(policy_count="412")
+        entry = AuditLog.objects.get(action="MAKE MODEL CLUSTER ADD")
+        self.assertEqual(entry.user, self.user)
+        self.assertIn("YAMAHA ALPHA", entry.details)
+        self.assertIn("two_wheeler_all", entry.details)
+        self.assertIn("412", entry.details)
+
+    def test_the_rate_form_choices_cache_is_invalidated(self):
+        from django.core.cache import cache
+        from insurance.views import RTO_MAKE_CHOICES_CACHE_KEY
+        cache.set(RTO_MAKE_CHOICES_CACHE_KEY, {"rtos": [], "makes": []}, 600)
+        self._post()
+        self.assertIsNone(cache.get(RTO_MAKE_CHOICES_CACHE_KEY))
+
+    def test_a_get_redirects_without_writing(self):
+        response = self.client.get(self.url, {"make_model_value": "yamaha alpha"})
+        self.assertEqual(response.status_code, 302)
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER")
+
+    def test_the_redirect_preserves_the_page_filters(self):
+        response = self._post(insurer="Acme General", product="Two Wheeler", status="all", q="alpha")
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("insurer=Acme+General", response["Location"])
+        self.assertIn("product=Two+Wheeler", response["Location"])
+        self.assertIn("status=all", response["Location"])
+        self.assertIn("q=alpha", response["Location"])
+
+    def test_a_user_without_the_group_is_refused(self):
+        other = User.objects.create_user(username="nobody", password="a-strong-test-password-2")
+        client = Client()
+        client.force_login(other)
+        response = client.post(self.url, {
+            "make_model_value": "yamaha alpha", "target": "existing", "master_id": str(self.master.id),
+        })
+        self.assertEqual(response.status_code, 403)
+        self.master.refresh_from_db()
+        self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA, TVS JUPITER")
