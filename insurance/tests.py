@@ -6,6 +6,7 @@ from django.test import TestCase, Client, override_settings
 from django.urls import reverse
 from django.urls.converters import get_converters
 from rest_framework_api_key.models import APIKey
+from rest_framework_api_key.permissions import HasAPIKey
 
 from insurance import sso
 from insurance import urls as insurance_urls
@@ -13,21 +14,26 @@ from insurance import urls as insurance_urls
 # Routes in insurance/urls.py that are deliberately reachable while logged
 # out (the password-reset flow, and the catch-all which just bounces
 # everyone to login regardless of auth state). Every other name in that
-# file is expected to redirect an anonymous request straight to the login
-# page — this test exists so a newly added path() that forgets its
-# login_required/page_access_required/staff_required wrapper fails loudly
-# in CI instead of silently shipping as a public page.
+# file is expected to refuse an anonymous request — this test exists so a
+# newly added path() that forgets its login_required/page_access_required/
+# staff_required wrapper fails loudly in CI instead of silently shipping as
+# a public page.
+#
+# Server-to-server API routes are deliberately NOT listed here. They are
+# gated by their own HasAPIKey permission rather than a session, which the
+# test detects directly (see _api_key_gated) — so they are *verified* to
+# reject a keyless request rather than skipped, and a new one needs no entry
+# here. Only genuinely public pages belong in this set.
 PUBLIC_URL_NAMES = {
     "password_reset",
     "password_reset_done",
     "password_reset_confirm",
     "password_reset_complete",
     "catch_all",
-    # Inbound partner-portal SSO handoff (insurance/sso.py): issue-ticket is
-    # gated by its own HasAPIKey permission instead of a session, and
-    # consume is the landing page a not-yet-logged-in browser is redirected
-    # to -- both are meant to be reachable while logged out.
-    "sso_issue_ticket",
+    # The landing page a not-yet-logged-in browser is redirected to by the
+    # inbound partner-portal SSO handoff (insurance/sso.py) — meant to be
+    # reachable while logged out. Its sibling, sso_issue_ticket, is covered
+    # by the HasAPIKey path above instead.
     "sso_consume",
 }
 
@@ -53,6 +59,22 @@ def _dummy_kwargs(url_pattern):
     return kwargs
 
 
+def _api_key_gated(url_pattern):
+    """
+    Whether this route's view is gated by rest_framework_api_key's HasAPIKey
+    rather than (or as well as) a session.
+
+    DRF's as_view() stashes the view class on the function it returns as
+    `.cls`, and functools.wraps -- which page_access_required and friends in
+    insurance/urls.py all use -- copies the wrapped function's __dict__ onto
+    the wrapper. So this still finds the class through a session wrapper,
+    which matters for api-export-rates: it stacks page_access_required on top
+    of a HasAPIKey view.
+    """
+    view_class = getattr(url_pattern.callback, "cls", None)
+    return HasAPIKey in (getattr(view_class, "permission_classes", None) or ())
+
+
 class UrlAuthGateTests(TestCase):
     """
     Every page in insurance/urls.py must be gated behind login_required (or
@@ -60,12 +82,22 @@ class UrlAuthGateTests(TestCase):
     explicitly whitelisted in PUBLIC_URL_NAMES above. An anonymous GET to a
     gated URL must redirect to the login page, never return 200 or any
     other status.
+
+    The one exception is a server-to-server route gated by HasAPIKey: those
+    refuse a keyless request with 403 rather than redirecting a browser, so
+    they are held to "403 or a 302 to login" instead. They are detected
+    directly rather than whitelisted -- see _api_key_gated.
     """
 
     def test_every_named_url_requires_login_unless_whitelisted(self):
         client = Client()
         login_path = reverse("login")
         checked = 0
+        # Collected rather than asserted inline: a bare assert stops at the
+        # first bad route and hides every one after it in urlpatterns order,
+        # which is exactly how three unlisted HasAPIKey routes sat unnoticed
+        # behind a fourth. One failure should report the whole list.
+        failures = []
 
         for pattern in insurance_urls.urlpatterns:
             name = getattr(pattern, "name", None)
@@ -75,19 +107,60 @@ class UrlAuthGateTests(TestCase):
             path = reverse(name, kwargs=_dummy_kwargs(pattern))
             response = client.get(path)
             checked += 1
+            redirects_to_login = (
+                response.status_code == 302 and response.url.startswith(login_path)
+            )
 
-            self.assertEqual(
-                response.status_code, 302,
-                f"'{name}' ({path}) returned {response.status_code} for an "
-                f"anonymous request instead of redirecting to login — it may "
-                f"be missing a login_required/page_access_required/"
-                f"staff_required wrapper in insurance/urls.py."
-            )
-            self.assertTrue(
-                response.url.startswith(login_path),
-                f"'{name}' ({path}) redirected an anonymous request to "
-                f"'{response.url}' instead of the login page."
-            )
+            if _api_key_gated(pattern):
+                # Server-to-server route: rest_framework_api_key refuses a
+                # keyless request with 403 rather than redirecting a browser.
+                # A 302 to login is equally fine — api-export-rates stacks
+                # page_access_required on top, and that fires first. Either
+                # way the route is not reachable anonymously, which is what
+                # this test is actually guarding. Anything else (a 200 above
+                # all, i.e. DRF's AllowAny default) is a real hole.
+                if response.status_code != 403 and not redirects_to_login:
+                    failures.append(
+                        f"'{name}' ({path}) is HasAPIKey-gated but returned "
+                        f"{response.status_code} for an anonymous, keyless request — "
+                        f"expected 403 from the API-key check, or a 302 to login from "
+                        f"a session wrapper stacked on top."
+                    )
+                continue
+
+            if response.status_code != 302:
+                # A DRF route lands here when it is neither HasAPIKey-gated nor
+                # session-wrapped. DEFAULT_PERMISSION_CLASSES is IsAuthenticated
+                # (project/settings.py), so it is not *open* — but this app has
+                # no such route by design, and the choice between the two gates
+                # should be made deliberately rather than inherited, so say that
+                # instead of sending someone hunting for a missing wrapper.
+                if getattr(pattern.callback, "cls", None) is not None:
+                    failures.append(
+                        f"'{name}' ({path}) is a DRF view that is neither HasAPIKey-gated "
+                        f"nor wrapped in insurance/urls.py, so it returned "
+                        f"{response.status_code} instead of redirecting to login. Add "
+                        f"permission_classes = [HasAPIKey] if it is server-to-server, or "
+                        f"a page_access_required wrapper if a browser session should reach it."
+                    )
+                else:
+                    failures.append(
+                        f"'{name}' ({path}) returned {response.status_code} for an "
+                        f"anonymous request instead of redirecting to login — it may "
+                        f"be missing a login_required/page_access_required/"
+                        f"staff_required wrapper in insurance/urls.py."
+                    )
+            elif not redirects_to_login:
+                failures.append(
+                    f"'{name}' ({path}) redirected an anonymous request to "
+                    f"'{response.url}' instead of the login page."
+                )
+
+        self.assertFalse(
+            failures,
+            f"{len(failures)} route(s) did not refuse an anonymous request:\n  "
+            + "\n  ".join(failures)
+        )
 
         # Guards against this test silently checking nothing if the loop
         # above ever stops matching real entries in insurance/urls.py.
@@ -106,6 +179,81 @@ class UrlAuthGateTests(TestCase):
         actual_names = {p.name for p in insurance_urls.urlpatterns if getattr(p, "name", None)}
         stale = PUBLIC_URL_NAMES - actual_names
         self.assertFalse(stale, f"Whitelisted public URL name(s) no longer exist: {stale}")
+
+
+class ApiKeyGatedRouteTests(TestCase):
+    """
+    The server-to-server routes UrlAuthGateTests above hands off to
+    _api_key_gated. That handoff is only safe if the detection actually works
+    and the gate actually refuses, so both are asserted here rather than
+    assumed — otherwise a broken detector would quietly turn the auth gate
+    test into a rubber stamp for every API route.
+    """
+
+    def setUp(self):
+        self.client = Client()
+        self.api_key_routes = [
+            p for p in insurance_urls.urlpatterns
+            if getattr(p, "name", None) and _api_key_gated(p)
+        ]
+
+    def test_the_api_key_routes_are_found(self):
+        # If DRF ever stops setting `.cls` on as_view()'s return value, or a
+        # wrapper stops using functools.wraps, this drops to zero -- and every
+        # one of those routes would then be held to the strict 302 rule, which
+        # fails loudly rather than silently passing. This just names the
+        # breakage directly instead of leaving it to be inferred.
+        found = {p.name for p in self.api_key_routes}
+        self.assertEqual(
+            found,
+            {
+                "api-export-rates",
+                "api_policy_lock_checker",
+                "api_health_payout_rates",
+                "api_make_model_master",
+                "sso_issue_ticket",
+            },
+            "The set of HasAPIKey-gated routes changed. If that was deliberate, update "
+            "this list; if not, _api_key_gated may have stopped seeing through as_view() "
+            "or a urls.py wrapper.",
+        )
+
+    def test_detection_sees_through_a_session_wrapper(self):
+        # api-export-rates is the awkward one: page_access_required stacked on
+        # top of a HasAPIKey view. functools.wraps copies as_view()'s `.cls`
+        # onto the wrapper, which is the only reason this works.
+        wrapped = next(p for p in insurance_urls.urlpatterns if p.name == "api-export-rates")
+        self.assertTrue(_api_key_gated(wrapped))
+        self.assertIsNot(
+            wrapped.callback, wrapped.callback.cls,
+            "Expected api-export-rates to be a wrapper around the DRF view, not the view itself.",
+        )
+
+    def test_every_api_key_route_refuses_a_keyless_request(self):
+        refused = []
+        for pattern in self.api_key_routes:
+            path = reverse(pattern.name, kwargs=_dummy_kwargs(pattern))
+            for method in (self.client.get, self.client.post):
+                response = method(path)
+                self.assertNotIn(
+                    response.status_code, (200, 201),
+                    f"'{pattern.name}' ({path}) served a keyless "
+                    f"{method.__name__.upper()} with {response.status_code}.",
+                )
+            refused.append(pattern.name)
+        self.assertEqual(len(refused), len(self.api_key_routes))
+
+    def test_a_valid_api_key_gets_past_the_gate(self):
+        # The mirror image of the test above: proves the 403s there come from
+        # the missing key, not from the route being broken for everyone.
+        _, key = APIKey.objects.create_key(name="test-gate-probe")
+        pattern = next(p for p in self.api_key_routes if p.name == "api_make_model_master")
+        path = reverse(pattern.name)
+
+        self.assertIn(self.client.get(path).status_code, (401, 403))
+        self.assertEqual(
+            self.client.get(path, HTTP_AUTHORIZATION=f"Api-Key {key}").status_code, 200
+        )
 
 
 @override_settings(
