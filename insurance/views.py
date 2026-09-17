@@ -4298,7 +4298,7 @@ def export_missing_make_model_xlsx(request):
         else:
             resolved_by = ""
         ws.append([
-            "Resolved" if g["resolved"] else "Still missing",
+            "Matched" if g["resolved"] else "Failed",
             g["make"], g["model"], g["value"], g["vehicle_class"], g["product"],
             g["sub_product"], g["insurer"],
             g["policy_count"], g["file_count"],

@@ -104,11 +104,11 @@
     <div class="d-flex flex-wrap align-items-center gap-3">
         <div class="d-flex gap-2">
             <div class="stat-badge">
-                <span class="text-overline mb-1" style="font-size: 10px;">Still Missing</span>
+                <span class="text-overline mb-1" style="font-size: 10px;">Failed</span>
                 <span style="font-size: 16px; font-weight: 800; color: #b91c1c;">{{ total_missing|default:0 }}</span>
             </div>
             <div class="stat-badge">
-                <span class="text-overline mb-1" style="font-size: 10px;">Resolved</span>
+                <span class="text-overline mb-1" style="font-size: 10px;">Matched</span>
                 <span style="font-size: 16px; font-weight: 800; color: #166534;">{{ total_resolved|default:0 }}</span>
             </div>
             <div class="stat-badge">
@@ -131,10 +131,10 @@
     <div class="p-4">
         <div class="d-flex flex-wrap gap-2 mb-4">
             <a href="?status=missing" class="type-chip {% if selected.status == 'missing' %}active{% endif %}">
-                <i class="bi bi-exclamation-circle"></i> Still Missing <span class="count">{{ total_missing|default:0 }}</span>
+                <i class="bi bi-exclamation-circle"></i> Failed <span class="count">{{ total_missing|default:0 }}</span>
             </a>
             <a href="?status=resolved" class="type-chip {% if selected.status == 'resolved' %}active{% endif %}">
-                <i class="bi bi-check-circle"></i> Resolved <span class="count">{{ total_resolved|default:0 }}</span>
+                <i class="bi bi-check-circle"></i> Matched <span class="count">{{ total_resolved|default:0 }}</span>
             </a>
             <a href="?status=all" class="type-chip {% if selected.status == 'all' %}active{% endif %}">
                 All <span class="count">{{ total_all|default:0 }}</span>
@@ -247,15 +247,15 @@
                             </td>
                             <td>
                                 {% if g.resolved_live %}
-                                    <span class="status-pill pill-low"><i class="bi bi-check-circle-fill"></i> Resolved</span>
+                                    <span class="status-pill pill-low"><i class="bi bi-check-circle-fill"></i> Matched</span>
                                     <div class="mm-sub" title="{{ g.resolved_names|join:", " }}">
                                         in {{ g.resolved_preview|join:", " }}{% if g.resolved_extra %} +{{ g.resolved_extra }} more{% endif %}
                                     </div>
                                 {% elif g.resolved_manual %}
-                                    <span class="status-pill pill-low"><i class="bi bi-check-circle-fill"></i> Resolved</span>
+                                    <span class="status-pill pill-low"><i class="bi bi-check-circle-fill"></i> Matched</span>
                                     <div class="mm-sub">marked resolved manually</div>
                                 {% else %}
-                                    <span class="status-pill pill-high"><i class="bi bi-exclamation-circle-fill"></i> Still missing</span>
+                                    <span class="status-pill pill-high"><i class="bi bi-exclamation-circle-fill"></i> Failed</span>
                                 {% endif %}
                             </td>
                             <td><strong>{{ g.make|default:"—" }}</strong></td>
