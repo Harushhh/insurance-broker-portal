@@ -1,0 +1,66 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## What this is
+
+A Django portal for an insurance broker: it ingests MIS (Management Information System) files from insurers, maps each policy row against a rate-card database to calculate payout, tracks rate-card health/overlap, and exposes dashboards for RTO, Make/Model, Pincode, and Health rate masters. A separate Next.js app (`life-payout-grid/`) is linked from the sidebar for life-insurance commission grids.
+
+## Commands
+
+Run from the repo root with the venv active (`venv\Scripts\python.exe` on Windows, no separate activation needed if invoking that binary directly).
+
+```bash
+python manage.py runserver 127.0.0.1:8000    # dev server (also runnable via .claude/launch.json "django-dev")
+python manage.py test                         # full test suite (plain Django TestCase, no pytest)
+python manage.py test insurance.tests.UrlAuthGateTests   # single test class
+python manage.py test insurance.tests.UrlAuthGateTests.test_something  # single test method
+python manage.py test insurance.test_overlap_utils        # overlap-detector tests (separate file, not in tests.py)
+python manage.py makemigrations insurance
+python manage.py migrate
+python manage.py createcachetable             # required once — DB-backed cache for login throttling
+```
+
+Life Payout Grid (separate Next.js app, its own `node_modules`):
+```bash
+npm run dev --prefix life-payout-grid    # or .claude/launch.json "life-payout-grid" (port 3000)
+npm run build --prefix life-payout-grid
+npm run lint --prefix life-payout-grid
+```
+Read `life-payout-grid/node_modules/next/dist/docs/` before writing Next.js code there — see `life-payout-grid/AGENTS.md`: this Next.js version has breaking changes vs. training-data assumptions.
+
+Background jobs (Celery, used for MIS mapping and Gemini OCR extraction) — see `Procfile`:
+```bash
+celery -A project worker --loglevel=info --concurrency=2
+celery -A project beat --loglevel=info    # runs the two scheduled cleanup tasks in project/settings.py
+```
+
+## Architecture
+
+**Single real Django app: `insurance/`.** `config/` and `dashboard/` are legacy scaffold apps (a few lines each, `config` even has a duplicate unused `RateMaster` model) — not wired into `project/urls.py` beyond being in `INSTALLED_APPS`. Don't add features there; everything routes through `insurance/`.
+
+- `project/settings.py` / `project/urls.py` — Django project config. Reads all secrets from `.env` (see `.env` keys, never commit values). `DEBUG=False` hard-fails startup if `SECRET_KEY`, `ALLOWED_HOSTS`, `LIFE_PAYOUT_GRID_AUTH_SECRET`, or `PARTNER_SSO_TICKET_SECRET` are unset — this is intentional, don't "fix" it by adding defaults.
+- `insurance/models.py` — all domain models. Key ones: `RateMaster` (motor rate cards), `HealthRateMaster`, `RTOMaster`, `MakeModelMaster`, `PincodeMaster`, `MISFile`/`MISFailedRow` (uploaded MIS files and rows the mapping engine couldn't resolve), `LockedPolicy`, `SpecialRateRequest`, `RateOverlapScan`/`RateOverlapPair`, `AuditLog`, `MissingMakeModelManualResolution`.
+- `insurance/views.py` (~7600 lines) — nearly the entire request-handling surface, organized into `# ====` / `# ---` banner-commented sections per feature (SSO handoff, upload/import, dashboard, rate master health, missing make/model, health rate master, motor/health payout rates, policy lock checker, business analysis, audit log, ticketing, MIS payout automation, REST API views). Grep the banner comments to navigate rather than reading linearly.
+- `insurance/urls.py` — every route wrapped in one of three access decorators defined at the top of the file: `staff_required` (is_staff/is_superuser/ADMIN group), `super_admin_required` (SUPER_ADMIN group only — reserved for minting Life Payout Grid admin tokens), `page_access_required(group_name)` (ADMIN group OR the named per-page group, checked against real Django `Group` membership set via `/user-management/`). A handful of server-to-server API routes deliberately skip these and use `HasAPIKey` instead. `insurance/tests.py::UrlAuthGateTests` enforces that every new route stays gated — update `PUBLIC_URL_NAMES` there only for genuinely public pages.
+- `insurance/mapping_engine.py` — the MIS-to-RateMaster matching engine (`process_mis_mapping`), a RULE 1-6 sequential-filter chain (insurance company, product, vehicle age, make/model fuzzy match via `rapidfuzz`, RTO, etc.) that narrows a rate-card queryset down to the matching row(s) for a policy. When a rule empties the queryset, that rule's label+detail becomes the stored `MISFailedRow.failure_reason`.
+- `insurance/overlap_utils.py` — the Rate Master Health overlap detector. Its predicates deliberately mirror `mapping_engine`'s RULE 1-6 semantics exactly (blank = wildcard, 0 = a real bound, YES/NO disjoint) so it flags every pair of rate rows the mapping engine could match ambiguously, before an MIS file ever hits them. Changing a rule in one file without the equivalent change in the other will desync detection from reality.
+- `insurance/health_grid_utils.py` — identity-hash/parsing helpers shared between the one-off Excel import command and the web bulk-upload endpoint for `HealthRateMaster`, so both agree on what makes two rows duplicates.
+- `insurance/sso.py` + `views.IssueSSOTicketAPIView` / `views.sso_consume_view` — inbound SSO handoff from an external partner portal (ArhamSecure), signed with `PARTNER_SSO_TICKET_SECRET`. Separate from `LIFE_PAYOUT_GRID_AUTH_SECRET`, which signs the *outbound* handoff into the `life-payout-grid` app (`views.life_payout_grid_admin_redirect`) — do not conflate the two secrets.
+- `insurance/tasks.py` — Celery tasks; currently the two scheduled log-cleanup jobs registered in `CELERY_BEAT_SCHEDULE`.
+- `insurance/management/commands/` — one-off/maintenance scripts: `dedupe_rate_master`, `purge_deleted_rate_master`, `regroup_rate_master`, `run_overlap_scan`, `import_health_rate_master`, `migrate_media_to_object_storage`.
+- Templates live in `insurance/templates/` (mostly flat, a few in `insurance/templates/insurance/`, `partials/`, and `registration/`). `base.html` is the authenticated shell; `base_auth.html` is the login/signup shell.
+
+### Soft delete and status conventions
+- `RateMaster.is_deleted` is a `CharField` `"YES"/"NO"` (not a boolean) and `RateMaster.status` is `"ACTIVE"/"INACTIVE"` — both `db_index=True`. Filter on the string values, not truthiness.
+- The Rate Master / Health Rate Master grid pages themselves still display soft-deleted rows; it's the *downstream* pages (dashboards, payout lookups, mapping engine) that must exclude `is_deleted="YES"`. When adding a new read path over these tables, check which behavior it should match.
+
+### Access control
+Permissions are real Django `Group` objects, managed at `/user-management/` (`staff_required`-gated) and enforced via `page_access_required` in `insurance/urls.py`. Group names are stable identifiers referenced by migrations (e.g. `insurance/migrations/0021_seed_page_access_groups.py`) — don't rename a permission group to "clean it up"; it silently revokes access for everyone already assigned.
+
+### Business-rule ambiguity
+Several features here encode a general rule plus named special cases (e.g. Rate Master Pi/Po margin exemptions, tariff/cc/sc rounding scope). When a new request could combine a general rule and a special case, they combine additively (AND), not as an override — confirm this reading explicitly when a change touches one of these rule sets, and ask up front if a request is ambiguous across more than one axis (e.g. which fields *and* which condition).
+
+## Environment
+
+`.env` (gitignored) supplies: `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `DB_HOST`/`DB_NAME`/`DB_USER`/`DB_PASSWORD`/`DB_PORT` (falls back to SQLite if `DB_NAME` unset, or `DATABASE_URL` wins if set), `EMAIL_HOST`/`EMAIL_PORT`/`EMAIL_HOST_USER`/`EMAIL_HOST_PASSWORD`/`EMAIL_USE_TLS`, `GEMINI_API_KEY` (AI OCR extraction), `LIFE_PAYOUT_GRID_URL`, `LIFE_PAYOUT_GRID_AUTH_SECRET`, `PARTNER_SSO_TICKET_SECRET`. Media storage auto-switches to Cloudflare R2 (S3-compatible) when `AWS_STORAGE_BUCKET_NAME`/`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` are all set, otherwise falls back to local disk. Deployed on Railway (see `Procfile`); `vercel.json` exists but Railway is the active target.
