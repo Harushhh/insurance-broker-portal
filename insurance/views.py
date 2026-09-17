@@ -1755,11 +1755,17 @@ def get_cluster_details(request):
     if not name or cluster_type not in ("rto", "make"):
         return JsonResponse({"success": False, "message": "Invalid request."})
 
+    # __iexact: RateMaster's own new_rto_list/new_vehicle_makes tokens have
+    # drifted in casing across different insurers' imports over time (e.g.
+    # "Private_Car_All" vs. the master row's "Private_Car_ALL"), and the
+    # mapping engine already resolves these names case-insensitively
+    # (see check_resolved_cluster_match) -- an exact-case lookup here just
+    # meant the popup disagreed with what the engine actually matches on.
     if cluster_type == "rto":
-        obj = RTOMaster.objects.filter(rto_name=name).first()
+        obj = RTOMaster.objects.filter(rto_name__iexact=name).first()
         cluster = obj.rto_cluster if obj else None
     else:
-        obj = MakeModelMaster.objects.filter(make_model_name=name).first()
+        obj = MakeModelMaster.objects.filter(make_model_name__iexact=name).first()
         cluster = obj.make_model_cluster if obj else None
 
     if not obj:
@@ -1803,13 +1809,13 @@ def update_cluster_details(request):
     cluster_value = ", ".join(cleaned_items)
 
     if cluster_type == "rto":
-        obj = RTOMaster.objects.filter(rto_name=name).first()
+        obj = RTOMaster.objects.filter(rto_name__iexact=name).first()
         if not obj:
             return JsonResponse({"success": False, "message": f'No RTO group found for "{name}".'})
         obj.rto_cluster = cluster_value
         obj.save(update_fields=["rto_cluster"])
     else:
-        obj = MakeModelMaster.objects.filter(make_model_name=name).first()
+        obj = MakeModelMaster.objects.filter(make_model_name__iexact=name).first()
         if not obj:
             return JsonResponse({"success": False, "message": f'No vehicle make group found for "{name}".'})
         obj.make_model_cluster = cluster_value
