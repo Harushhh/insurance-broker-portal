@@ -574,8 +574,13 @@ def get_make_mapping_context():
     # MakeModelMaster table for every (rate row x make) pair — that was an
     # O(n*m) scan repeated on every request to this and the payout/lock-checker
     # views that call this function.
+    # Keyed upper-case: RateMaster.new_vehicle_makes tokens (rg below) don't
+    # always match a MakeModelMaster.make_model_name's casing byte-for-byte
+    # (different insurers' uploads have spelled the same group differently --
+    # e.g. "Private_Car_All" vs. "Private_Car_ALL") -- an exact-case dict
+    # lookup silently dropped that group's makes from the mapping entirely.
     makes_by_name = {
-        obj.make_model_name.strip(): obj
+        obj.make_model_name.strip().upper(): obj
         for obj in all_makes_objs
         if obj.make_model_name
     }
@@ -605,7 +610,7 @@ def get_make_mapping_context():
         for rg in rate_groups:
             if not rg:
                 continue
-            obj = makes_by_name.get(rg)
+            obj = makes_by_name.get(rg.upper())
             if obj and obj.make_model_cluster:
                 for item in str(obj.make_model_cluster).split(","):
                     item = item.strip()
@@ -1001,10 +1006,18 @@ def api_upload_chunk(request):
                         if not rto_name:
                             raise ValueError("rto_name is blank")
                         if not dry_run:
-                            RTOMaster.objects.update_or_create(
-                                rto_name=rto_name,
-                                defaults={"rto_cluster": rto_cluster or None}
-                            )
+                            # __iexact, not update_or_create(rto_name=...): an
+                            # exact-case match let the same group get re-uploaded
+                            # under different casing (e.g. "ZYX" vs "Zyx") and
+                            # silently create a second RTOMaster row instead of
+                            # updating the existing one -- the split then breaks
+                            # every case-sensitive comparison downstream.
+                            existing = RTOMaster.objects.filter(rto_name__iexact=rto_name).first()
+                            if existing:
+                                existing.rto_cluster = rto_cluster or None
+                                existing.save(update_fields=["rto_cluster"])
+                            else:
+                                RTOMaster.objects.create(rto_name=rto_name, rto_cluster=rto_cluster or None)
                         inserted += 1
                     if not dry_run:
                         cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
@@ -1016,10 +1029,16 @@ def api_upload_chunk(request):
                         if not make_model_name:
                             raise ValueError("make_model_name is blank")
                         if not dry_run:
-                            MakeModelMaster.objects.update_or_create(
-                                make_model_name=make_model_name,
-                                defaults={"make_model_cluster": make_model_cluster or None}
-                            )
+                            # Same __iexact reasoning as rto_master above -- this is
+                            # exactly how "Private_Car_ALL" and "Private_Car_All" end
+                            # up as two separate MakeModelMaster rows for the same
+                            # group after two insurers' files spell it differently.
+                            existing = MakeModelMaster.objects.filter(make_model_name__iexact=make_model_name).first()
+                            if existing:
+                                existing.make_model_cluster = make_model_cluster or None
+                                existing.save(update_fields=["make_model_cluster"])
+                            else:
+                                MakeModelMaster.objects.create(make_model_name=make_model_name, make_model_cluster=make_model_cluster or None)
                         inserted += 1
                     if not dry_run:
                         cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
