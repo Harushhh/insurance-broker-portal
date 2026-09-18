@@ -1082,3 +1082,38 @@ class RateOverlapPair(models.Model):
 
     def __str__(self):
         return f"{self.group_key_a} <-> {self.group_key_b} ({self.conflict_type})"
+
+
+class CsvUploadAttempt(models.Model):
+    """
+    One row per click of "Start Upload" on the Import Data page (upload.html),
+    keyed on a SHA-256 hash of the raw file bytes computed client-side --
+    lets api_check_duplicate_upload warn "this exact file was already
+    uploaded" before a retry (after a timeout/error) or an accidental re-pick
+    of the same file reprocesses rows an earlier, partially-successful attempt
+    already wrote. Recorded at the START of an attempt, not just on success,
+    since a retry of a crashed-partway attempt is exactly the case this
+    guards against.
+    """
+    STATUS_CHOICES = [
+        ("IN_PROGRESS", "In Progress"),
+        ("COMPLETED", "Completed"),
+        ("FAILED", "Failed"),
+    ]
+
+    target_table = models.CharField(max_length=50, db_index=True)
+    file_hash = models.CharField(max_length=64, db_index=True)
+    file_name = models.CharField(max_length=255, blank=True)
+    row_count = models.IntegerField(null=True, blank=True)
+    uploaded_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="IN_PROGRESS")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["target_table", "file_hash"], name="csv_upload_hash_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.target_table} {self.file_name} ({self.status})"

@@ -84,6 +84,8 @@ urlpatterns = [
     # Core portal pages
     path("upload/", page_access_required("Can_Upload_CSV")(views.import_data_view), name="upload"),
     path("api/upload-chunk/", page_access_required("Can_Upload_CSV")(views.api_upload_chunk), name="api_upload_chunk"),
+    path("api/check-duplicate-upload/", page_access_required("Can_Upload_CSV")(views.api_check_duplicate_upload), name="api_check_duplicate_upload"),
+    path("api/complete-upload/", page_access_required("Can_Upload_CSV")(views.api_complete_upload), name="api_complete_upload"),
     path("dashboard/", page_access_required("Can_View_Dashboard")(views.dashboard), name="dashboard"),
     path("api/cluster-details/", page_access_required("Can_View_Dashboard")(views.get_cluster_details), name="get_cluster_details"),
     path("api/cluster-details/update/", page_access_required("Can_View_Dashboard")(views.update_cluster_details), name="update_cluster_details"),

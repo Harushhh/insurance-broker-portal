@@ -55,6 +55,7 @@ from .models import (
     LockedPolicy, SupportTicket, MISFile, MappingConfiguration,
     HealthRateMaster, SpecialRateRequest, MISFailedRow,
     RateOverlapScan, RateOverlapPair, MissingMakeModelManualResolution,
+    CsvUploadAttempt,
 )
 
 # Import our Gemini AI utility and background logic engines
@@ -965,10 +966,76 @@ def home_dashboard(request):
 
 def import_data_view(request):
     """
-    Renders the beautiful SaaS upload interface. 
+    Renders the beautiful SaaS upload interface.
     The heavy lifting is handled via JS (PapaParse) to bypass Server RAM and timeouts.
     """
     return render(request, "upload.html")
+
+
+def api_check_duplicate_upload(request):
+    """
+    Called by upload.html right before it starts reading/chunking a file,
+    with a SHA-256 hash of the raw file bytes computed client-side. Records
+    this attempt and reports back the most recent PRIOR attempt for the same
+    (target_table, file_hash), if any -- so the frontend can warn "this exact
+    file was already uploaded" before a retry or an accidental re-pick
+    reprocesses a file that (fully or partially) already landed in the DB.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
+    try:
+        data = json.loads(request.body)
+        target_table = data.get('target_table')
+        file_hash = data.get('file_hash')
+        file_name = data.get('file_name', '')
+        if not target_table or not file_hash:
+            return JsonResponse({'status': 'error', 'message': 'target_table and file_hash are required'}, status=400)
+
+        prior = CsvUploadAttempt.objects.filter(
+            target_table=target_table, file_hash=file_hash
+        ).order_by('-created_at').first()
+
+        prior_info = None
+        if prior:
+            prior_info = {
+                'uploaded_at': timezone.localtime(prior.created_at).strftime('%d %b %Y, %I:%M %p'),
+                'uploaded_by': prior.uploaded_by.get_full_name() or prior.uploaded_by.username if prior.uploaded_by else 'Unknown user',
+                'status': prior.status,
+                'row_count': prior.row_count,
+            }
+
+        attempt = CsvUploadAttempt.objects.create(
+            target_table=target_table,
+            file_hash=file_hash,
+            file_name=file_name[:255],
+            uploaded_by=request.user if request.user.is_authenticated else None,
+        )
+        return JsonResponse({'status': 'ok', 'attempt_id': attempt.id, 'prior_upload': prior_info})
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
+
+
+def api_complete_upload(request):
+    """
+    Called by upload.html once a chunked upload's real (non-dry-run) pass
+    finishes, success or failure, so later duplicate-upload checks can report
+    an accurate outcome instead of every prior attempt looking identically
+    "in progress" forever.
+    """
+    if request.method != 'POST':
+        return JsonResponse({'status': 'error', 'message': 'Method not allowed'}, status=405)
+    try:
+        data = json.loads(request.body)
+        attempt_id = data.get('attempt_id')
+        if not attempt_id:
+            return JsonResponse({'status': 'error', 'message': 'attempt_id is required'}, status=400)
+        CsvUploadAttempt.objects.filter(id=attempt_id).update(
+            status='COMPLETED' if data.get('success') else 'FAILED',
+            row_count=data.get('row_count'),
+        )
+        return JsonResponse({'status': 'ok'})
+    except Exception as e:
+        return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 
 def api_upload_chunk(request):
@@ -1061,11 +1128,28 @@ def api_upload_chunk(request):
                     valid_rtos = {str(rto).lower() for rto in RTOMaster.objects.values_list("rto_name", flat=True) if rto}
                     valid_makes = {str(make).lower() for make in MakeModelMaster.objects.values_list("make_model_name", flat=True) if make}
 
-                    products_map = {p.name.lower(): p for p in ProductMaster.objects.all()}
-                    sub_products_map = {sp.name.lower(): sp for sp in SubProductMaster.objects.all()}
-                    policy_types_map = {pt.name.lower(): pt for pt in PolicyTypeMaster.objects.all()}
-                    fuel_types_map = {ft.name.lower(): ft for ft in FuelTypeMaster.objects.all()}
-                    mmc_classes_map = {m.name.lower(): m for m in MakeModelClassMaster.objects.all()}
+                    # Loaded once per chunk and indexed both by name and by id --
+                    # a CSV that carries numeric master ids instead of names (a
+                    # common export format) used to send every single row back
+                    # to the DB for a fresh .filter(id=...).first(), since the
+                    # id branch below never consulted the name-keyed cache. With
+                    # these tables already fully loaded here, indexing by id too
+                    # is free and turns that per-row query into a dict lookup.
+                    products_all = list(ProductMaster.objects.all())
+                    products_map = {p.name.lower(): p for p in products_all}
+                    products_by_id = {p.id: p for p in products_all}
+                    sub_products_all = list(SubProductMaster.objects.all())
+                    sub_products_map = {sp.name.lower(): sp for sp in sub_products_all}
+                    sub_products_by_id = {sp.id: sp for sp in sub_products_all}
+                    policy_types_all = list(PolicyTypeMaster.objects.all())
+                    policy_types_map = {pt.name.lower(): pt for pt in policy_types_all}
+                    policy_types_by_id = {pt.id: pt for pt in policy_types_all}
+                    fuel_types_all = list(FuelTypeMaster.objects.all())
+                    fuel_types_map = {ft.name.lower(): ft for ft in fuel_types_all}
+                    fuel_types_by_id = {ft.id: ft for ft in fuel_types_all}
+                    mmc_classes_all = list(MakeModelClassMaster.objects.all())
+                    mmc_classes_map = {m.name.lower(): m for m in mmc_classes_all}
+                    mmc_classes_by_id = {m.id: m for m in mmc_classes_all}
                     
                     ynn_map = {y.code.lower(): y for y in YesNoNAMaster.objects.all()}
                     for code in ["YES", "NO", "NA"]:
@@ -1098,12 +1182,12 @@ def api_upload_chunk(request):
                         if v in ["no", "n", "false", "0"]: return ynn_map["no"]
                         return ynn_map["na"]
 
-                    def get_master(val, mapping_dict, ModelClass):
+                    def get_master(val, mapping_dict, ModelClass, by_id_dict=None):
                         if not val: return None
                         v = str(val).strip()
                         if not v: return None
                         if v.isdigit() and ModelClass != ProductMaster:
-                            obj = ModelClass.objects.filter(id=int(v)).first()
+                            obj = by_id_dict.get(int(v)) if by_id_dict is not None else ModelClass.objects.filter(id=int(v)).first()
                             if obj:
                                 mapping_dict[obj.name.lower()] = obj
                                 return obj
@@ -1158,7 +1242,7 @@ def api_upload_chunk(request):
                         product_obj = None
                         if product_val:
                             if product_val.isdigit():
-                                product_obj = ProductMaster.objects.filter(id=int(product_val)).first()
+                                product_obj = products_by_id.get(int(product_val))
                             else:
                                 if product_val.lower() in products_map:
                                     product_obj = products_map[product_val.lower()]
@@ -1166,10 +1250,10 @@ def api_upload_chunk(request):
                                     product_obj = ProductMaster.objects.create(name=product_val)
                                     products_map[product_val.lower()] = product_obj
 
-                        sub_product_obj = get_master(row.get("sub_product"), sub_products_map, SubProductMaster)
-                        policy_type_obj = get_master(row.get("policy_type"), policy_types_map, PolicyTypeMaster)
-                        fuel_type_obj = get_master(row.get("fuel_type"), fuel_types_map, FuelTypeMaster)
-                        mmc_obj = get_master(row.get("make_model_class"), mmc_classes_map, MakeModelClassMaster)
+                        sub_product_obj = get_master(row.get("sub_product"), sub_products_map, SubProductMaster, sub_products_by_id)
+                        policy_type_obj = get_master(row.get("policy_type"), policy_types_map, PolicyTypeMaster, policy_types_by_id)
+                        fuel_type_obj = get_master(row.get("fuel_type"), fuel_types_map, FuelTypeMaster, fuel_types_by_id)
+                        mmc_obj = get_master(row.get("make_model_class"), mmc_classes_map, MakeModelClassMaster, mmc_classes_by_id)
                         
                         is_ncb_obj = get_ynn(row.get("is_ncb"))
                         is_cpa_obj = get_ynn(row.get("is_cpa"))

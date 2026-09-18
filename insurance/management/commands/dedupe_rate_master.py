@@ -41,21 +41,26 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--cross-group", action="store_true",
-            help="Also/instead soft-delete identical-content ACTIVE rows across different group_ids.",
+            help="Also/instead soft-delete identical-content rows (of the given --status) across different group_ids.",
+        )
+        parser.add_argument(
+            "--status", choices=["ACTIVE", "INACTIVE"], default="ACTIVE",
+            help="Cross-group mode only: which status to scan for duplicates (default ACTIVE).",
         )
 
     def handle(self, *args, **options):
         apply_changes = options["apply"]
         cross_group = options["cross_group"]
+        status = options["status"]
 
-        _, clusters = find_duplicate_clusters(cross_group)
+        _, clusters = find_duplicate_clusters(cross_group, status)
 
         drop_ids = []
         for extra, ids, group_ids in clusters:
             drop_ids.extend(ids[1:])
         drop_ids.sort()
 
-        mode_desc = "cross-group (ACTIVE rows, any group_id)" if cross_group else "within-group"
+        mode_desc = f"cross-group ({status} rows, any group_id)" if cross_group else "within-group"
         self.stdout.write(f"Mode: {mode_desc}")
         self.stdout.write(f"Duplicate clusters found: {len(clusters):,}")
         self.stdout.write(f"Rows that would be soft-deleted (is_deleted=YES): {len(drop_ids):,}")

@@ -44,7 +44,7 @@ CONTENT_FIELDS = [
 ]
 
 
-def find_duplicate_clusters(cross_group):
+def find_duplicate_clusters(cross_group, status="ACTIVE"):
     """
     Returns (total_rows_scanned, clusters) where clusters is a list of
     (extra_row_count, sorted_ids, group_ids_involved) tuples, one per
@@ -52,13 +52,20 @@ def find_duplicate_clusters(cross_group):
 
     Within-group mode (cross_group=False): a cluster is rows sharing one
     group_id AND identical content. Cross-group mode: a cluster is rows
-    sharing identical content anywhere (status=ACTIVE, is_deleted=NO),
-    regardless of group_id.
+    sharing identical content anywhere (status=<status>, is_deleted=NO),
+    regardless of group_id. `status` defaults to ACTIVE (the original,
+    "re-uploaded content that's already live" case) but can be set to
+    INACTIVE to catch the same signature among never-activated rows -- e.g.
+    a bulk upload that got retried after a mid-upload server error and
+    re-inserted rows an earlier, partially-successful attempt already wrote
+    (each attempt lands in its own RateGroup, since upload_batch_id is part
+    of the group hash -- see GROUP_FIELDS in views.py -- so these are
+    cross-group duplicates, not within-group ones).
     """
     fields = ["id", "group_id"] + CONTENT_FIELDS
     qs = RateMaster.objects.exclude(group_id__isnull=True).filter(is_deleted="NO")
     if cross_group:
-        qs = qs.filter(status="ACTIVE")
+        qs = qs.filter(status=status)
     rows = qs.values(*fields).iterator(chunk_size=5000)
 
     total_rows = 0
@@ -103,19 +110,24 @@ class Command(BaseCommand):
         parser.add_argument(
             "--cross-group", action="store_true",
             help=(
-                "Also/instead look for identical-content ACTIVE rows across different "
-                "group_ids, not just within the same group."
+                "Also/instead look for identical-content rows (of the given --status) "
+                "across different group_ids, not just within the same group."
             ),
+        )
+        parser.add_argument(
+            "--status", choices=["ACTIVE", "INACTIVE"], default="ACTIVE",
+            help="Cross-group mode only: which status to scan for duplicates (default ACTIVE).",
         )
 
     def handle(self, *args, **options):
         sample_groups = options["sample_groups"]
         cross_group = options["cross_group"]
+        status = options["status"]
 
-        total_rows, clusters = find_duplicate_clusters(cross_group)
+        total_rows, clusters = find_duplicate_clusters(cross_group, status)
         total_extra_rows = sum(c[0] for c in clusters)
 
-        mode_desc = "cross-group (ACTIVE rows, any group_id)" if cross_group else "within-group"
+        mode_desc = f"cross-group ({status} rows, any group_id)" if cross_group else "within-group"
         self.stdout.write(f"Scanned {total_rows:,} RateMaster rows [{mode_desc} mode].")
         self.stdout.write(f"Duplicate clusters found: {len(clusters):,}")
         self.stdout.write(f"Total extra (duplicate) rows found: {total_extra_rows:,}")
