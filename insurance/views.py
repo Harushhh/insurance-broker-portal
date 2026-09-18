@@ -1116,6 +1116,31 @@ def api_upload_chunk(request):
 
                     instances_to_create = []
 
+                    # Cross-upload duplicate guard, batched: the per-row .exists()
+                    # query this replaced (one complex ~30-column WHERE per row)
+                    # took long enough over a 2500-row chunk to blow past Railway's
+                    # proxy timeout and 500 the whole request. Every field below is
+                    # a FloatField (see models.py) so these DB-fetched values
+                    # compare exactly against the same float(row[...]) parses done
+                    # per row further down -- no Decimal/float mismatch risk.
+                    chunk_companies = {str(r.get("insurance_company", "")).strip() for r in rows}
+                    existing_active_keys = set(
+                        RateMaster.objects.filter(
+                            status="ACTIVE",
+                            is_deleted="NO",
+                            insurance_company__in=chunk_companies,
+                        ).values_list(
+                            "insurance_company", "insurer_vertical", "new_vehicle_makes", "new_rto_list",
+                            "product_id", "sub_product_id", "policy_type_id", "fuel_type_id", "make_model_class_id",
+                            "vehicle_age_min", "vehicle_age_max",
+                            "pi_od_rate", "pi_tp_rate", "pi_tp_2", "pi_tp_3", "pi_tp_4", "pi_tp_5",
+                            "pi_net_rate", "pi_flat_amount", "pi_vli", "pi_type",
+                            "tariff_min", "tariff_max",
+                            "is_ncb_id", "is_cpa_id", "is_zd_id",
+                            "cc_min", "cc_max", "from_date", "to_date", "sc_min", "sc_max", "add_tnc",
+                        )
+                    )
+
                     for row in rows:
                         raw_rtos = row.get("new_rto_list") or ""
                         rto_items = [x.strip() for x in raw_rtos.split(",") if x.strip()]
@@ -1239,44 +1264,21 @@ def api_upload_chunk(request):
                         # Only checked against ACTIVE/NO rows, not INACTIVE or
                         # soft-deleted ones -- re-introducing a rate that was
                         # deliberately turned off is a legitimate thing to upload.
-                        active_duplicate_exists = RateMaster.objects.filter(
-                            status="ACTIVE",
-                            is_deleted="NO",
-                            insurance_company=cleaned["insurance_company"],
-                            insurer_vertical=cleaned["insurer_vertical"],
-                            new_vehicle_makes=cleaned["new_vehicle_makes"],
-                            new_rto_list=row.get("new_rto_list") or None,
-                            product=product_obj,
-                            sub_product=sub_product_obj,
-                            policy_type=policy_type_obj,
-                            fuel_type=fuel_type_obj,
-                            make_model_class=mmc_obj,
-                            vehicle_age_min=cleaned["vehicle_age_min"],
-                            vehicle_age_max=cleaned["vehicle_age_max"],
-                            pi_od_rate=cleaned["pi_od_rate"],
-                            pi_tp_rate=cleaned["pi_tp_rate"],
-                            pi_tp_2=cleaned["pi_tp_2"],
-                            pi_tp_3=cleaned["pi_tp_3"],
-                            pi_tp_4=cleaned["pi_tp_4"],
-                            pi_tp_5=cleaned["pi_tp_5"],
-                            pi_net_rate=cleaned["pi_net_rate"],
-                            pi_flat_amount=cleaned["pi_flat_amount"],
-                            pi_vli=cleaned["pi_vli"],
-                            pi_type=cleaned["pi_type"],
-                            tariff_min=cleaned["tariff_min"],
-                            tariff_max=cleaned["tariff_max"],
-                            is_ncb=is_ncb_obj,
-                            is_cpa=is_cpa_obj,
-                            is_zd=is_zd_obj,
-                            cc_min=cleaned["cc_min"],
-                            cc_max=cleaned["cc_max"],
-                            from_date=cleaned["from_date"],
-                            to_date=cleaned["to_date"],
-                            sc_min=cleaned["sc_min"],
-                            sc_max=cleaned["sc_max"],
-                            add_tnc=cleaned["add_tnc"],
-                        ).exists()
-                        if active_duplicate_exists:
+                        dup_key = (
+                            cleaned["insurance_company"], cleaned["insurer_vertical"], cleaned["new_vehicle_makes"], row.get("new_rto_list") or None,
+                            product_obj.id if product_obj else None,
+                            sub_product_obj.id if sub_product_obj else None,
+                            policy_type_obj.id if policy_type_obj else None,
+                            fuel_type_obj.id if fuel_type_obj else None,
+                            mmc_obj.id if mmc_obj else None,
+                            cleaned["vehicle_age_min"], cleaned["vehicle_age_max"],
+                            cleaned["pi_od_rate"], cleaned["pi_tp_rate"], cleaned["pi_tp_2"], cleaned["pi_tp_3"], cleaned["pi_tp_4"], cleaned["pi_tp_5"],
+                            cleaned["pi_net_rate"], cleaned["pi_flat_amount"], cleaned["pi_vli"], cleaned["pi_type"],
+                            cleaned["tariff_min"], cleaned["tariff_max"],
+                            is_ncb_obj.id, is_cpa_obj.id, is_zd_obj.id,
+                            cleaned["cc_min"], cleaned["cc_max"], cleaned["from_date"], cleaned["to_date"], cleaned["sc_min"], cleaned["sc_max"], cleaned["add_tnc"],
+                        )
+                        if dup_key in existing_active_keys:
                             continue
 
                         # Within one group, new_rto_list is what distinguishes one
