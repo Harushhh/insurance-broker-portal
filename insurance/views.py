@@ -15,6 +15,7 @@ from django.core.cache import cache
 from django.conf import settings
 from django.db import transaction
 from django import forms
+import base64
 import csv
 import json
 from urllib.parse import urlencode
@@ -64,7 +65,7 @@ from .forms import (
 )
 from .tasks import (
     process_mis_mapping_task, process_policy_document_task,
-    run_rate_overlap_scan_task,
+    run_rate_overlap_scan_task, save_grid_document_file_task,
 )
 from .health_grid_utils import (
     parse_number as parse_health_number,
@@ -6708,13 +6709,26 @@ def grid_management(request):
         uploaded_file = request.FILES.get("uploaded_file")
 
         if insurer_name and uploaded_file:
-            GridDocument.objects.create(
+            file_bytes = uploaded_file.read()
+            file_name = uploaded_file.name
+
+            doc = GridDocument.objects.create(
                 insurer_name=insurer_name,
                 remarks=remarks,
                 work_effected_date=work_effected_date,
-                uploaded_file=uploaded_file,
+                uploaded_file="",
                 uploaded_by=request.user,
                 status="PENDING"
+            )
+            # Writing uploaded_file to storage (Cloudflare R2) here used to
+            # block this request until the write finished -- when R2 was slow
+            # to respond, that pinned a gunicorn worker for up to the full
+            # request timeout, and with only a couple of worker/thread slots
+            # (see Procfile) that alone was enough to starve every other page
+            # on the site. Deferring the actual storage write to Celery keeps
+            # a slow/stuck upload from taking down unrelated requests.
+            save_grid_document_file_task.delay(
+                doc.id, file_name, base64.b64encode(file_bytes).decode("ascii")
             )
 
             uploader_name = "System User"

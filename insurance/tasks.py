@@ -58,6 +58,26 @@ def process_mis_mapping_task(self, mis_file_id):
 
 @shared_task(
     bind=True,
+    max_retries=3,
+    default_retry_delay=30,
+    soft_time_limit=120,
+    time_limit=150,
+)
+def save_grid_document_file_task(self, document_id, filename, file_b64):
+    # The write to storage (Cloudflare R2) is the slow/hang-prone part of a
+    # grid upload -- see grid_management in views.py, which now creates the
+    # GridDocument row with an empty uploaded_file and hands the actual bytes
+    # here so a stuck storage write can't block a gunicorn worker.
+    import base64
+    from django.core.files.base import ContentFile
+    from .models import GridDocument
+
+    doc = GridDocument.objects.get(id=document_id)
+    doc.uploaded_file.save(filename, ContentFile(base64.b64decode(file_b64)), save=True)
+
+
+@shared_task(
+    bind=True,
     max_retries=2,
     default_retry_delay=60,
     soft_time_limit=180,

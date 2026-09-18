@@ -280,9 +280,13 @@
                     </td>
                     <td style="padding:16px; color:#475569;">{{ doc.uploaded_date|date:"d M Y, h:i A" }}</td>
                     <td style="padding:16px; text-align:right;">
+                        {% if doc.uploaded_file %}
                         <a href="{{ doc.uploaded_file.url }}" target="_blank" class="btn" style="background:#eff6ff; color:#2563eb; border:1px solid #bfdbfe; padding:8px 16px; border-radius:8px; font-size:13px; font-weight:600; text-decoration:none;">
                             <i class="bi bi-download"></i> Download
                         </a>
+                        {% else %}
+                        <span style="color:#94a3b8; font-size:13px;">Uploading…</span>
+                        {% endif %}
                     </td>
                 </tr>
                 {% empty %}
