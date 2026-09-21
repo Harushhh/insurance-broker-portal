@@ -269,15 +269,15 @@
                     </div>
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">Age Range</label>
-                        <input type="text" name="age_range" placeholder="e.g. 0-5" value="{{ selected.age_range|default_if_none:'' }}" class="form-control-premium">
+                        <input type="text" name="age_range" placeholder="e.g. 0-5" value="{{ selected.age_range|default_if_none:'' }}" class="form-control-premium" pattern="[0-9]*\.?[0-9]*\s*(-\s*[0-9]*\.?[0-9]*)?" title="Enter a number or a range like 0-5">
                     </div>
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">CC Range</label>
-                        <input type="text" name="cc_range" placeholder="e.g. 1000-1500" value="{{ selected.cc_range|default_if_none:'' }}" class="form-control-premium">
+                        <input type="text" name="cc_range" placeholder="e.g. 1000-1500" value="{{ selected.cc_range|default_if_none:'' }}" class="form-control-premium" pattern="[0-9]*\.?[0-9]*\s*(-\s*[0-9]*\.?[0-9]*)?" title="Enter a number or a range like 1000-1500">
                     </div>
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">SC Range</label>
-                        <input type="text" name="sc_range" placeholder="e.g. 1-5" value="{{ selected.sc_range|default_if_none:'' }}" class="form-control-premium">
+                        <input type="text" name="sc_range" placeholder="e.g. 1-5" value="{{ selected.sc_range|default_if_none:'' }}" class="form-control-premium" pattern="[0-9]*\.?[0-9]*\s*(-\s*[0-9]*\.?[0-9]*)?" title="Enter a number or a range like 1-5">
                     </div>
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">Zero Dep (ZD)</label>

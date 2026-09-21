@@ -215,15 +215,15 @@
                     </div>
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">Sum Insured Range</label>
-                        <input type="text" name="sum_insured_range" placeholder="e.g. 0-500000" value="{{ selected.sum_insured_range|default_if_none:'' }}" class="form-control-premium">
+                        <input type="text" name="sum_insured_range" placeholder="e.g. 0-500000" value="{{ selected.sum_insured_range|default_if_none:'' }}" class="form-control-premium" pattern="[0-9]*\.?[0-9]*\s*(-\s*[0-9]*\.?[0-9]*)?" title="Enter a number or a range like 0-500000">
                     </div>
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">Age Range</label>
-                        <input type="text" name="age_range" placeholder="e.g. 0-59.99" value="{{ selected.age_range|default_if_none:'' }}" class="form-control-premium">
+                        <input type="text" name="age_range" placeholder="e.g. 0-59.99" value="{{ selected.age_range|default_if_none:'' }}" class="form-control-premium" pattern="[0-9]*\.?[0-9]*\s*(-\s*[0-9]*\.?[0-9]*)?" title="Enter a number or a range like 0-59.99">
                     </div>
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">Deductible Range</label>
-                        <input type="text" name="deductible_range" placeholder="e.g. 0-10000000" value="{{ selected.deductible_range|default_if_none:'' }}" class="form-control-premium">
+                        <input type="text" name="deductible_range" placeholder="e.g. 0-10000000" value="{{ selected.deductible_range|default_if_none:'' }}" class="form-control-premium" pattern="[0-9]*\.?[0-9]*\s*(-\s*[0-9]*\.?[0-9]*)?" title="Enter a number or a range like 0-10000000">
                     </div>
                     <div class="col-12 col-md-4 col-lg-3 col-xl-2">
                         <label class="text-overline">Is Deleted?</label>

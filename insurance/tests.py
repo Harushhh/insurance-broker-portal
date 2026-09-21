@@ -575,6 +575,74 @@ class GridSummaryDateFilterTests(TestCase):
         self.assertEqual(len(data_rows), 2)
 
 
+class RangeFilterInvalidInputTests(TestCase):
+    """
+    apply_range_filter() (shared by Rate Master's dashboard/export and Health
+    Rate Master) feeds request.GET values straight into a filter on a
+    FloatField. A value Django can't coerce with float() -- e.g. "12/" or
+    "12\\", typed into Age Range / CC Range / SC Range -- used to raise an
+    uncaught ValueError there and 500 the page, instead of being ignored the
+    way an invalid date already is elsewhere on this same dashboard (see
+    GridSummaryDateFilterTests.test_an_invalid_date_is_ignored_rather_than_erroring).
+    """
+
+    def setUp(self):
+        from insurance.models import ProductMaster, RateGroup, RateMaster
+
+        self.client = Client()
+        Group.objects.get_or_create(name="Can_View_Dashboard")
+        Group.objects.get_or_create(name="Can_View_Health_Rate_Master")
+        self.user = User.objects.create_user(username="ops", password="a-strong-test-password-1")
+        self.user.groups.add(
+            Group.objects.get(name="Can_View_Dashboard"),
+            Group.objects.get(name="Can_View_Health_Rate_Master"),
+        )
+        self.client.force_login(self.user)
+
+        product = ProductMaster.objects.create(name="Private Car")
+        RateMaster.objects.create(
+            insurance_company="Acme General", product=product, status="ACTIVE", is_deleted="NO",
+            group=RateGroup.objects.create(key_hash="range-filter-h1"),
+            vehicle_age_min=0, vehicle_age_max=5,
+        )
+
+    def test_slash_or_backslash_in_age_range_is_ignored_rather_than_erroring(self):
+        # dashboard() only runs its real query once >=2 filters are set --
+        # match that here with a harmless second filter (status).
+        for bad_value in ["12/", "12\\"]:
+            response = self.client.get(reverse("dashboard"), {"age_range": bad_value, "status": "ACTIVE"})
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.context["total"], 1)
+
+    def test_slash_in_cc_or_sc_range_is_ignored_rather_than_erroring(self):
+        response = self.client.get(
+            reverse("dashboard"), {"cc_range": "12/", "sc_range": "3\\", "status": "ACTIVE"}
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_export_honours_the_same_graceful_handling(self):
+        response = self.client.get(reverse("export_rates_xlsx"), {"age_range": "12/"})
+        self.assertEqual(response.status_code, 200)
+
+    def test_health_rate_master_range_filters_are_also_protected(self):
+        response = self.client.get(reverse("health_rate_master"), {
+            "age_range": "12/", "sum_insured_range": "1\\", "deductible_range": "x",
+        })
+        self.assertEqual(response.status_code, 200)
+
+    def test_valid_bare_age_range_still_filters(self):
+        # 5 falls inside the fixture row's [0, 5] span -> still matches.
+        response = self.client.get(reverse("dashboard"), {"age_range": "5", "status": "ACTIVE"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total"], 1)
+
+    def test_out_of_range_age_still_excludes(self):
+        # Proves invalid input is ignored, not that filtering stopped working.
+        response = self.client.get(reverse("dashboard"), {"age_range": "99", "status": "ACTIVE"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["total"], 0)
+
+
 class ApiUploadChunkRateMasterDedupTests(TestCase):
     """
     Bulk Upload -> Rate Master (api_upload_chunk) used to insert a fresh

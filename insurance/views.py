@@ -475,6 +475,17 @@ def split_csv_values(values):
                 out.append(part)
     return out
 
+def _is_valid_range_number(value):
+    # field_min/field_max are FloatFields -- Django coerces the filter value
+    # via float() while building the query, which raises an uncaught
+    # ValueError (-> 500) for stray characters like "/" or "\". Validate
+    # here so an unparseable value is just ignored, like an empty one.
+    try:
+        float(value)
+    except (TypeError, ValueError):
+        return False
+    return True
+
 def apply_range_filter(qs, field_min, field_max, range_val):
     if not range_val:
         return qs
@@ -482,14 +493,15 @@ def apply_range_filter(qs, field_min, field_max, range_val):
         parts = range_val.split("-")
         val_min = parts[0].strip()
         val_max = parts[1].strip()
-        if val_min:
+        if val_min and _is_valid_range_number(val_min):
             qs = qs.filter(**{field_min: val_min})
-        if val_max:
+        if val_max and _is_valid_range_number(val_max):
             qs = qs.filter(**{field_max: val_max})
     else:
         # A bare value (no "-") means "records whose min-max span contains
         # this value", not an exact match on the min column.
-        qs = qs.filter(**{f"{field_min}__lte": range_val, f"{field_max}__gte": range_val})
+        if _is_valid_range_number(range_val):
+            qs = qs.filter(**{f"{field_min}__lte": range_val, f"{field_max}__gte": range_val})
     return qs
 
 def get_na_class_list_for_product(product_id: str):
