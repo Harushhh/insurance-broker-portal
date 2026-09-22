@@ -1517,7 +1517,12 @@ def api_upload_chunk(request):
 # -------------------------
 # Dashboard (GROUPED view)
 # -------------------------
-DASHBOARD_BATCH_SIZE = 50
+# Choices for the "rows per page" selector on dashboard.html -- default is
+# first, and any page_size not in this list (missing, malformed, or a
+# tampered query param past the 200 cap) falls back to it rather than
+# serving an unbounded page.
+DASHBOARD_PAGE_SIZE_OPTIONS = (50, 100, 200)
+DASHBOARD_BATCH_SIZE = DASHBOARD_PAGE_SIZE_OPTIONS[0]
 
 # The Motor Rate Master filter/table show "UNLOCKED"/"LOCKED" (see
 # dashboard.html), but RateMaster.status only ever stores "ACTIVE"/"INACTIVE"
@@ -1558,6 +1563,13 @@ def dashboard(request):
     is_zd = (request.GET.get("is_zd") or "").strip()
     is_ncb = (request.GET.get("is_ncb") or "").strip()
     is_cpa = (request.GET.get("is_cpa") or "").strip()
+
+    try:
+        page_size = int(request.GET.get("page_size") or DASHBOARD_BATCH_SIZE)
+    except ValueError:
+        page_size = DASHBOARD_BATCH_SIZE
+    if page_size not in DASHBOARD_PAGE_SIZE_OPTIONS:
+        page_size = DASHBOARD_BATCH_SIZE
 
     filter_count = sum(1 for v in [
         q, status_filter, is_deleted_filter, created_date, updated_date, date_range,
@@ -1616,7 +1628,9 @@ def dashboard(request):
                 "is_zd": is_zd,
                 "is_ncb": is_ncb,
                 "is_cpa": is_cpa,
+                "page_size": page_size,
             },
+            "page_size_options": DASHBOARD_PAGE_SIZE_OPTIONS,
             "no_filter_selected": True,
         })
 
@@ -1731,7 +1745,7 @@ def dashboard(request):
             matching_gids_set.add(gid)
             ordered_gids.append(gid)
 
-    paginator = Paginator(ordered_gids, DASHBOARD_BATCH_SIZE)
+    paginator = Paginator(ordered_gids, page_size)
     try:
         page_number = int(request.GET.get("page") or 1)
     except ValueError:
@@ -1859,7 +1873,9 @@ def dashboard(request):
             "is_zd": is_zd,
             "is_ncb": is_ncb,
             "is_cpa": is_cpa,
-        }
+            "page_size": page_size,
+        },
+        "page_size_options": DASHBOARD_PAGE_SIZE_OPTIONS,
     })
 
 

@@ -131,6 +131,14 @@
     .pager .ellipsis { color: #94a3b8; padding: 7px 4px; border: none; }
     .pager .page-num { min-width: 36px; text-align: center; }
     .pager .page-num.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+    .page-size-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 20px 0; }
+    .page-size-bar label { font-size: 12.5px; font-weight: 600; color: #64748b; display: flex; align-items: center; gap: 8px; margin: 0; }
+    .page-size-bar select {
+        border: 1px solid #cbd5e1; border-radius: 8px; padding: 5px 10px; font-size: 13px;
+        font-weight: 600; color: #0f172a; background-color: #fff; cursor: pointer;
+    }
+    .page-size-bar select:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
 </style>
 
 <div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3 mb-4">
@@ -173,6 +181,7 @@
     <div class="p-4">
         <form method="GET" action="{% url 'dashboard' %}" id="dashboardFilterForm">
             <input type="hidden" name="auto_loaded_today" id="auto_loaded_today" value="{{ request.GET.auto_loaded_today|default_if_none:'' }}">
+            <input type="hidden" name="page_size" id="page_size_hidden" value="{{ selected.page_size|default:50 }}">
 
             <div class="row g-3 mb-3">
                 <div class="col-12 col-md-4 col-lg-3 col-xl-2">
@@ -412,6 +421,17 @@
                         {% endfor %}
                     </tbody>
                 </table>
+            </div>
+
+            <div class="page-size-bar">
+                <label for="pageSizeSelect">
+                    Rows per page
+                    <select id="pageSizeSelect" onchange="changePageSize(this.value)">
+                        {% for size in page_size_options %}
+                            <option value="{{ size }}" {% if selected.page_size == size %}selected{% endif %}>{{ size }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
             </div>
 
             {% if page_obj.paginator.num_pages > 1 %}
@@ -661,6 +681,17 @@
         }
         rowChecks.forEach(cb => cb.addEventListener('change', updateCheckCount));
     });
+
+    // --- 5b. Rows-per-page selector ---
+    // Re-navigates with the new page_size, preserving every other filter
+    // param already on the URL, and drops any existing `page` so the
+    // reload lands on page 1 of the resized result set.
+    function changePageSize(value) {
+        const params = new URLSearchParams(window.location.search);
+        params.set('page_size', value);
+        params.delete('page');
+        window.location.search = params.toString();
+    }
 
     // --- 6. Modal Trigger ---
     function openBulkModal() {
