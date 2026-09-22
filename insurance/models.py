@@ -308,6 +308,8 @@ class HealthRateMaster(models.Model):
 class RTOMaster(models.Model):
     rto_name = models.CharField(max_length=100, unique=True)
     rto_cluster = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["rto_name"]
@@ -319,6 +321,8 @@ class RTOMaster(models.Model):
 class MakeModelMaster(models.Model):
     make_model_name = models.CharField(max_length=150, unique=True)
     make_model_cluster = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["make_model_name"]

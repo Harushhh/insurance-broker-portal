@@ -1095,7 +1095,7 @@ def api_upload_chunk(request):
                             existing = RTOMaster.objects.filter(rto_name__iexact=rto_name).first()
                             if existing:
                                 existing.rto_cluster = rto_cluster or None
-                                existing.save(update_fields=["rto_cluster"])
+                                existing.save(update_fields=["rto_cluster", "updated_at"])
                             else:
                                 RTOMaster.objects.create(rto_name=rto_name, rto_cluster=rto_cluster or None)
                         inserted += 1
@@ -1116,7 +1116,7 @@ def api_upload_chunk(request):
                             existing = MakeModelMaster.objects.filter(make_model_name__iexact=make_model_name).first()
                             if existing:
                                 existing.make_model_cluster = make_model_cluster or None
-                                existing.save(update_fields=["make_model_cluster"])
+                                existing.save(update_fields=["make_model_cluster", "updated_at"])
                             else:
                                 MakeModelMaster.objects.create(make_model_name=make_model_name, make_model_cluster=make_model_cluster or None)
                         inserted += 1
@@ -1931,13 +1931,13 @@ def update_cluster_details(request):
         if not obj:
             return JsonResponse({"success": False, "message": f'No RTO group found for "{name}".'})
         obj.rto_cluster = cluster_value
-        obj.save(update_fields=["rto_cluster"])
+        obj.save(update_fields=["rto_cluster", "updated_at"])
     else:
         obj = MakeModelMaster.objects.filter(make_model_name__iexact=name).first()
         if not obj:
             return JsonResponse({"success": False, "message": f'No vehicle make group found for "{name}".'})
         obj.make_model_cluster = cluster_value
-        obj.save(update_fields=["make_model_cluster"])
+        obj.save(update_fields=["make_model_cluster", "updated_at"])
 
     return JsonResponse({"success": True, "type": cluster_type, "name": name, "items": cleaned_items})
 
@@ -2453,7 +2453,10 @@ def user_management(request):
 # -------------------------
 # RTO DASHBOARD
 # -------------------------
-def rto_dashboard(request):
+RTO_DASHBOARD_DEFAULT_LIMIT = 20
+
+
+def _filtered_rto_qs(request):
     qs = RTOMaster.objects.all().order_by("rto_name")
 
     rto_names = request.GET.getlist("rto_name")
@@ -2464,29 +2467,101 @@ def rto_dashboard(request):
     if cluster_q:
         qs = qs.filter(rto_cluster__icontains=cluster_q)
 
+    return qs
+
+
+def rto_dashboard(request):
+    """
+    Renders the page shell only. The table itself is populated by JS via
+    rto_dashboard_search (default: the 20 most recently added/updated rows),
+    so the initial page load no longer pulls every RTOMaster row regardless
+    of whether the user ever searches.
+    """
     rto_name_list = RTOMaster.objects.values_list("rto_name", flat=True).distinct().order_by("rto_name")
 
     return render(request, "rto_dashboard.html", {
-        "data": qs,
-        "total": qs.count(),
+        "total": RTOMaster.objects.count(),
         "rto_name_list": rto_name_list,
-        "selected": {
-            "rto_names": rto_names,
-            "cluster_q": cluster_q
-        },
+        "default_limit": RTO_DASHBOARD_DEFAULT_LIMIT,
         "is_admin": True
     })
 
+
+def rto_dashboard_search(request):
+    """
+    JSON backing endpoint for the dashboard table. With a `limit` param it
+    returns just that many rows, most recently added/updated first (the
+    page's own default view, and "Reset"); without one it returns every row
+    matching the filters, unbounded -- only reached when the user actually
+    clicks Apply.
+    """
+    qs = _filtered_rto_qs(request)
+
+    limit_raw = (request.GET.get("limit") or "").strip()
+    if limit_raw:
+        try:
+            limit = max(1, int(limit_raw))
+        except ValueError:
+            limit = RTO_DASHBOARD_DEFAULT_LIMIT
+        qs = qs.order_by("-updated_at", "-id")[:limit]
+
+    results = [
+        {"id": r.id, "rto_name": r.rto_name, "rto_cluster": r.rto_cluster or ""}
+        for r in qs
+    ]
+    return JsonResponse({"results": results, "total": len(results)})
+
+
+def create_rto(request):
+    """
+    "Create New Group" endpoint for the dashboard's modal -- adds a single
+    new RTOMaster row without leaving the page. Same iexact pre-check as
+    api_upload_chunk's rto_master branch, so a case variant of an existing
+    name gets a friendly message instead of an IntegrityError.
+    """
+    if request.method != "POST":
+        return JsonResponse({"success": False, "message": "Invalid request method."}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"success": False, "message": "Invalid request body."}, status=400)
+
+    name = (data.get("rto_name") or "").strip()
+    cluster = (data.get("rto_cluster") or "").strip()
+
+    if not name:
+        return JsonResponse({"success": False, "message": "Group name is required."}, status=400)
+    if len(name) > 100:
+        return JsonResponse({"success": False, "message": "Group name is longer than 100 characters."}, status=400)
+    if RTOMaster.objects.filter(rto_name__iexact=name).exists():
+        return JsonResponse({"success": False, "message": f'"{name}" already exists.'}, status=400)
+
+    obj = RTOMaster.objects.create(rto_name=name, rto_cluster=cluster or None)
+
+    AuditLog.objects.create(
+        user=request.user,
+        action="RTO MASTER CREATE",
+        details=(
+            f"Created new RTO Master group '{name}' (id {obj.id}) from the RTO Dashboard."
+            + (f" Cluster: {cluster}" if cluster else "")
+        ),
+    )
+    # Mirrors api_upload_chunk / create_make_model: every write to this master
+    # table busts the key get_rto_and_make_choices caches the rate forms'
+    # dropdowns under.
+    cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
+
+    return JsonResponse({
+        "success": True,
+        "id": obj.id,
+        "rto_name": obj.rto_name,
+        "rto_cluster": obj.rto_cluster or "",
+    })
+
+
 def export_rto_xlsx(request):
-    qs = RTOMaster.objects.all().order_by("rto_name")
-
-    rto_names = request.GET.getlist("rto_name")
-    cluster_q = (request.GET.get("cluster_q") or "").strip()
-
-    if rto_names and "" not in rto_names:
-        qs = qs.filter(rto_name__in=rto_names)
-    if cluster_q:
-        qs = qs.filter(rto_cluster__icontains=cluster_q)
+    qs = _filtered_rto_qs(request)
 
     wb = Workbook()
     ws = wb.active
@@ -2506,7 +2581,10 @@ def export_rto_xlsx(request):
 # -------------------------
 # MAKE MODEL DASHBOARD
 # -------------------------
-def make_model_dashboard(request):
+MAKE_MODEL_DASHBOARD_DEFAULT_LIMIT = 20
+
+
+def _filtered_make_model_qs(request):
     qs = MakeModelMaster.objects.all().order_by("make_model_name")
 
     make_model_names = request.GET.getlist("make_model_name")
@@ -2517,31 +2595,107 @@ def make_model_dashboard(request):
     if cluster_q:
         qs = qs.filter(make_model_cluster__icontains=cluster_q)
 
+    return qs
+
+
+def make_model_dashboard(request):
+    """
+    Renders the page shell only. The table itself is populated by JS via
+    make_model_dashboard_search (default: the 20 most recently added/updated
+    rows), so the initial page load no longer pulls every MakeModelMaster
+    row regardless of whether the user ever searches.
+    """
     make_model_name_list = MakeModelMaster.objects.values_list(
         "make_model_name", flat=True
     ).distinct().order_by("make_model_name")
 
     return render(request, "make_model_dashboard.html", {
-        "data": qs,
-        "total": qs.count(),
+        "total": MakeModelMaster.objects.count(),
         "make_model_name_list": make_model_name_list,
-        "selected": {
-            "make_model_names": make_model_names,
-            "cluster_q": cluster_q
-        },
+        "default_limit": MAKE_MODEL_DASHBOARD_DEFAULT_LIMIT,
         "is_admin": True
     })
 
+
+def make_model_dashboard_search(request):
+    """
+    JSON backing endpoint for the dashboard table. With a `limit` param it
+    returns just that many rows, most recently added/updated first (the
+    page's own default view, and "Reset"); without one it returns every row
+    matching the filters, unbounded -- only reached when the user actually
+    clicks Apply.
+    """
+    qs = _filtered_make_model_qs(request)
+
+    limit_raw = (request.GET.get("limit") or "").strip()
+    if limit_raw:
+        try:
+            limit = max(1, int(limit_raw))
+        except ValueError:
+            limit = MAKE_MODEL_DASHBOARD_DEFAULT_LIMIT
+        qs = qs.order_by("-updated_at", "-id")[:limit]
+
+    results = [
+        {
+            "id": r.id,
+            "make_model_name": r.make_model_name,
+            "make_model_cluster": r.make_model_cluster or "",
+        }
+        for r in qs
+    ]
+    return JsonResponse({"results": results, "total": len(results)})
+
+
+def create_make_model(request):
+    """
+    "Create New Group" endpoint for the dashboard's modal -- adds a single
+    new MakeModelMaster row without leaving the page. Same iexact pre-check
+    as add_missing_make_model_to_master's "new" target, so a case variant of
+    an existing name gets a friendly message instead of an IntegrityError.
+    """
+    if request.method != "POST":
+        return JsonResponse({"success": False, "message": "Invalid request method."}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"success": False, "message": "Invalid request body."}, status=400)
+
+    name = (data.get("make_model_name") or "").strip()
+    cluster = (data.get("make_model_cluster") or "").strip()
+
+    if not name:
+        return JsonResponse({"success": False, "message": "Group name is required."}, status=400)
+    if len(name) > 150:
+        return JsonResponse({"success": False, "message": "Group name is longer than 150 characters."}, status=400)
+    if MakeModelMaster.objects.filter(make_model_name__iexact=name).exists():
+        return JsonResponse({"success": False, "message": f'"{name}" already exists.'}, status=400)
+
+    obj = MakeModelMaster.objects.create(make_model_name=name, make_model_cluster=cluster or None)
+
+    AuditLog.objects.create(
+        user=request.user,
+        action="MAKE MODEL MASTER CREATE",
+        details=(
+            f"Created new Make/Model Master group '{name}' (id {obj.id}) from the Make Model Dashboard."
+            + (f" Cluster: {cluster}" if cluster else "")
+        ),
+    )
+    # Mirrors api_upload_chunk / add_missing_make_model_to_master: every write
+    # to this master table busts the key get_rto_and_make_choices caches the
+    # rate forms' dropdowns under.
+    cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
+
+    return JsonResponse({
+        "success": True,
+        "id": obj.id,
+        "make_model_name": obj.make_model_name,
+        "make_model_cluster": obj.make_model_cluster or "",
+    })
+
+
 def export_make_model_xlsx(request):
-    qs = MakeModelMaster.objects.all().order_by("make_model_name")
-
-    make_model_names = request.GET.getlist("make_model_name")
-    cluster_q = (request.GET.get("cluster_q") or "").strip()
-
-    if make_model_names and "" not in make_model_names:
-        qs = qs.filter(make_model_name__in=make_model_names)
-    if cluster_q:
-        qs = qs.filter(make_model_cluster__icontains=cluster_q)
+    qs = _filtered_make_model_qs(request)
 
     wb = Workbook()
     ws = wb.active
@@ -4557,7 +4711,7 @@ def add_missing_make_model_to_master(request):
         # created is only ever True for the single-row "new" target, so this
         # is never ambiguous about which master it refers to.
         if _append_make_model_cluster_item(master, stored_value):
-            master.save(update_fields=None if created else ["make_model_cluster"])
+            master.save(update_fields=None if created else ["make_model_cluster", "updated_at"])
             changed_masters.append(master)
         else:
             unchanged_masters.append(master)
@@ -4702,7 +4856,7 @@ def bulk_add_missing_make_model_to_master(request):
 
     for master in masters:
         if master.id in touched_masters:
-            master.save(update_fields=None if created else ["make_model_cluster"])
+            master.save(update_fields=None if created else ["make_model_cluster", "updated_at"])
 
     master_names = ", ".join(f"'{m.make_model_name}'" for m in masters)
     AuditLog.objects.create(

@@ -154,7 +154,11 @@ urlpatterns = [
 
     # Master dashboards
     path("rto-dashboard/", page_access_required("Can_View_RTO_Dashboard")(views.rto_dashboard), name="rto_dashboard"),
+    path("rto-dashboard/search/", page_access_required("Can_View_RTO_Dashboard")(views.rto_dashboard_search), name="rto_dashboard_search"),
+    path("rto-dashboard/create/", page_access_required("Can_View_RTO_Dashboard")(views.create_rto), name="create_rto"),
     path("make-model-dashboard/", page_access_required("Can_View_Make_Model_Dashboard")(views.make_model_dashboard), name="make_model_dashboard"),
+    path("make-model-dashboard/search/", page_access_required("Can_View_Make_Model_Dashboard")(views.make_model_dashboard_search), name="make_model_dashboard_search"),
+    path("make-model-dashboard/create/", page_access_required("Can_View_Make_Model_Dashboard")(views.create_make_model), name="create_make_model"),
     path("missing-make-model/", page_access_required("Can_View_Missing_Make_Model")(views.missing_make_model), name="missing_make_model"),
     path("missing-make-model/add-to-master/", page_access_required("Can_View_Missing_Make_Model")(views.add_missing_make_model_to_master), name="add_missing_make_model_to_master"),
     path("missing-make-model/bulk-add-to-master/", page_access_required("Can_View_Missing_Make_Model")(views.bulk_add_missing_make_model_to_master), name="bulk_add_missing_make_model_to_master"),
