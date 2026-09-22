@@ -12,10 +12,7 @@
 {{ chart_data|json_script:"chart-data" }}
 
 <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
-<link rel="stylesheet" type="text/css" href="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.css" />
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jqueryui/1.13.2/jquery-ui.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/pivottable/2.23.0/pivot.min.js"></script>
 <script type="text/javascript" src="https://cdn.jsdelivr.net/momentjs/latest/moment.min.js"></script>
 <script type="text/javascript" src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
 
@@ -35,10 +32,6 @@
     .analysis-filters .field { display:flex; flex-direction:column; gap:6px; }
     .analysis-filters select, .analysis-filters input { border:1px solid #cbd5e1; border-radius:8px; padding:8px 14px; font-size:13px; color:#0f172a; background:#fff; height:40px; min-width:170px; }
     .analysis-filters select:focus, .analysis-filters input:focus { outline:none; border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.15); }
-    .analysis-seg { display:flex; border:1px solid #cbd5e1; border-radius:8px; overflow:hidden; height:40px; }
-    .analysis-seg button { font-size:13px; padding:0 14px; background:#fff; color:#64748b; border:none; border-right:1px solid #cbd5e1; cursor:pointer; font-weight:600; }
-    .analysis-seg button:last-child { border-right:none; }
-    .analysis-seg button[aria-pressed="true"] { background:#2563eb; color:#fff; }
     .analysis-filters input[type="text"] { min-width:220px; }
 
     .analysis-table-scroll { overflow-x:auto; padding:20px 24px; }
@@ -125,35 +118,7 @@
         </div>
     </div>
 
-    <div class="analysis-seg" role="tablist" aria-label="View" style="margin:0 24px 16px;">
-        <button type="button" id="tabHeatmap" role="tab" aria-pressed="true">Heatmap</button>
-        <button type="button" id="tabPivot" role="tab" aria-pressed="false">Pivot table</button>
-    </div>
-
     <div id="chartBody"></div>
-    <div id="pivotBody" style="padding:20px 24px;" hidden></div>
-</div>
-
-<div class="analysis-premium-card">
-    <div class="analysis-card-header">
-        <div>
-            <h3 style="margin:0; font-size:18px; color:#1e293b;">🏆 Payout Leaderboard</h3>
-            <p style="margin:4px 0 0; font-size:12px; color:#64748b; font-weight:600;">Which insurers pay the highest commission (PO), by product.</p>
-        </div>
-    </div>
-
-    <div class="analysis-filters">
-        <div class="field">
-            <label class="analysis-text-overline" for="lbProductSelect">Product</label>
-            <select id="lbProductSelect"></select>
-        </div>
-        <div class="field">
-            <label class="analysis-text-overline">Rate type</label>
-            <div class="analysis-seg" id="lbRateTypeSeg" role="tablist" aria-label="Rate type"></div>
-        </div>
-    </div>
-
-    <div id="leaderboardBody" style="padding:20px 24px;"></div>
 </div>
 
 <div id="cellTooltip" class="cell-tooltip" hidden></div>
@@ -230,13 +195,6 @@
         const a = fmtNum(range.min), b = fmtNum(range.max);
         if(hasMin && hasMax) return (range.min === range.max) ? (a + unit) : (a + unit + ' - ' + b + unit);
         return hasMax ? ('up to ' + b + unit) : (a + unit + '+');
-    }
-
-    // Shared by the Leaderboard below, which reads from analysis_payout_data
-    // (PO/payout) instead of the chart_data blob (PI/premium) the heatmap
-    // above uses.
-    function poProductsList(rows){
-        return [...new Set(rows.map(r => r.product))].sort();
     }
 
     // Spans whichever of Net/OD/TP/TP2-5 exist for the cell - the widest
@@ -535,257 +493,9 @@
         host.innerHTML = html;
     }
 
-    // ---- pivot table tab ----
-    let pivotLoaded = false;
-
-    // The server sends {sum, count} per cell instead of raw per-record
-    // values (see analysis_pivot_data) -- this aggregator rolls those up
-    // as sum(sum) / sum(count) under whatever grouping the user drags to,
-    // which is a true weighted average, never an average-of-averages.
-    function weightedAverageAggregator(){
-        return function(){
-            return {
-                sum: 0, count: 0,
-                push: function(record){
-                    this.sum += parseFloat(record.sum) || 0;
-                    this.count += parseInt(record.count, 10) || 0;
-                },
-                value: function(){ return this.count ? this.sum / this.count : null; },
-                format: function(x){ return (x === null || isNaN(x)) ? '—' : x.toFixed(2) + '%'; }
-            };
-        };
-    }
-
-    function setActiveTab(tab){
-        const isHeat = tab === 'heatmap';
-        const isPivot = tab === 'pivot';
-        document.getElementById('tabHeatmap').setAttribute('aria-pressed', String(isHeat));
-        document.getElementById('tabPivot').setAttribute('aria-pressed', String(isPivot));
-        document.getElementById('chartBody').hidden = !isHeat;
-        document.getElementById('pivotBody').hidden = !isPivot;
-        document.getElementById('productSelect').closest('.field').hidden = !isHeat;
-        document.getElementById('subProductSelect').closest('.field').hidden = !isHeat;
-        document.getElementById('stateSearch').closest('.field').hidden = !isHeat;
-        if(isPivot) loadPivot();
-    }
-
-    // pivottable.js's own filter-box positioning is unreliable on this page:
-    // it computes the box's top/left as a small offset relative to the
-    // *table cell* the clicked field's triangle sits in (a native-DOM quirk
-    // where <td> acts as an implicit offset anchor for statically-positioned
-    // descendants), then applies that offset to a box that CSS actually
-    // renders relative to the nearest `position:relative` ancestor — here,
-    // <main class="main-wrapper"> in base.html — landing it near the top of
-    // the page instead of near the field. Worse, when a field is dragged
-    // from the "unused" pool into Rows/Cols, only its trigger <li> moves —
-    // the filter box itself stays behind in the original "unused" cell — so
-    // even a CSS-only fix (e.g. position:relative on the axis cells) would
-    // anchor it to the wrong cell. Fixed by recalculating the box's position
-    // ourselves from the actual clicked trigger's live position, using the
-    // box's own (correctly resolved, since it has explicit position:absolute)
-    // offsetParent as the reference frame. Delegated on #pivotBody, which
-    // persists across pivotUI re-renders, and registered as a normal
-    // (bubble-phase) listener so it runs after pivottable's own click
-    // handler has already shown the box.
-    function fixPivotFilterBoxPosition(){
-        document.getElementById('pivotBody').addEventListener('click', function(e){
-            const triangle = e.target.closest('.pvtTriangle');
-            if(!triangle) return;
-            const attrSpan = triangle.closest('.pvtAttr');
-            const name = attrSpan.childNodes[0].textContent.trim();
-            const box = Array.from(document.querySelectorAll('.pvtFilterBox')).find(b => {
-                const h4span = b.querySelector('h4 span');
-                return h4span && h4span.textContent === name;
-            });
-            if(!box || getComputedStyle(box).display === 'none') return;
-            const triRect = triangle.getBoundingClientRect();
-            const cbEl = box.offsetParent || document.documentElement;
-            const cbRect = cbEl.getBoundingClientRect();
-            let top = triRect.bottom - cbRect.top + 4;
-            let left = triRect.left - cbRect.left;
-            const boxWidth = box.offsetWidth || 300;
-            const maxLeft = cbRect.width - boxWidth - 4;
-            if(left > maxLeft) left = Math.max(4, maxLeft);
-            box.style.top = top + 'px';
-            box.style.left = left + 'px';
-        });
-    }
-
-    function applyPivotHeatColors(){
-        const cells = document.querySelectorAll('#pivotBody td.pvtVal');
-        const vals = [];
-        cells.forEach(td => { const v = parseFloat(td.textContent); if(!isNaN(v)) vals.push(v); });
-        if(!vals.length) return;
-        const min = Math.min(...vals), max = Math.max(...vals);
-        cells.forEach(td => {
-            td.classList.remove('cell-b0','cell-b1','cell-b2','cell-b3','cell-b4','cell-b5','cell-nodata');
-            const v = parseFloat(td.textContent);
-            if(isNaN(v)){ td.classList.add('cell-nodata'); return; }
-            const bucket = (max === min) ? 3 : Math.max(0, Math.min(5, Math.floor((v - min) / (max - min) * 6)));
-            td.classList.add('cell-b' + bucket);
-        });
-    }
-
-    async function loadPivot(){
-        if(pivotLoaded) return;
-        pivotLoaded = true;
-        document.getElementById('pivotBody').innerHTML = '<div class="analysis-empty">Loading pivot data…</div>';
-        const params = new URLSearchParams();
-        const dr = document.getElementById('date_range').value;
-        if(dr) params.set('date_range', dr);
-        const cc = document.getElementById('ccInput').value;
-        if(cc) params.set('cc', cc);
-        const sc = document.getElementById('scInput').value;
-        if(sc) params.set('sc', sc);
-        const url = '{% url "analysis_pivot_data" %}?' + params.toString();
-        const res = await fetch(url);
-        const rows = await res.json();
-        document.getElementById('pivotBody').innerHTML = '';
-        $('#pivotBody').pivotUI(rows, {
-            rows: ['insurer'],
-            cols: ['month'],
-            aggregators: {
-                'Weighted average': weightedAverageAggregator,
-                'Count': $.pivotUtilities.aggregators['Count']
-            },
-            aggregatorName: 'Weighted average',
-            rendererName: 'Table',
-            hiddenFromDragDrop: ['sum', 'count'],
-            onRefresh: applyPivotHeatColors
-        });
-    }
-
-    // ---- payout (PO) data for the Leaderboard card. Same filters (date
-    // range / CC / SC) as the pivot table above, fetched once and cached.
-    let poDataPromise = null;
-    let PO_ROWS = [];
-    function loadPayoutData(){
-        if(poDataPromise) return poDataPromise;
-        const params = new URLSearchParams();
-        const dr = document.getElementById('date_range').value;
-        if(dr) params.set('date_range', dr);
-        const cc = document.getElementById('ccInput').value;
-        if(cc) params.set('cc', cc);
-        const sc = document.getElementById('scInput').value;
-        if(sc) params.set('sc', sc);
-        const url = '{% url "analysis_payout_data" %}?' + params.toString();
-        poDataPromise = fetch(url).then(r => r.json());
-        return poDataPromise;
-    }
-
-    const RATE_TYPE_ORDER = ['OD', 'TP', 'Net'];
-    // Picks whichever available rate type has the most underlying rows for
-    // this product, so the default view always opens on data rather than an
-    // arbitrarily-first, possibly-empty rate type.
-    function pickDefaultRateType(rows, product, available){
-        let best = available[0], bestN = -1;
-        available.forEach(t => {
-            const n = rows.filter(r => r.product === product && r.rate_type === t)
-                .reduce((a, r) => a + r.count, 0);
-            if(n > bestN){ bestN = n; best = t; }
-        });
-        return best;
-    }
-
-    // ---- Leaderboard ----
-    let lbState = { product: '', rateType: '' };
-
-    async function initLeaderboard(){
-        const host = document.getElementById('leaderboardBody');
-        host.innerHTML = '<div class="analysis-empty">Loading payout data…</div>';
-        let rows;
-        try {
-            rows = await loadPayoutData();
-            PO_ROWS = rows;
-        } catch(e) {
-            host.innerHTML = '<div class="analysis-empty">Could not load payout data.</div>';
-            return;
-        }
-        if(!rows.length){
-            host.innerHTML = '<div class="analysis-empty">No payout (PO) data on file yet.</div>';
-            return;
-        }
-        renderLeaderboardControls(rows);
-    }
-
-    function renderLeaderboardControls(rows){
-        const products = poProductsList(rows);
-        if(!products.includes(lbState.product)) lbState.product = products[0] || '';
-
-        const sel = document.getElementById('lbProductSelect');
-        sel.innerHTML = products.map(p => `<option value="${esc(p)}"${p===lbState.product?' selected':''}>${esc(p)}</option>`).join('');
-        sel.onchange = () => {
-            lbState.product = sel.value;
-            renderLeaderboardRateTypeSeg(rows);
-        };
-
-        renderLeaderboardRateTypeSeg(rows);
-    }
-
-    function renderLeaderboardRateTypeSeg(rows){
-        const available = RATE_TYPE_ORDER.filter(t =>
-            rows.some(r => r.product === lbState.product && r.rate_type === t));
-        if(!available.includes(lbState.rateType)){
-            lbState.rateType = pickDefaultRateType(rows, lbState.product, available);
-        }
-        const seg = document.getElementById('lbRateTypeSeg');
-        seg.innerHTML = available.map(t =>
-            `<button type="button" data-rt="${esc(t)}" aria-pressed="${t===lbState.rateType}">${esc(t)}</button>`).join('');
-        seg.querySelectorAll('button').forEach(btn => {
-            btn.addEventListener('click', () => {
-                lbState.rateType = btn.dataset.rt;
-                seg.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b===btn)));
-                renderLeaderboard(rows);
-            });
-        });
-        renderLeaderboard(rows);
-    }
-
-    function renderLeaderboard(rows){
-        const host = document.getElementById('leaderboardBody');
-        const matching = rows.filter(r => r.product === lbState.product && r.rate_type === lbState.rateType);
-
-        const byInsurer = new Map();
-        matching.forEach(r => {
-            if(!byInsurer.has(r.insurer)) byInsurer.set(r.insurer, [0, 0]);
-            const cell = byInsurer.get(r.insurer);
-            cell[0] += r.sum; cell[1] += r.count;
-        });
-
-        const entries = insMeta
-            .map(m => {
-                const cell = byInsurer.get(m.full);
-                return (cell && cell[1]) ? { m, avg: cell[0]/cell[1], n: cell[1] } : null;
-            })
-            .filter(Boolean)
-            .sort((a, b) => b.avg - a.avg);
-
-        if(!entries.length){
-            host.innerHTML = `<div class="analysis-empty">No payout (PO) data on file for ${esc(lbState.product)} / ${esc(lbState.rateType)}.</div>`;
-            return;
-        }
-
-        const max = entries[0].avg;
-        let html = '';
-        entries.forEach(e => {
-            const pct = max ? Math.max(6, (e.avg/max)*100) : 0;
-            html += `<div class="dd-bar-row">
-                <span class="lbl"><span class="dot" style="background:var(${e.m.colorVar})"></span>${esc(e.m.short)}</span>
-                <span class="dd-track" title="${esc(e.m.short)} &middot; ${e.n} rate cards"><span class="dd-fill" style="width:${pct}%;background:var(${e.m.colorVar})"></span></span>
-                <span class="val">${fmtPct(e.avg)}</span>
-            </div>`;
-        });
-        host.innerHTML = html;
-    }
-
-    document.getElementById('tabHeatmap').addEventListener('click', () => setActiveTab('heatmap'));
-    document.getElementById('tabPivot').addEventListener('click', () => setActiveTab('pivot'));
-    fixPivotFilterBoxPosition();
-
     renderControls();
     renderStats();
     renderBody();
-    initLeaderboard();
 })();
 </script>
 
