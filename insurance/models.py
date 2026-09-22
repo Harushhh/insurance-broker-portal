@@ -370,6 +370,8 @@ class PincodeMaster(models.Model):
     """
     pincode_zone = models.CharField(max_length=100, unique=True)
     pincode_cluster = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["pincode_zone"]

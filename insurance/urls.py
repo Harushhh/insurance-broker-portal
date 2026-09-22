@@ -167,6 +167,8 @@ urlpatterns = [
     path("missing-make-model/bulk-mark-resolved/", page_access_required("Can_View_Missing_Make_Model")(views.bulk_mark_missing_make_model_resolved), name="bulk_mark_missing_make_model_resolved"),
     path("missing-make-model/export/", page_access_required("Can_View_Missing_Make_Model")(views.export_missing_make_model_xlsx), name="export_missing_make_model_xlsx"),
     path("pincode-dashboard/", page_access_required("Can_View_Pincode_Dashboard")(views.pincode_dashboard), name="pincode_dashboard"),
+    path("pincode-dashboard/search/", page_access_required("Can_View_Pincode_Dashboard")(views.pincode_dashboard_search), name="pincode_dashboard_search"),
+    path("pincode-dashboard/create/", page_access_required("Can_View_Pincode_Dashboard")(views.create_pincode), name="create_pincode"),
 
     # Master edit routes
     path("rto/edit/<int:pk>/", page_access_required("Can_View_RTO_Dashboard")(views.edit_rto), name="edit_rto"),

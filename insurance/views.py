@@ -2732,9 +2732,10 @@ def _sync_pincode_zones_from_health_data():
         PincodeMaster.objects.get_or_create(pincode_zone=zone)
 
 
-def pincode_dashboard(request):
-    _sync_pincode_zones_from_health_data()
+PINCODE_DASHBOARD_DEFAULT_LIMIT = 20
 
+
+def _filtered_pincode_qs(request):
     qs = PincodeMaster.objects.all().order_by("pincode_zone")
 
     zone_names = request.GET.getlist("pincode_zone")
@@ -2744,32 +2745,106 @@ def pincode_dashboard(request):
         qs = qs.filter(pincode_zone__in=zone_names)
     if cluster_q:
         qs = qs.filter(pincode_cluster__icontains=cluster_q)
+
+    return qs
+
+
+def pincode_dashboard(request):
+    """
+    Renders the page shell only. The table itself is populated by JS via
+    pincode_dashboard_search (default: the 20 most recently added/updated
+    rows), so the initial page load no longer pulls every PincodeMaster row
+    regardless of whether the user ever searches.
+    """
+    _sync_pincode_zones_from_health_data()
 
     zone_name_list = PincodeMaster.objects.values_list("pincode_zone", flat=True).distinct().order_by("pincode_zone")
 
     return render(request, "pincode_dashboard.html", {
-        "data": qs,
-        "total": qs.count(),
+        "total": PincodeMaster.objects.count(),
         "zone_name_list": zone_name_list,
-        "selected": {
-            "zone_names": zone_names,
-            "cluster_q": cluster_q
-        },
+        "default_limit": PINCODE_DASHBOARD_DEFAULT_LIMIT,
         "is_admin": True
     })
+
+
+def pincode_dashboard_search(request):
+    """
+    JSON backing endpoint for the dashboard table. With a `limit` param it
+    returns just that many rows, most recently added/updated first (the
+    page's own default view, and "Reset"); without one it returns every row
+    matching the filters, unbounded -- only reached when the user actually
+    clicks Apply. Re-syncs zones first, same as every other entry point into
+    this table, so a zone that only just appeared in HealthRateMaster is
+    searchable immediately rather than after the next full page load.
+    """
+    _sync_pincode_zones_from_health_data()
+
+    qs = _filtered_pincode_qs(request)
+
+    limit_raw = (request.GET.get("limit") or "").strip()
+    if limit_raw:
+        try:
+            limit = max(1, int(limit_raw))
+        except ValueError:
+            limit = PINCODE_DASHBOARD_DEFAULT_LIMIT
+        qs = qs.order_by("-updated_at", "-id")[:limit]
+
+    results = [
+        {"id": r.id, "pincode_zone": r.pincode_zone, "pincode_cluster": r.pincode_cluster or ""}
+        for r in qs
+    ]
+    return JsonResponse({"results": results, "total": len(results)})
+
+
+def create_pincode(request):
+    """
+    "Create New Group" endpoint for the dashboard's modal -- adds a single
+    new PincodeMaster row without leaving the page. Same iexact pre-check as
+    the RTO/Make-Model create endpoints, so a case variant of an existing
+    zone gets a friendly message instead of an IntegrityError.
+    """
+    if request.method != "POST":
+        return JsonResponse({"success": False, "message": "Invalid request method."}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except (json.JSONDecodeError, TypeError):
+        return JsonResponse({"success": False, "message": "Invalid request body."}, status=400)
+
+    zone = (data.get("pincode_zone") or "").strip()
+    cluster = (data.get("pincode_cluster") or "").strip()
+
+    if not zone:
+        return JsonResponse({"success": False, "message": "Zone name is required."}, status=400)
+    if len(zone) > 100:
+        return JsonResponse({"success": False, "message": "Zone name is longer than 100 characters."}, status=400)
+    if PincodeMaster.objects.filter(pincode_zone__iexact=zone).exists():
+        return JsonResponse({"success": False, "message": f'"{zone}" already exists.'}, status=400)
+
+    obj = PincodeMaster.objects.create(pincode_zone=zone, pincode_cluster=cluster or None)
+
+    AuditLog.objects.create(
+        user=request.user,
+        action="PINCODE MASTER CREATE",
+        details=(
+            f"Created new Pincode Master zone '{zone}' (id {obj.id}) from the Pincode Dashboard."
+            + (f" Cluster: {cluster}" if cluster else "")
+        ),
+    )
+
+    return JsonResponse({
+        "success": True,
+        "id": obj.id,
+        "pincode_zone": obj.pincode_zone,
+        "pincode_cluster": obj.pincode_cluster or "",
+    })
+
 
 def export_pincode_xlsx(request):
     _sync_pincode_zones_from_health_data()
 
-    qs = PincodeMaster.objects.all().order_by("pincode_zone")
-
-    zone_names = request.GET.getlist("pincode_zone")
-    cluster_q = (request.GET.get("cluster_q") or "").strip()
-
-    if zone_names and "" not in zone_names:
-        qs = qs.filter(pincode_zone__in=zone_names)
-    if cluster_q:
-        qs = qs.filter(pincode_cluster__icontains=cluster_q)
+    qs = _filtered_pincode_qs(request)
 
     wb = Workbook()
     ws = wb.active
