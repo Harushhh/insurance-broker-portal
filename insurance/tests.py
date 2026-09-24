@@ -751,6 +751,74 @@ class ApiUploadChunkRateMasterDedupTests(TestCase):
         self.assertEqual(RateMaster.objects.count(), 2)
 
 
+class ApiUploadChunkRateMasterQueryCountTests(TestCase):
+    """
+    api_upload_chunk's rate_master branch used to run one RateGroup
+    get_or_create() and one RateMaster.objects.filter(group=...) per
+    *distinct group* in the chunk, not per row -- fine for a handful of
+    groups, but rate cards routinely carry hundreds of distinct rate
+    combinations (age/fuel/cc/tariff bands) per 2500-row chunk. That was
+    enough individual DB round trips to blow the gunicorn worker's request
+    timeout, which kills the worker outright (SIGKILL) instead of letting
+    Django return an error response -- the browser then gets Railway's raw
+    HTML error page back and fails to JSON-parse it as the chunk's response.
+    Confirmed in production on /api/upload-chunk/ (worker timeouts logged
+    2026-09-18 and 2026-09-24).
+
+    The fix batches both queries across the whole chunk (see existing_groups
+    / existing_rto_by_group in api_upload_chunk's rate_master branch) so the
+    query count stays flat no matter how many distinct groups a chunk has.
+    """
+
+    def setUp(self):
+        from insurance.models import RTOMaster
+
+        self.client = Client()
+        Group.objects.get_or_create(name="Can_Upload_CSV")
+        self.user = User.objects.create_user(username="uploader2", password="a-strong-test-password-1")
+        self.user.groups.add(Group.objects.get(name="Can_Upload_CSV"))
+        self.client.force_login(self.user)
+
+        RTOMaster.objects.create(rto_name="MUMBAI")
+
+    def test_query_count_does_not_scale_with_distinct_groups_in_chunk(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from insurance.models import RateMaster
+
+        # Every row uses a different pi_od_rate, so each row lands in its
+        # own RateGroup -- the worst case this bug hit in production.
+        rows = [
+            {
+                "insurance_company": "Acme General",
+                "new_rto_list": "MUMBAI",
+                "from_date": "2026-01-01",
+                "to_date": "2026-12-31",
+                "pi_od_rate": str(10 + i),
+            }
+            for i in range(200)
+        ]
+
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.post(
+                reverse("api_upload_chunk"),
+                data=json.dumps({
+                    "target_table": "rate_master",
+                    "rows": rows,
+                    "upload_batch_id": "query-count-batch",
+                    "dry_run": False,
+                }),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(RateMaster.objects.count(), 200)
+        # However many queries this legitimately needs, it must not grow
+        # with the number of distinct groups (200 here) -- a regression to
+        # one query per group would blow well past this.
+        self.assertLess(len(ctx.captured_queries), 40)
+
+
 class DedupeRateMasterCommandTests(TestCase):
     """
     dedupe_rate_master soft-deletes the exact-duplicate rows produced by the

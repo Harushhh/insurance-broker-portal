@@ -1168,25 +1168,6 @@ def api_upload_chunk(request):
                         if code.lower() not in ynn_map:
                             ynn_map[code.lower()] = YesNoNAMaster.objects.create(code=code)
 
-                    # Deliberately NOT seeded from RateGroup.objects.all() -- a new
-                    # upload must never silently attach its rows to a group left
-                    # over from a past, unrelated upload just because the content
-                    # hash happens to match. Starting empty means rows only group
-                    # together with other rows from this same upload; any genuine
-                    # cross-upload duplicates get consolidated later, deliberately,
-                    # by regroup_rate_master.py instead of invisibly at import time.
-                    existing_groups = {}
-
-                    # group_obj.id -> set of new_rto_list values already present for
-                    # that group, whether already committed to the DB (an earlier
-                    # chunk of this same upload, or a retried request resending a
-                    # chunk that already succeeded) or already staged earlier in
-                    # this same chunk's `rows`. Populated lazily per group the first
-                    # time a row lands in it -- see the skip check below, which is
-                    # what makes a row upload idempotent instead of blindly
-                    # inserting a fresh copy every time identical content is seen.
-                    existing_rto_by_group = {}
-
                     def get_ynn(val):
                         if not val: return ynn_map["na"]
                         v = str(val).strip().lower()
@@ -1237,6 +1218,7 @@ def api_upload_chunk(request):
                         )
                     )
 
+                    row_records = []
                     for row in rows:
                         raw_rtos = row.get("new_rto_list") or ""
                         rto_items = [x.strip() for x in raw_rtos.split(",") if x.strip()]
@@ -1327,28 +1309,81 @@ def api_upload_chunk(request):
                             "upload_batch": upload_batch_id,
                         }
 
-                        # Hashed and (in a real run) grouped even during
-                        # dry_run, so a row that would fail here -- it can't,
-                        # build_key_hash is pure computation -- is still
-                        # exercised by the validation pass. Nothing below this
-                        # point writes anything when dry_run is set.
+                        # Hashed even during dry_run, so a row that would fail
+                        # here -- it can't, build_key_hash is pure computation --
+                        # is still exercised by the validation pass. Group
+                        # lookup/creation happens in a second pass below, batched
+                        # across the whole chunk instead of per row.
                         key_hash, key_text = build_key_hash(cleaned)
                         if dry_run:
                             continue
-                        if key_hash in existing_groups:
-                            group_obj = existing_groups[key_hash]
-                        else:
-                            # get_or_create, not create: a large file spans
-                            # multiple chunk requests, each starting with an
-                            # empty existing_groups -- without this, a later
-                            # chunk needing a group an earlier chunk of the
-                            # *same* upload already created (or a genuine
-                            # same-day retry) would crash on the key_hash
-                            # uniqueness constraint instead of reusing it.
-                            group_obj, _ = RateGroup.objects.get_or_create(
-                                key_hash=key_hash, defaults={"key_text": key_text}
-                            )
-                            existing_groups[key_hash] = group_obj
+                        row_records.append({
+                            "row": row, "cleaned": cleaned, "key_hash": key_hash, "key_text": key_text,
+                            "product_obj": product_obj, "sub_product_obj": sub_product_obj,
+                            "policy_type_obj": policy_type_obj, "fuel_type_obj": fuel_type_obj, "mmc_obj": mmc_obj,
+                            "is_ncb_obj": is_ncb_obj, "is_cpa_obj": is_cpa_obj, "is_zd_obj": is_zd_obj,
+                        })
+
+                    # Batched for the same reason existing_active_keys above is: a
+                    # get_or_create() and a RateMaster.objects.filter(group=...) per
+                    # *distinct group* in the chunk -- not per row, but rate cards
+                    # routinely carry hundreds of distinct rate combinations
+                    # (age/fuel/cc/tariff bands) per chunk, which was still enough
+                    # individual round trips to blow the gunicorn worker timeout and
+                    # get the worker SIGKILLed mid-request (seen in production on
+                    # /api/upload-chunk/).
+                    #
+                    # Deliberately scoped to only the hashes this chunk's own rows
+                    # need (not RateGroup.objects.all()) -- upload_batch_id is part
+                    # of the hash, so a new upload must never silently attach its
+                    # rows to a group left over from a past, unrelated upload just
+                    # because the content hash happens to match. Any genuine
+                    # cross-upload duplicates get consolidated later, deliberately,
+                    # by regroup_rate_master.py instead of invisibly at import time.
+                    needed_hashes = {rec["key_hash"] for rec in row_records}
+                    existing_groups = {g.key_hash: g for g in RateGroup.objects.filter(key_hash__in=needed_hashes)}
+                    missing_hashes = needed_hashes - existing_groups.keys()
+                    if missing_hashes:
+                        hash_to_text = {}
+                        for rec in row_records:
+                            hash_to_text.setdefault(rec["key_hash"], rec["key_text"])
+                        RateGroup.objects.bulk_create(
+                            [RateGroup(key_hash=h, key_text=hash_to_text[h]) for h in missing_hashes],
+                            ignore_conflicts=True,
+                        )
+                        # ignore_conflicts rows don't come back with a pk, and a
+                        # concurrent request could have created one of these hashes
+                        # in the gap above -- refetch rather than assume our own
+                        # bulk_create is what's now there.
+                        existing_groups.update(
+                            {g.key_hash: g for g in RateGroup.objects.filter(key_hash__in=missing_hashes)}
+                        )
+
+                    # group_obj.id -> set of new_rto_list values already present for
+                    # that group, whether already committed to the DB (an earlier
+                    # chunk of this same upload, or a retried request resending a
+                    # chunk that already succeeded) or staged earlier in this same
+                    # chunk. Preloaded for every group this chunk touches in one
+                    # query -- see the skip check below, which is what makes a row
+                    # upload idempotent instead of blindly inserting a fresh copy
+                    # every time identical content is seen.
+                    existing_rto_by_group = defaultdict(set)
+                    group_ids = {g.id for g in existing_groups.values()}
+                    for gid, rto in RateMaster.objects.filter(group_id__in=group_ids).values_list("group_id", "new_rto_list"):
+                        existing_rto_by_group[gid].add(rto)
+
+                    for rec in row_records:
+                        row = rec["row"]
+                        cleaned = rec["cleaned"]
+                        product_obj = rec["product_obj"]
+                        sub_product_obj = rec["sub_product_obj"]
+                        policy_type_obj = rec["policy_type_obj"]
+                        fuel_type_obj = rec["fuel_type_obj"]
+                        mmc_obj = rec["mmc_obj"]
+                        is_ncb_obj = rec["is_ncb_obj"]
+                        is_cpa_obj = rec["is_cpa_obj"]
+                        is_zd_obj = rec["is_zd_obj"]
+                        group_obj = existing_groups[rec["key_hash"]]
 
                         # Cross-upload duplicate guard: an ACTIVE, non-deleted row
                         # with this exact content (same business terms *and* RTO)
@@ -1387,11 +1422,6 @@ def api_upload_chunk(request):
                         # twice (client retry), or the whole upload being resent.
                         # Skip it instead of inserting another exact copy.
                         row_rto = row.get("new_rto_list") or None
-                        if group_obj.id not in existing_rto_by_group:
-                            existing_rto_by_group[group_obj.id] = set(
-                                RateMaster.objects.filter(group=group_obj)
-                                .values_list("new_rto_list", flat=True)
-                            )
                         if row_rto in existing_rto_by_group[group_obj.id]:
                             continue
                         existing_rto_by_group[group_obj.id].add(row_rto)
