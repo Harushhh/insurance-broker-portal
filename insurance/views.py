@@ -7187,6 +7187,126 @@ def points_audit_logs(request):
         }
     })
 
+
+def _resolve_points_log_param(flat_params, key, id_to_name):
+    """Same numeric-id-to-name resolution points_audit_logs applies per row,
+    factored out so the XLSX export (which has no display-side row cap) uses
+    identical logic instead of drifting from the on-page table."""
+    val = flat_params.get(key)
+    if val and str(val).isdigit():
+        return id_to_name.get(int(val), val)
+    return val
+
+
+def export_points_audit_logs_xlsx(request):
+    """XLSX twin of points_audit_logs -- same filters, same per-row field
+    resolution, but without the [:500] display cap (7-day retention already
+    bounds the result set) so it always reflects the full filtered table."""
+    retention_cutoff = timezone.now() - timedelta(days=7)
+
+    type_filter = (request.GET.get("type") or "").strip().lower()
+    action_filter = {
+        "motor": ["MOTOR_POINTS_SEARCH"],
+        "health": ["HEALTH_POINTS_SEARCH"],
+    }.get(type_filter, POINTS_SEARCH_ACTIONS)
+
+    qs = AuditLog.objects.filter(
+        action__in=action_filter, timestamp__gte=retention_cutoff
+    ).select_related("user").order_by("-timestamp")
+
+    vehicle_no_filter = (request.GET.get("vehicle_no") or "").strip()
+    policy_holder_name_filter = (request.GET.get("policy_holder_name") or "").strip()
+    insurance_company_filter = (request.GET.get("insurance_company") or "").strip()
+    username_filter = (request.GET.get("username") or "").strip()
+    product_name_filter = (request.GET.get("product_name") or "").strip()
+    business_type_filter = (request.GET.get("business_type") or "").strip()
+    policy_category_filter = (request.GET.get("policy_category") or "").strip()
+
+    if vehicle_no_filter:
+        qs = qs.filter(details__icontains=vehicle_no_filter)
+    if policy_holder_name_filter:
+        qs = qs.filter(details__icontains=policy_holder_name_filter)
+    if insurance_company_filter:
+        qs = qs.filter(details__icontains=insurance_company_filter)
+    if username_filter:
+        qs = qs.filter(user__username__icontains=username_filter)
+    if product_name_filter:
+        qs = qs.filter(details__icontains=product_name_filter)
+    if business_type_filter:
+        qs = qs.filter(details__icontains=business_type_filter)
+    if policy_category_filter:
+        qs = qs.filter(details__icontains=policy_category_filter)
+
+    # Loaded once and reused per row, same reasoning as points_audit_logs
+    # itself (avoids up to 4 extra queries per row).
+    product_names = dict(ProductMaster.objects.values_list("id", "name"))
+    sub_product_names = dict(SubProductMaster.objects.values_list("id", "name"))
+    make_model_class_names = dict(MakeModelClassMaster.objects.values_list("id", "name"))
+    fuel_type_names = dict(FuelTypeMaster.objects.values_list("id", "name"))
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Points Search Logs"
+    ws.append([
+        "ID", "User", "Search Type", "Search Time", "Target Date",
+        "Vehicle No.", "Policy Holder Name",
+        "Product", "Sub Product",
+        "Make", "Class", "RTO Code", "Mfg Year", "Fuel", "CC", "SC",
+        "Plan Type", "Sum Assured", "Age", "Pincode", "Policy Term",
+        "ZD", "CPA", "NCB",
+    ])
+
+    for log in qs.iterator(chunk_size=2000):
+        is_health = log.action == "HEALTH_POINTS_SEARCH"
+        flat_params = {}
+        try:
+            clean_str = log.details.replace("Eligibility Check Parameters: ", "")
+            params_dict = ast.literal_eval(clean_str)
+            if isinstance(params_dict, dict):
+                for k, v in params_dict.items():
+                    flat_params[k] = v[0] if isinstance(v, list) and len(v) > 0 else v
+        except Exception:
+            pass
+
+        product = _resolve_points_log_param(flat_params, "product", product_names)
+        sub_product = _resolve_points_log_param(flat_params, "sub_product", sub_product_names)
+        make_model_class = _resolve_points_log_param(flat_params, "make_model_class", make_model_class_names)
+        fuel = _resolve_points_log_param(flat_params, "fuel", fuel_type_names)
+
+        ws.append([
+            log.id,
+            log.user.username if log.user else "System",
+            "Health" if is_health else "Motor",
+            log.timestamp.strftime("%Y-%m-%d %H:%M:%S") if log.timestamp else "",
+            flat_params.get("target_date") or "",
+            flat_params.get("vehicle_no") or "",
+            flat_params.get("policy_holder_name") or "",
+            (flat_params.get("product_name") if is_health else product) or "",
+            (flat_params.get("business_type") if is_health else sub_product) or "",
+            flat_params.get("make_names") or "",
+            make_model_class or "",
+            flat_params.get("rto_code") or "",
+            flat_params.get("mfg_year") or "",
+            fuel or "",
+            flat_params.get("cc") or "",
+            flat_params.get("sc") or "",
+            flat_params.get("policy_category") or "",
+            flat_params.get("sum_insured") or "",
+            flat_params.get("age") or "",
+            flat_params.get("pincode") or "",
+            flat_params.get("policy_term") or "",
+            "YES" if flat_params.get("is_zd") == "YES" else "NO",
+            "YES" if flat_params.get("is_cpa") == "YES" else "NO",
+            "YES" if flat_params.get("is_ncb") == "YES" else "NO",
+        ])
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = 'attachment; filename="points_search_logs.xlsx"'
+    wb.save(response)
+    return response
+
 # =========================================================
 # REST API ENDPOINTS
 # =========================================================

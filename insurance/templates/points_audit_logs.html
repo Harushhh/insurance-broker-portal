@@ -258,6 +258,7 @@
         A complete audit trail of every time a user clicked "Check Eligibility" on the Motor Points or Health Points page.
       </div>
     </div>
+    <a href="{% url 'export_points_audit_logs_xlsx' %}?type={{ selected.type|urlencode }}&vehicle_no={{ selected.vehicle_no|urlencode }}&policy_holder_name={{ selected.policy_holder_name|urlencode }}&insurance_company={{ selected.insurance_company|urlencode }}&username={{ selected.username|urlencode }}&product_name={{ selected.product_name|urlencode }}&business_type={{ selected.business_type|urlencode }}&policy_category={{ selected.policy_category|urlencode }}" class="modern-btn btn-primary">⬇️ Export to Excel</a>
   </div>
 
   <div class="type-toggle">
