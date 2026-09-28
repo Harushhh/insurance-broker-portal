@@ -5880,7 +5880,14 @@ def _collect_motor_payout_rows(qs, matching_rto_names, matching_make_groups, rto
         else:
             row.display_make_model_class = row.make_model_class.name
 
-        if row.pi_net_rate and row.pi_net_rate > 0:
+        # 'On OD and TP' means the payout is genuinely split across two
+        # rates -- picking just one (as the elif chain below does for every
+        # other type) silently drops the other half. Same "OD+TP" display
+        # convention as Policy Lock Checker's po_rate and the MIS export's
+        # format_od_tp_rate.
+        if row.pi_type == 'On OD and TP':
+            row.pi_rate = f"{row.pi_od_rate or 0:.2f}+{row.pi_tp_rate or 0:.2f}"
+        elif row.pi_net_rate and row.pi_net_rate > 0:
             row.pi_rate = row.pi_net_rate
         elif row.pi_od_rate and row.pi_od_rate > 0:
             row.pi_rate = row.pi_od_rate
@@ -5889,7 +5896,9 @@ def _collect_motor_payout_rows(qs, matching_rto_names, matching_make_groups, rto
         else:
             row.pi_rate = 0.0
 
-        if row.po_net_rate and row.po_net_rate > 0:
+        if row.po_type == 'On OD and TP':
+            row.po_rate = f"{row.po_od_rate or 0:.2f}+{row.po_tp_rate or 0:.2f}"
+        elif row.po_net_rate and row.po_net_rate > 0:
             row.po_rate = row.po_net_rate
         elif row.po_od_rate and row.po_od_rate > 0:
             row.po_rate = row.po_od_rate
