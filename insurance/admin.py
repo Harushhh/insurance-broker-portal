@@ -4,6 +4,8 @@ from .models import (
     HealthRateMaster,
     RTOMaster,
     MakeModelMaster,
+    MakeModelMapping,
+    MakeModelMappingValue,
     PincodeMaster,
     ExtractionField,
     FieldSynonym,
@@ -147,6 +149,19 @@ class MakeModelMasterAdmin(admin.ModelAdmin):
     list_display = ("id", "make_model_name", "make_model_cluster")
     search_fields = ("make_model_name", "make_model_cluster")
     ordering = ("make_model_name",)
+
+
+class MakeModelMappingValueInline(admin.TabularInline):
+    model = MakeModelMappingValue
+    extra = 0
+
+
+@admin.register(MakeModelMapping)
+class MakeModelMappingAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "created_by", "updated_at")
+    search_fields = ("name", "values__value")
+    ordering = ("name",)
+    inlines = [MakeModelMappingValueInline]
 
 
 # =========================================================

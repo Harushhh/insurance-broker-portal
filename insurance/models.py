@@ -331,6 +331,45 @@ class MakeModelMaster(models.Model):
         return self.make_model_name
 
 
+class MakeModelMapping(models.Model):
+    """
+    One vehicle spelled differently across MakeModelMaster clusters -- e.g.
+    one insurer's group lists "HERO SPLENDOR" while another's lists "HERO
+    MOTOR SPLENDOR". Maintained on the Make/Model Mapping page; the make/model
+    search pages resolve a picked value through views.resolve_make_model_groups,
+    which expands it to every spelling in its mapping so a search on one finds
+    the groups listing any of them. Clusters themselves are never rewritten.
+
+    `name` is the main spelling, and is also stored as one of `values`.
+    """
+    name = models.CharField(max_length=500, unique=True)
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class MakeModelMappingValue(models.Model):
+    """
+    One spelling (a MakeModelMaster cluster item, stored stripped and
+    upper-cased) belonging to a MakeModelMapping. `value` is unique across
+    every mapping, so a spelling can only ever belong to one of them.
+    """
+    mapping = models.ForeignKey(MakeModelMapping, on_delete=models.CASCADE, related_name="values")
+    value = models.CharField(max_length=500, unique=True)
+
+    class Meta:
+        ordering = ["value"]
+
+    def __str__(self):
+        return self.value
+
+
 class MissingMakeModelManualResolution(models.Model):
     """
     Manual "mark as Resolved" override for the Missing Make/Model page --

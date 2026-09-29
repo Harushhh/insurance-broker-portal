@@ -2082,3 +2082,182 @@ class BulkMissingMakeModelActionsTests(TestCase):
         self.assertEqual(MissingMakeModelManualResolution.objects.count(), 0)
         self.master.refresh_from_db()
         self.assertEqual(self.master.make_model_cluster, "HONDA ACTIVA")
+
+
+@override_settings(**MISSING_MM_OVERRIDES)
+class MakeModelMappingTests(TestCase):
+    """
+    Make/Model Mapping page: linking spellings of one vehicle that different
+    MakeModelMaster groups write differently, so a make/model search on one
+    spelling finds the groups listing any of them.
+    """
+
+    def setUp(self):
+        from insurance.models import MakeModelMaster
+
+        self.client = Client()
+        group, _ = Group.objects.get_or_create(name="Can_View_Make_Model_Dashboard")
+        self.user = User.objects.create_user(username="mapper", password="a-strong-test-password-1")
+        self.user.groups.add(group)
+        self.client.force_login(self.user)
+
+        MakeModelMaster.objects.create(make_model_name="grp_a", make_model_cluster="HERO SPLENDOR, HONDA ACTIVA")
+        MakeModelMaster.objects.create(make_model_name="grp_b", make_model_cluster="HERO MOTOR SPLENDOR, TVS JUPITER")
+        MakeModelMaster.objects.create(
+            make_model_name="grp_c", make_model_cluster="HERO MOTOCORP SPLENDOR+, HERO PASSION, HERO"
+        )
+
+    def _save(self, **payload):
+        return self.client.post(
+            reverse("save_make_model_mapping"), data=json.dumps(payload), content_type="application/json"
+        )
+
+    def _map(self, name, *values):
+        from insurance.models import MakeModelMapping, MakeModelMappingValue
+        mapping = MakeModelMapping.objects.create(name=name)
+        for v in (name,) + values:
+            MakeModelMappingValue.objects.create(mapping=mapping, value=v)
+        return mapping
+
+    # ---- resolve_make_model_groups ----
+
+    def test_without_a_mapping_only_the_exact_spellings_group_is_found(self):
+        from insurance.views import resolve_make_model_groups
+        self.assertEqual(resolve_make_model_groups("HERO SPLENDOR"), ["GRP_A"])
+
+    def test_a_mapping_expands_to_every_linked_spellings_group(self):
+        from insurance.views import resolve_make_model_groups
+        self._map("HERO SPLENDOR", "HERO MOTOR SPLENDOR")
+        self.assertEqual(resolve_make_model_groups("HERO SPLENDOR"), ["GRP_A", "GRP_B"])
+
+    def test_the_mapping_works_from_either_spelling_and_any_case(self):
+        from insurance.views import resolve_make_model_groups
+        self._map("HERO SPLENDOR", "HERO MOTOR SPLENDOR")
+        self.assertEqual(set(resolve_make_model_groups("  hero motor splendor ")), {"GRP_A", "GRP_B"})
+
+    def test_an_unmapped_term_is_unaffected_by_other_mappings(self):
+        from insurance.views import resolve_make_model_groups
+        self._map("HERO SPLENDOR", "HERO MOTOR SPLENDOR")
+        self.assertEqual(resolve_make_model_groups("TVS JUPITER"), ["GRP_B"])
+        self.assertEqual(resolve_make_model_groups(""), [])
+
+    def test_policy_lock_checker_search_returns_rates_from_the_mapped_group(self):
+        from django.test import RequestFactory
+        from insurance.models import RateMaster
+        from insurance.views import _run_policy_lock_checker_search
+
+        RateMaster.objects.create(insurance_company="Insurer A", new_vehicle_makes="grp_a", status="ACTIVE")
+        RateMaster.objects.create(insurance_company="Insurer B", new_vehicle_makes="grp_b", status="ACTIVE")
+
+        def search():
+            request = RequestFactory().get("/", {"make_names": "HERO SPLENDOR"})
+            request.user = self.user
+            results, _, _ = _run_policy_lock_checker_search(request)
+            return {r.insurance_company for r in results}
+
+        self.assertEqual(search(), {"Insurer A"})
+        self._map("HERO SPLENDOR", "HERO MOTOR SPLENDOR")
+        self.assertEqual(search(), {"Insurer A", "Insurer B"})
+
+    # ---- save / delete ----
+
+    def test_create_stores_upper_cased_values_including_the_main_name(self):
+        from insurance.models import AuditLog, MakeModelMapping
+        response = self._save(name="hero splendor", values=["hero motor splendor", "HERO MOTOR SPLENDOR"])
+        self.assertEqual(response.status_code, 200, response.content)
+        mapping = MakeModelMapping.objects.get()
+        self.assertEqual(mapping.name, "HERO SPLENDOR")
+        self.assertEqual(mapping.created_by, self.user)
+        self.assertEqual(
+            sorted(mapping.values.values_list("value", flat=True)), ["HERO MOTOR SPLENDOR", "HERO SPLENDOR"]
+        )
+        self.assertTrue(AuditLog.objects.filter(action="MAKE MODEL MAPPING CREATE").exists())
+
+    def test_a_mapping_needs_at_least_two_spellings(self):
+        from insurance.models import MakeModelMapping
+        response = self._save(name="HERO SPLENDOR", values=["hero splendor"])
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(MakeModelMapping.objects.exists())
+
+    def test_a_spelling_already_in_another_mapping_is_rejected(self):
+        from insurance.models import MakeModelMapping
+        self._map("HERO SPLENDOR", "HERO MOTOR SPLENDOR")
+        response = self._save(name="HERO MOTOCORP SPLENDOR+", values=["HERO MOTOR SPLENDOR"])
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("already mapped under", response.json()["message"])
+        self.assertEqual(MakeModelMapping.objects.count(), 1)
+
+    def test_a_spelling_with_a_comma_is_rejected(self):
+        response = self._save(name="HERO SPLENDOR", values=["HERO, SPLENDOR"])
+        self.assertEqual(response.status_code, 400)
+
+    def test_update_replaces_the_spelling_set(self):
+        from insurance.models import AuditLog
+        mapping = self._map("HERO SPLENDOR", "HERO MOTOR SPLENDOR")
+        response = self._save(id=mapping.id, name="HERO SPLENDOR", values=["HERO MOTOCORP SPLENDOR+"])
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            sorted(mapping.values.values_list("value", flat=True)), ["HERO MOTOCORP SPLENDOR+", "HERO SPLENDOR"]
+        )
+        entry = AuditLog.objects.get(action="MAKE MODEL MAPPING UPDATE")
+        self.assertIn("Removed: HERO MOTOR SPLENDOR", entry.details)
+
+    def test_delete_removes_the_mapping_but_leaves_the_groups_alone(self):
+        from insurance.models import AuditLog, MakeModelMapping, MakeModelMappingValue, MakeModelMaster
+        mapping = self._map("HERO SPLENDOR", "HERO MOTOR SPLENDOR")
+        response = self.client.post(
+            reverse("delete_make_model_mapping"), data=json.dumps({"id": mapping.id}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(MakeModelMapping.objects.exists())
+        self.assertFalse(MakeModelMappingValue.objects.exists())
+        self.assertEqual(MakeModelMaster.objects.get(make_model_name="grp_b").make_model_cluster,
+                         "HERO MOTOR SPLENDOR, TVS JUPITER")
+        self.assertTrue(AuditLog.objects.filter(action="MAKE MODEL MAPPING DELETE").exists())
+
+    # ---- suggestions / autocomplete ----
+
+    def test_suggestions_find_other_spellings_but_not_other_models_or_lone_words(self):
+        response = self.client.get(reverse("make_model_mapping_suggest"), {"value": "hero splendor"})
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["groups"], ["grp_a"])
+        suggested = {s["value"] for s in data["suggestions"]}
+        self.assertIn("HERO MOTOR SPLENDOR", suggested)
+        self.assertIn("HERO MOTOCORP SPLENDOR+", suggested)
+        self.assertNotIn("HERO PASSION", suggested)
+        self.assertNotIn("HERO", suggested)
+        self.assertNotIn("HERO SPLENDOR", suggested)
+
+    def test_suggestions_flag_a_spelling_that_is_already_mapped(self):
+        mapping = self._map("HERO MOTOR SPLENDOR", "HERO MOTOCORP SPLENDOR+")
+        data = self.client.get(reverse("make_model_mapping_suggest"), {"value": "HERO SPLENDOR"}).json()
+        flagged = {s["value"]: s["mapping_id"] for s in data["suggestions"]}
+        self.assertEqual(flagged["HERO MOTOR SPLENDOR"], mapping.id)
+
+    def test_values_autocomplete_lists_cluster_items_with_their_groups(self):
+        data = self.client.get(reverse("make_model_mapping_values"), {"q": "splendor"}).json()
+        by_value = {r["value"]: r["groups"] for r in data["results"]}
+        self.assertEqual(by_value["HERO MOTOR SPLENDOR"], ["grp_b"])
+        self.assertNotIn("TVS JUPITER", by_value)
+
+    def test_page_and_list_render(self):
+        self._map("HERO SPLENDOR", "HERO MOTOR SPLENDOR")
+        self.assertEqual(self.client.get(reverse("make_model_mapping")).status_code, 200)
+        data = self.client.get(reverse("make_model_mapping_list"), {"q": "motor"}).json()
+        self.assertEqual(data["total"], 1)
+        values = {v["value"]: v["groups"] for v in data["results"][0]["values"]}
+        self.assertEqual(values, {"HERO SPLENDOR": ["grp_a"], "HERO MOTOR SPLENDOR": ["grp_b"]})
+
+    def test_a_user_without_the_group_is_refused(self):
+        other = User.objects.create_user(username="nobody", password="a-strong-test-password-2")
+        client = Client()
+        client.force_login(other)
+        self.assertEqual(client.get(reverse("make_model_mapping")).status_code, 403)
+        response = client.post(
+            reverse("save_make_model_mapping"),
+            data=json.dumps({"name": "HERO SPLENDOR", "values": ["HERO MOTOR SPLENDOR"]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)

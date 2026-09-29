@@ -1,0 +1,608 @@
+{% extends "base.html" %}
+{% block title %}Make/Model Mapping - Insurance Portal{% endblock %}
+
+{% block content %}
+<style>
+    .premium-card {
+        background: #ffffff;
+        border-radius: 16px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 4px 20px rgba(15, 23, 42, 0.03);
+        margin-bottom: 24px;
+        overflow: visible;
+    }
+    .card-header-premium {
+        background: #f8fafc;
+        padding: 16px 24px;
+        border-bottom: 1px solid #e2e8f0;
+        border-radius: 16px 16px 0 0;
+    }
+    .text-overline { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 6px; display: block; }
+    .stat-badge { display: flex; flex-direction: column; align-items: center; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+    .hint { font-size: 12px; color: #64748b; margin-top: 6px; }
+
+    .form-control-premium {
+        border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 14px; font-size: 13px; color: #0f172a;
+        background-color: #fff; transition: all 0.2s ease; height: 40px; width: 100%;
+    }
+    .form-control-premium:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
+
+    .btn-gradient { background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%); color: white; border: none; border-radius: 8px; padding: 8px 24px; font-weight: 600; font-size: 14px; transition: all 0.2s; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.1); display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; }
+    .btn-gradient:hover { transform: translateY(-1px); box-shadow: 0 6px 15px rgba(37, 99, 235, 0.25); color: white; }
+    .btn-gradient:disabled { opacity: 0.6; transform: none; box-shadow: none; }
+    .btn-soft { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 20px; font-weight: 600; font-size: 14px; transition: all 0.2s; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 40px; }
+    .btn-soft:hover { background: #e2e8f0; color: #0f172a; border-color: #cbd5e1; }
+    .btn-xs { padding: 4px 12px; font-size: 11px; height: auto; }
+
+    .table-responsive-custom { max-height: 65vh; overflow: auto; border-top: 1px solid #e2e8f0; }
+    .table-modern { width: 100%; border-collapse: separate; border-spacing: 0; }
+    .table-modern th {
+        background: #f8fafc; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+        padding: 14px 20px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 10; white-space: nowrap;
+    }
+    .table-modern td { padding: 12px 16px; font-size: 13px; color: #334155; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .table-modern tbody tr:hover td { background-color: #f8fafc; }
+
+    /* Spelling chips */
+    .map-chip {
+        display: inline-flex; align-items: center; gap: 6px; background: #f1f5f9; border: 1px solid #e2e8f0; color: #334155;
+        border-radius: 6px; padding: 3px 8px; font-size: 12px; font-weight: 600; margin: 0 6px 6px 0; max-width: 100%;
+    }
+    .map-chip.main { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+    .map-chip.orphan { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+    .chip-count { background: rgba(15, 23, 42, 0.08); border-radius: 10px; padding: 0 6px; font-size: 11px; font-weight: 700; }
+    .chip-remove { border: none; background: transparent; color: inherit; padding: 0; line-height: 1; font-size: 14px; cursor: pointer; opacity: 0.7; }
+    .chip-remove:hover { opacity: 1; }
+
+    /* Autocomplete */
+    .ac-wrap { position: relative; }
+    .ac-list {
+        position: absolute; top: 100%; left: 0; right: 0; z-index: 1060; background: #fff; border: 1px solid #cbd5e1;
+        border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); max-height: 280px; overflow-y: auto; margin-top: 4px; display: none;
+    }
+    .ac-item { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid #f1f5f9; }
+    .ac-item:last-child { border-bottom: none; }
+    .ac-item:hover, .ac-item.active { background: #eff6ff; }
+    .ac-item .ac-meta { font-size: 11px; color: #64748b; }
+    .ac-empty { padding: 8px 12px; font-size: 12px; color: #64748b; }
+
+    /* Suggestions */
+    .sugg-list { border: 1px solid #e2e8f0; border-radius: 10px; max-height: 300px; overflow-y: auto; }
+    .sugg-row { display: flex; align-items: flex-start; gap: 10px; padding: 9px 12px; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+    .sugg-row:last-child { border-bottom: none; }
+    .sugg-row.disabled { opacity: 0.55; }
+    .sugg-row label { flex: 1; cursor: pointer; margin: 0; min-width: 0; }
+    .sugg-row.disabled label { cursor: not-allowed; }
+    .sugg-value { font-weight: 700; color: #0f172a; word-break: break-word; }
+    .sugg-groups { font-size: 11px; color: #64748b; word-break: break-word; }
+    .score-pill { font-size: 11px; font-weight: 700; border-radius: 10px; padding: 1px 8px; background: #ecfdf5; color: #047857; white-space: nowrap; }
+    .score-pill.mid { background: #fefce8; color: #a16207; }
+    .step-label { font-size: 13px; font-weight: 700; color: #0f172a; margin-bottom: 8px; }
+    .step-num { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; background: #2563eb; color: #fff; font-size: 11px; margin-right: 6px; }
+</style>
+
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3 mb-4">
+    <div>
+        <h2 class="mb-1" style="font-weight: 800; color: #0f172a; letter-spacing: -0.02em; font-size: 26px;">
+            Make/Model Mapping
+        </h2>
+        <p class="text-muted mb-0" style="font-size: 14px; max-width: 760px;">
+            Link spellings of the same vehicle that different make/model groups write differently
+            (e.g. <b>HERO SPLENDOR</b> and <b>HERO MOTOR SPLENDOR</b>). Searching any one spelling in Motor Payout Rates,
+            the Policy Lock Checker or the Rate Master dashboard then finds the groups listing any of them.
+            Group clusters themselves are never changed.
+        </p>
+    </div>
+
+    <div class="d-flex flex-wrap align-items-center gap-3">
+        <div class="stat-badge">
+            <span class="text-overline mb-1" style="font-size: 10px;">Total Mappings</span>
+            <span id="statTotal" style="font-size: 16px; font-weight: 800; color: #0f172a;">{{ total }}</span>
+        </div>
+        <button type="button" id="newMappingBtn" class="btn-gradient">
+            <i class="bi bi-link-45deg"></i> New Mapping
+        </button>
+    </div>
+</div>
+
+<div class="premium-card">
+    <div class="card-header-premium">
+        <h6 class="mb-0 fw-bold" style="color: #0f172a;"><i class="bi bi-funnel text-primary me-2"></i> Filter Mappings</h6>
+    </div>
+    <div class="p-4">
+        <form id="filterForm">
+            <div class="row g-3 align-items-end">
+                <div class="col-12 col-md-6">
+                    <label class="text-overline" for="filterQ">Search spelling</label>
+                    <input type="text" id="filterQ" placeholder="e.g. SPLENDOR" class="form-control-premium">
+                </div>
+                <div class="col-12 col-md-3 d-flex gap-2">
+                    <button type="submit" class="btn-gradient flex-grow-1"><i class="bi bi-search"></i> Apply</button>
+                    <button type="button" id="resetFilterBtn" class="btn-soft px-3" title="Reset"><i class="bi bi-arrow-counterclockwise m-0"></i></button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="premium-card">
+    <p id="tableStatusText" class="text-muted mb-0" style="font-size: 12.5px; padding: 14px 24px 0;"></p>
+    <div class="table-responsive-custom">
+        <table class="table-modern">
+            <thead>
+                <tr>
+                    <th style="width: 150px; text-align: center;">Action</th>
+                    <th style="width: 260px;">Main Make/Model</th>
+                    <th>Mapped Spellings <span style="text-transform: none; font-weight: 500;">(number = groups listing it)</span></th>
+                    <th style="width: 190px;">Last Updated</th>
+                </tr>
+            </thead>
+            <tbody id="tableBody">
+                <tr><td colspan="4" class="text-center py-5 text-muted">Loading…</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- New / Edit Mapping -->
+<div class="modal fade" id="mappingModal" tabindex="-1" aria-hidden="true">
+    <!-- Not modal-dialog-scrollable: its overflow would clip the autocomplete
+         dropdowns. The suggestion list scrolls on its own instead. -->
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content" style="border-radius: 16px; border: 1px solid #e2e8f0;">
+            <div class="modal-header" style="background: #f8fafc; border-radius: 16px 16px 0 0;">
+                <h6 class="modal-title fw-bold" style="color: #0f172a;">
+                    <i class="bi bi-link-45deg text-primary me-2"></i> <span id="mappingModalTitle">New Mapping</span>
+                </h6>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="mb-4">
+                    <div class="step-label"><span class="step-num">1</span>Main make/model</div>
+                    <div class="ac-wrap">
+                        <input type="text" id="mainInput" class="form-control-premium" autocomplete="off"
+                               placeholder="Type at least 2 letters, e.g. HERO SPLENDOR">
+                        <div class="ac-list" id="mainAcList"></div>
+                    </div>
+                    <div id="mainPicked" class="mt-2"></div>
+                    <div id="mainWarning" class="alert alert-warning py-2 px-3 mt-2 mb-0" style="font-size: 13px; display: none;"></div>
+                </div>
+
+                <div class="mb-4" id="suggestSection" style="display: none;">
+                    <div class="step-label"><span class="step-num">2</span>Tick the spellings that are the same vehicle</div>
+                    <div id="suggestList" class="sugg-list"></div>
+                    <div class="hint">Similar spellings found in other make/model groups, best match first.</div>
+                </div>
+
+                <div class="mb-4" id="manualSection" style="display: none;">
+                    <div class="step-label"><span class="step-num">3</span>Add a spelling manually <span class="text-muted fw-normal">(optional)</span></div>
+                    <div class="ac-wrap">
+                        <input type="text" id="manualInput" class="form-control-premium" autocomplete="off"
+                               placeholder="Search a spelling, or type one and press Enter">
+                        <div class="ac-list" id="manualAcList"></div>
+                    </div>
+                </div>
+
+                <div id="selectedSection" style="display: none;">
+                    <div class="text-overline">Will be saved as one vehicle</div>
+                    <div id="selectedChips"></div>
+                </div>
+
+                <div id="mappingError" class="alert alert-danger py-2 px-3 mt-3 mb-0" style="font-size: 13px; display: none;"></div>
+            </div>
+            <div class="modal-footer" style="border-top: 1px solid #e2e8f0;">
+                <button type="button" class="btn-soft" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn-gradient" id="saveMappingBtn" disabled><i class="bi bi-check2"></i> Save Mapping</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var LIST_URL = "{% url 'make_model_mapping_list' %}";
+    var VALUES_URL = "{% url 'make_model_mapping_values' %}";
+    var SUGGEST_URL = "{% url 'make_model_mapping_suggest' %}";
+    var SAVE_URL = "{% url 'save_make_model_mapping' %}";
+    var DELETE_URL = "{% url 'delete_make_model_mapping' %}";
+    var CSRF_TOKEN = "{{ csrf_token }}";
+
+    function esc(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+    function norm(s) { return String(s || '').trim().toUpperCase(); }
+    function groupsTitle(groups) {
+        return groups && groups.length ? 'Groups: ' + groups.join(', ') : 'Not in any make/model group yet';
+    }
+    // Real spellings often sit in 20-30 groups -- show the first few, full list on hover.
+    function groupsShort(groups) {
+        if (!groups || !groups.length) return 'Not in any make/model group yet';
+        return groups.length + ' group' + (groups.length === 1 ? '' : 's') + ': ' + groups.slice(0, 3).join(', ') +
+            (groups.length > 3 ? ', +' + (groups.length - 3) + ' more' : '');
+    }
+    // Groups a spelling is listed in that the main spelling isn't -- what mapping it actually adds to a search.
+    function extraGroupsHtml(groups, baseGroups) {
+        var extra = (groups || []).filter(function (g) { return baseGroups.indexOf(g) < 0; });
+        if (!extra.length) return '<span class="text-muted">· no groups beyond the main spelling\'s</span>';
+        return '<span class="text-success fw-semibold" title="' + esc(extra.join(', ')) + '">· +' + extra.length +
+            ' group' + (extra.length === 1 ? '' : 's') + ' the main spelling isn\'t in</span>';
+    }
+    function postJson(url, body) {
+        return fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRFToken': CSRF_TOKEN },
+            body: JSON.stringify(body)
+        }).then(function (res) { return res.json(); });
+    }
+
+    // ---------------- Mappings table ----------------
+    var mappingsById = {};
+
+    function chipHtml(value, groups, isMain) {
+        var cls = 'map-chip' + (isMain ? ' main' : '') + (groups.length ? '' : ' orphan');
+        return '<span class="' + cls + '" title="' + esc(groupsTitle(groups)) + '">' + esc(value) +
+            ' <span class="chip-count">' + groups.length + '</span></span>';
+    }
+
+    function renderTable(rows, q) {
+        var tbody = document.getElementById('tableBody');
+        mappingsById = {};
+        if (!rows.length) {
+            tbody.innerHTML = '<tr><td colspan="4" class="text-center py-5">' +
+                '<i class="bi bi-link-45deg" style="font-size: 48px; color: #cbd5e1;"></i>' +
+                '<h5 class="mt-3 fw-bold">' + (q ? 'No Mappings Found' : 'No Mappings Yet') + '</h5>' +
+                '<p class="text-muted">' + (q ? 'Try a different spelling.' : 'Click <b>New Mapping</b> to link spellings of the same vehicle.') + '</p></td></tr>';
+            return;
+        }
+        var html = '';
+        rows.forEach(function (row) {
+            mappingsById[row.id] = row;
+            var chips = '';
+            row.values.forEach(function (v) { chips += chipHtml(v.value, v.groups, v.value === row.name); });
+            html += '<tr>' +
+                '<td class="text-center" style="white-space: nowrap;">' +
+                    '<button type="button" class="btn-soft btn-xs me-1" data-edit="' + row.id + '"><i class="bi bi-pencil-square text-primary"></i> Edit</button>' +
+                    '<button type="button" class="btn-soft btn-xs" data-delete="' + row.id + '"><i class="bi bi-trash text-danger"></i></button>' +
+                '</td>' +
+                '<td style="font-weight: 700; color: #0f172a;">' + esc(row.name) + '</td>' +
+                '<td>' + chips + '</td>' +
+                '<td style="font-size: 12px;">' + esc(row.updated_at) +
+                    (row.created_by ? '<div class="text-muted">by ' + esc(row.created_by) + '</div>' : '') + '</td>' +
+                '</tr>';
+        });
+        tbody.innerHTML = html;
+    }
+
+    function loadTable() {
+        var q = document.getElementById('filterQ').value.trim();
+        var params = new URLSearchParams();
+        if (q) params.set('q', q);
+        document.getElementById('tableBody').innerHTML =
+            '<tr><td colspan="4" class="text-center py-5 text-muted">Loading…</td></tr>';
+        return fetch(LIST_URL + '?' + params.toString())
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                renderTable(data.results, q);
+                document.getElementById('tableStatusText').textContent = q
+                    ? data.total + ' mapping' + (data.total === 1 ? '' : 's') + ' found.'
+                    : 'Showing all ' + data.total + ' mapping' + (data.total === 1 ? '' : 's') + ', most recently updated first.';
+                if (!q) document.getElementById('statTotal').textContent = data.total;
+            })
+            .catch(function () {
+                document.getElementById('tableBody').innerHTML =
+                    '<tr><td colspan="4" class="text-center py-5 text-danger">Could not load mappings. Please try again.</td></tr>';
+            });
+    }
+
+    // ---------------- Autocomplete ----------------
+    function attachAutocomplete(input, listEl, onPick, allowFreeText) {
+        var timer = null, items = [], active = -1, seq = 0;
+
+        function hide() { listEl.style.display = 'none'; active = -1; }
+        function render() {
+            if (!items.length) {
+                listEl.innerHTML = '<div class="ac-empty">No matching spelling in any group' +
+                    (allowFreeText ? ' — press Enter to add it as typed.' : '.') + '</div>';
+            } else {
+                listEl.innerHTML = items.map(function (it, i) {
+                    var meta = it.groups.length + ' group' + (it.groups.length === 1 ? '' : 's') +
+                        (it.mapped_to ? ' · already in mapping "' + esc(it.mapped_to) + '"' : '');
+                    return '<div class="ac-item' + (i === active ? ' active' : '') + '" data-i="' + i + '">' +
+                        '<div class="fw-semibold">' + esc(it.value) + '</div><div class="ac-meta">' + meta + '</div></div>';
+                }).join('');
+            }
+            listEl.style.display = 'block';
+        }
+        function pick(value) {
+            // Drop any debounced/in-flight lookup so it can't reopen the list after the pick.
+            clearTimeout(timer);
+            seq++;
+            hide();
+            input.value = '';
+            onPick(norm(value));
+        }
+
+        input.addEventListener('input', function () {
+            clearTimeout(timer);
+            var q = input.value.trim();
+            if (q.length < 2) { hide(); return; }
+            timer = setTimeout(function () {
+                var mySeq = ++seq;
+                fetch(VALUES_URL + '?' + new URLSearchParams({ q: q }).toString())
+                    .then(function (res) { return res.json(); })
+                    .then(function (data) {
+                        if (mySeq !== seq) return;
+                        items = data.results || [];
+                        active = -1;
+                        render();
+                    });
+            }, 250);
+        });
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'ArrowDown' && items.length) { active = Math.min(active + 1, items.length - 1); render(); e.preventDefault(); }
+            else if (e.key === 'ArrowUp' && items.length) { active = Math.max(active - 1, 0); render(); e.preventDefault(); }
+            else if (e.key === 'Escape') { hide(); }
+            else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (active >= 0 && items[active]) pick(items[active].value);
+                else if (allowFreeText && input.value.trim()) pick(input.value);
+            }
+        });
+        listEl.addEventListener('mousedown', function (e) {
+            var el = e.target.closest('.ac-item');
+            if (!el) return;
+            e.preventDefault();
+            pick(items[+el.getAttribute('data-i')].value);
+        });
+        input.addEventListener('blur', function () { setTimeout(hide, 150); });
+    }
+
+    // ---------------- Modal state ----------------
+    var modalEl = document.getElementById('mappingModal');
+    var state = { editingId: null, main: null, mainGroups: [], blockedBy: null, selected: {}, suggestions: [] };
+    var suggestSeq = 0;
+
+    function showError(msg) {
+        var el = document.getElementById('mappingError');
+        el.textContent = msg || '';
+        el.style.display = msg ? '' : 'none';
+    }
+
+    function renderMain() {
+        var picked = document.getElementById('mainPicked');
+        var warn = document.getElementById('mainWarning');
+        picked.innerHTML = state.main
+            ? chipHtml(state.main, state.mainGroups, true) +
+              '<span class="hint d-inline-block ms-1" title="' + esc(groupsTitle(state.mainGroups)) + '">' +
+              esc(groupsShort(state.mainGroups)) + '</span>'
+            : '';
+        if (state.blockedBy) {
+            warn.innerHTML = '<b>' + esc(state.main) + '</b> is already in the mapping <b>' + esc(state.blockedBy.name) +
+                '</b>. <a href="#" id="editBlockingLink">Edit that mapping instead</a>.';
+            warn.style.display = '';
+        } else {
+            warn.style.display = 'none';
+        }
+        var hasMain = !!state.main && !state.blockedBy;
+        document.getElementById('suggestSection').style.display = hasMain ? '' : 'none';
+        document.getElementById('manualSection').style.display = hasMain ? '' : 'none';
+    }
+
+    function renderSuggestions(loading) {
+        var list = document.getElementById('suggestList');
+        if (loading) { list.innerHTML = '<div class="ac-empty py-3 text-center">Finding similar spellings…</div>'; return; }
+        if (!state.suggestions.length) {
+            list.innerHTML = '<div class="ac-empty py-3 text-center">No similar spellings found in other groups. Add one manually below.</div>';
+            return;
+        }
+        list.innerHTML = state.suggestions.map(function (s, i) {
+            var elsewhere = s.mapping_id && s.mapping_id !== state.editingId;
+            var checked = !!state.selected[s.value];
+            var id = 'sugg_' + i;
+            return '<div class="sugg-row' + (elsewhere ? ' disabled' : '') + '">' +
+                '<input type="checkbox" class="form-check-input mt-1" id="' + id + '" data-sugg="' + i + '"' +
+                    (checked ? ' checked' : '') + (elsewhere ? ' disabled' : '') + '>' +
+                '<label for="' + id + '"><div class="sugg-value">' + esc(s.value) + '</div>' +
+                    '<div class="sugg-groups" title="' + esc(groupsTitle(s.groups)) + '">' + esc(groupsShort(s.groups)) + ' ' +
+                    (elsewhere ? '· <b>already in mapping "' + esc(s.mapped_to) + '"</b>' : extraGroupsHtml(s.groups, state.mainGroups)) +
+                    '</div></label>' +
+                '<span class="score-pill' + (s.score < 100 ? ' mid' : '') + '" title="Similarity">' + s.score + '%</span>' +
+                '</div>';
+        }).join('');
+    }
+
+    function renderSelected() {
+        var values = Object.keys(state.selected);
+        var section = document.getElementById('selectedSection');
+        if (!state.main || state.blockedBy) {
+            section.style.display = 'none';
+        } else {
+            section.style.display = '';
+            var html = chipHtml(state.main, state.mainGroups, true);
+            values.forEach(function (v) {
+                var groups = state.selected[v].groups;
+                var cls = 'map-chip' + (groups.length ? '' : ' orphan');
+                html += '<span class="' + cls + '" title="' + esc(groupsTitle(groups)) + '">' + esc(v) +
+                    ' <span class="chip-count">' + groups.length + '</span>' +
+                    '<button type="button" class="chip-remove" data-remove="' + esc(v) + '" title="Remove">&times;</button></span>';
+            });
+            if (!values.length) html += '<div class="hint">Tick or add at least one other spelling.</div>';
+            document.getElementById('selectedChips').innerHTML = html;
+        }
+        document.getElementById('saveMappingBtn').disabled = !state.main || !!state.blockedBy || !values.length;
+    }
+
+    function renderAll() { renderMain(); renderSuggestions(false); renderSelected(); }
+
+    function setMain(value) {
+        state.main = value;
+        state.mainGroups = [];
+        state.blockedBy = null;
+        state.suggestions = [];
+        delete state.selected[value];
+        showError('');
+        renderMain();
+        renderSelected();
+        renderSuggestions(true);
+
+        var mySeq = ++suggestSeq;
+        fetch(SUGGEST_URL + '?' + new URLSearchParams({ value: value }).toString())
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                if (mySeq !== suggestSeq) return;
+                if (!data.success) { showError(data.message); return; }
+                state.mainGroups = data.groups;
+                if (data.mapping_id && data.mapping_id !== state.editingId) {
+                    state.blockedBy = { id: data.mapping_id, name: data.mapped_to };
+                }
+                state.suggestions = data.suggestions;
+                // Refresh group info for anything already selected that the server just described.
+                data.suggestions.forEach(function (s) {
+                    if (state.selected[s.value]) state.selected[s.value].groups = s.groups;
+                });
+                renderAll();
+            })
+            .catch(function () {
+                if (mySeq !== suggestSeq) return;
+                showError('Could not load suggestions. Please try again.');
+                state.suggestions = [];
+                renderSuggestions(false);
+            });
+    }
+
+    function addSelected(value, groups) {
+        if (!value || value === state.main) return;
+        state.selected[value] = { groups: groups || [] };
+        renderSuggestions(false);
+        renderSelected();
+    }
+
+    function openModal(mapping) {
+        state = { editingId: mapping ? mapping.id : null, main: null, mainGroups: [], blockedBy: null, selected: {}, suggestions: [] };
+        document.getElementById('mappingModalTitle').textContent = mapping ? 'Edit Mapping' : 'New Mapping';
+        document.getElementById('mainInput').value = '';
+        document.getElementById('manualInput').value = '';
+        showError('');
+        if (mapping) {
+            mapping.values.forEach(function (v) {
+                if (v.value !== mapping.name) state.selected[v.value] = { groups: v.groups };
+            });
+        }
+        renderAll();
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        if (mapping) setMain(mapping.name);
+    }
+
+    function openMappingById(id) {
+        if (mappingsById[id]) { openModal(mappingsById[id]); return; }
+        // Not in the currently filtered table -- look it up by name.
+        fetch(LIST_URL + '?' + new URLSearchParams({ q: state.main || '' }).toString())
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                var found = (data.results || []).filter(function (m) { return m.id === id; })[0];
+                if (found) openModal(found);
+            });
+    }
+
+    // ---------------- Wiring ----------------
+    attachAutocomplete(document.getElementById('mainInput'), document.getElementById('mainAcList'), setMain, true);
+    attachAutocomplete(document.getElementById('manualInput'), document.getElementById('manualAcList'), function (value) {
+        if (value === state.main) return;
+        // Look the value up so its groups / existing mapping are known before adding it.
+        fetch(VALUES_URL + '?' + new URLSearchParams({ q: value }).toString())
+            .then(function (res) { return res.json(); })
+            .then(function (data) {
+                var hit = (data.results || []).filter(function (r) { return r.value === value; })[0];
+                if (hit && hit.mapping_id && hit.mapping_id !== state.editingId) {
+                    showError('"' + value + '" is already in the mapping "' + hit.mapped_to + '". Remove it from there first.');
+                    return;
+                }
+                showError('');
+                addSelected(value, hit ? hit.groups : []);
+            })
+            .catch(function () { addSelected(value, []); });
+    }, true);
+
+    document.getElementById('suggestList').addEventListener('change', function (e) {
+        var i = e.target.getAttribute('data-sugg');
+        if (i === null) return;
+        var s = state.suggestions[+i];
+        if (e.target.checked) state.selected[s.value] = { groups: s.groups };
+        else delete state.selected[s.value];
+        renderSelected();
+    });
+
+    document.getElementById('selectedChips').addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-remove]');
+        if (!btn) return;
+        delete state.selected[btn.getAttribute('data-remove')];
+        renderSuggestions(false);
+        renderSelected();
+    });
+
+    document.getElementById('mainWarning').addEventListener('click', function (e) {
+        if (e.target.id !== 'editBlockingLink') return;
+        e.preventDefault();
+        var id = state.blockedBy.id;
+        bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+        modalEl.addEventListener('hidden.bs.modal', function once() {
+            modalEl.removeEventListener('hidden.bs.modal', once);
+            openMappingById(id);
+        });
+    });
+
+    document.getElementById('saveMappingBtn').addEventListener('click', function () {
+        var btn = this;
+        btn.disabled = true;
+        showError('');
+        postJson(SAVE_URL, {
+            id: state.editingId,
+            name: state.main,
+            values: Object.keys(state.selected)
+        })
+            .then(function (data) {
+                if (!data.success) {
+                    showError(data.message || 'Could not save the mapping.');
+                    btn.disabled = false;
+                    return;
+                }
+                bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+                loadTable();
+            })
+            .catch(function () {
+                showError('A network error occurred while saving.');
+                btn.disabled = false;
+            });
+    });
+
+    document.getElementById('tableBody').addEventListener('click', function (e) {
+        var editBtn = e.target.closest('[data-edit]');
+        if (editBtn) { openModal(mappingsById[+editBtn.getAttribute('data-edit')]); return; }
+        var delBtn = e.target.closest('[data-delete]');
+        if (!delBtn) return;
+        var m = mappingsById[+delBtn.getAttribute('data-delete')];
+        if (!confirm('Delete the mapping "' + m.name + '"?\n\nIts spellings will no longer be searched together. ' +
+                     'Make/model groups are not changed.')) return;
+        postJson(DELETE_URL, { id: m.id })
+            .then(function (data) {
+                if (!data.success) { alert(data.message || 'Could not delete the mapping.'); }
+                loadTable();
+            })
+            .catch(function () { alert('A network error occurred while deleting.'); });
+    });
+
+    document.getElementById('newMappingBtn').addEventListener('click', function () { openModal(null); });
+    modalEl.addEventListener('shown.bs.modal', function () {
+        if (!state.editingId) document.getElementById('mainInput').focus();
+    });
+    document.getElementById('filterForm').addEventListener('submit', function (e) { e.preventDefault(); loadTable(); });
+    document.getElementById('resetFilterBtn').addEventListener('click', function () {
+        document.getElementById('filterQ').value = '';
+        loadTable();
+    });
+
+    loadTable();
+})();
+</script>
+{% endblock %}

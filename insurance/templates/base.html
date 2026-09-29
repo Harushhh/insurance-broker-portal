@@ -451,6 +451,11 @@
                         <i class="bi bi-car-front-fill"></i> Make/Model Master
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a href="{% url 'make_model_mapping' %}" class="nav-link {% if request.path == '/make-model-mapping/' %}active{% endif %}">
+                        <i class="bi bi-link-45deg"></i> Make/Model Mapping
+                    </a>
+                </li>
                 {% endif %}
                 {% if 'Can_View_Missing_Make_Model' in nav_pages %}
                 <li class="nav-item">
