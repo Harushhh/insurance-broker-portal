@@ -529,6 +529,43 @@ def is_combined_cc_gvw(raw_value) -> bool:
     return bool(_CC_COMBINED_PATTERN.search(str(raw_value)))
 
 
+# The failed_on label RULE 3's vehicle-age check reports under. The age is no
+# longer read from the MIS 'Policy: vehage' column — it is calculated from
+# 'Policy: manufacturing year' (see calculate_vehicle_age), so that is the
+# column a human has to fix when this rule fails.
+VEHICLE_AGE_RULE_LABEL = 'Policy: manufacturing year'
+
+# A calendar year (1900-2099) standing on its own inside the cell, so "2024",
+# "2024.0", "15/03/2024" and an Excel "2024-03-15 00:00:00" all yield 2024.
+_MFG_YEAR_PATTERN = re.compile(r'(?<!\d)((?:19|20)\d{2})(?!\d)')
+
+
+def calculate_vehicle_age(mfg_year_series, current_year):
+    """
+    Motor vehicle age for RULE 3, as a whole number of years:
+
+        Calculated_Age = CURRENT_YEAR - Manufacturing_Year
+
+    CURRENT_YEAR is the calendar year the mapping run happens in (2026 now,
+    2027 once the clock rolls over), passed in by process_mis_mapping from
+    timezone.localdate() rather than hard-coded here.
+
+    The result is NaN when the manufacturing year is blank or has no 4-digit
+    year in it; RULE 3 then treats it like any other blank value (only a rate
+    row with an open, fully blank age range can pass). It is NOT clamped: a
+    manufacturing year later than the current year gives a negative age, which
+    matches no band.
+
+    RULE 3 then reads this against each rate row's age band as
+    [vehicle_age_min, vehicle_age_max) — see the range_rules loop.
+    """
+    mfg_year = pd.to_numeric(
+        mfg_year_series.astype(str).str.extract(_MFG_YEAR_PATTERN, expand=False),
+        errors='coerce',
+    )
+    return current_year - mfg_year
+
+
 def normalize_rto_code(raw_value):
     """
     Normalizes a raw MIS RTO value before the two-step RTOMaster lookup.
@@ -748,7 +785,7 @@ MATCHING_RULE_COLUMNS = [
     'Policy: cc cubic capacity',        # Rule 3 (CC, or GVW below for GCV 3W/4W)
     'Policy: gvw gross vehicle weight', # Rule 3 (GCV 3W/4W only)
     'Policy: seating capacity',         # Rule 3
-    'Policy: vehage',                   # Rule 3
+    'Policy: manufacturing year',       # Rule 3 (vehicle age = current year - this)
     'Policy: tariff rate',              # Rule 3
     'Policy: inception date',           # Rule 4
     'Policy: vehicle make',             # Rule 5a
@@ -1239,17 +1276,30 @@ def process_mis_mapping(mis_file_id):
         sc_raw = safe_get_col(df_mis, 'Policy: seating capacity').astype(str).str.replace(r'[^0-9.]', '', regex=True)
         df_mis['_mis_sc'] = pd.to_numeric(sc_raw, errors='coerce')
 
-        age_raw = safe_get_col(df_mis, 'Policy: vehage').astype(str).str.replace(r'[^0-9.]', '', regex=True)
-        df_mis['_mis_age'] = pd.to_numeric(age_raw, errors='coerce')
-
         tariff_raw = safe_get_col(df_mis, 'Policy: tariff rate').astype(str).str.replace(r'[^0-9.]', '', regex=True)
         df_mis['_mis_tariff'] = pd.to_numeric(tariff_raw, errors='coerce')
 
         df_mis['_mis_date'] = pd.to_datetime(safe_get_col(df_mis, 'Policy: inception date'), errors='coerce', dayfirst=True)
 
+        # Vehicle age (RULE 3) is calculated, not read: the current year (the
+        # year this run happens in) minus the manufacturing year.
+        df_mis['_mis_age'] = calculate_vehicle_age(
+            safe_get_col(df_mis, 'Policy: manufacturing year'),
+            timezone.localdate().year,
+        )
+
         df_mis['_mis_ncb'] = pd.to_numeric(safe_get_col(df_mis, 'Policy: no claim bonus'), errors='coerce')
         df_mis['_mis_cpa'] = pd.to_numeric(safe_get_col(df_mis, 'Policy: cpa'), errors='coerce')
         df_mis['_mis_zd'] = safe_get_col(df_mis, 'Policy: nil dep').astype(str).str.strip().str.upper()
+
+        # --- PRODUCT ROUTING KEYS ---
+        # The Product column decides which Rate Master a row may be compared
+        # against: 'motor' -> RateMaster only, 'health' -> HealthRateMaster only,
+        # anything else -> neither (see the PRODUCT ROUTING block in the row
+        # loop). Defined ahead of every insurer/rate lookup below so nothing is
+        # fuzzy-matched or fetched for a row before its table is known.
+        df_mis['_mis_product'] = safe_get_col(df_mis, 'Product').astype(str).str.strip().str.lower()
+        df_mis['_mis_is_motor'] = df_mis['_mis_product'] == 'motor'
 
         # --- HEALTH PRE-COMPUTE ---
         # Mirrors the Motor _mis_* block above, but for the fields Health
@@ -1332,8 +1382,11 @@ def process_mis_mapping(mis_file_id):
         # Insurance company fuzzy mapping — now powered by RapidFuzz (5-100x
         # faster), and now matched against just the distinct insurer list
         # instead of the full grid.
+        # Only Motor rows' insurers are matched against RateMaster's insurer
+        # list — a Health row's insurer belongs to HealthRateMaster (matched
+        # separately below), never to this one.
         fuzzy_ins_map = get_fuzzy_dict(
-            df_mis['_mis_ins'].unique(),
+            df_mis.loc[df_mis['_mis_is_motor'], '_mis_ins'].unique(),
             distinct_raw_insurers,
             threshold=INSURANCE_FUZZY_THRESHOLD
         )
@@ -1503,10 +1556,42 @@ def process_mis_mapping(mis_file_id):
 
         for idx, mis_row in df_mis_slim.iterrows():
 
+            # --- PRODUCT ROUTING (first step for every row) ---
+            # The Product column selects which Rate Master this row may be
+            # compared against, before any other check, range test, fuzzy
+            # match or rate logic runs:
+            #   'health' -> HealthRateMaster only (_match_health_row)
+            #   'motor'  -> RateMaster only (the BAD DATA guard and RULE 1-6
+            #               chain below)
+            #   anything else (blank, 'non_motor', 'life', a typo) -> neither
+            if mis_row['_mis_h_is_health']:
+                results.append(_match_health_row(mis_row, health_grid_by_insurer, _empty_health_grid, resolve_pincode))
+                continue
+
+            if not mis_row['_mis_is_motor']:
+                raw_product = mis_row['_mis_product']
+                shown_product = '(blank)' if pd.isna(raw_product) or raw_product in ('', 'nan', 'none') else raw_product
+                results.append({
+                    'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
+                    'Mapping Status': '❌ NO MATCH',
+                    'Failure Reason': (
+                        f"Failed on: Product — Product '{shown_product}' is neither 'motor' nor 'health', "
+                        f"so no Rate Master applies and the row was not matched. Correct the Product "
+                        f"column and re-run mapping for this row."
+                    ),
+                    'Displaygroupid': None,
+                    'Potype': None, 'Porate': None, 'Poflatamount': None,
+                    'Pitype': None, 'Pirate': None, 'Piflatamount': None,
+                    'Addtnc': None
+                })
+                continue
+
             # --- BAD DATA GUARD: combined CC/GVW value ---
             # Flagged during pre-compute (is_combined_cc_gvw). Never enters the
             # elimination rules — a fabricated CC number could otherwise cause
             # a false NO MATCH, or worse, a false MATCH against the wrong rate.
+            # Motor rows only: it runs after the Product routing above, so it
+            # never fires for (or blocks) a Health row.
             if mis_row['_mis_cc_bad_data']:
                 results.append({
                     'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
@@ -1523,16 +1608,8 @@ def process_mis_mapping(mis_file_id):
                 })
                 continue
 
-            # --- HEALTH BRANCH ---
-            # Health rows (Product == 'health') are matched against
-            # HealthRateMaster via _match_health_row instead of the Motor
-            # RULE 1-6 chain below, which is completely untouched and keeps
-            # running exactly as before for every other row (motor, and any
-            # other Product value).
-            if mis_row['_mis_h_is_health']:
-                results.append(_match_health_row(mis_row, health_grid_by_insurer, _empty_health_grid, resolve_pincode))
-                continue
-
+            # Motor row (Product == 'motor'): the RULE 1-6 chain below runs
+            # exactly as before, against RateMaster only.
             failed_on = []
 
             # --- RULE 1: Insurance Company ---
@@ -1616,13 +1693,22 @@ def process_mis_mapping(mis_file_id):
                     ))
 
             # --- RULE 3: Numeric Ranges ---
+            # Last element: is the band's upper bound inclusive? True for CC/
+            # GVW, seating capacity and tariff, exactly as before. Vehicle age
+            # is a whole number (current year - manufacturing year), and the
+            # grids write consecutive bands as '0 to 1', '1 to 2', ... meaning
+            # age 0, age 1, ... — so an age band is [min, max): the lower bound
+            # is inclusive and the upper bound EXCLUSIVE, which puts the age on
+            # a seam (age 1 between '0 to 1' and '1 to 2') in exactly one band.
+            # Bands written with an x.01 upper bound ('0 to 1.01') still cover
+            # the whole number below it, as no whole-number age equals x.01.
             range_rules = [
-                ('_mis_cc', 'cc_min', 'cc_max', mis_row['_mis_cc_source_label']),
-                ('_mis_sc', 'sc_min', 'sc_max', 'Policy: seating capacity'),
-                ('_mis_age', 'vehicle_age_min', 'vehicle_age_max', 'Policy: vehage'),
-                ('_mis_tariff', 'tariff_min', 'tariff_max', 'Policy: tariff rate'),
+                ('_mis_cc', 'cc_min', 'cc_max', mis_row['_mis_cc_source_label'], True),
+                ('_mis_sc', 'sc_min', 'sc_max', 'Policy: seating capacity', True),
+                ('_mis_age', 'vehicle_age_min', 'vehicle_age_max', VEHICLE_AGE_RULE_LABEL, False),
+                ('_mis_tariff', 'tariff_min', 'tariff_max', 'Policy: tariff rate', True),
             ]
-            for mis_col, min_col, max_col, label in range_rules:
+            for mis_col, min_col, max_col, label, max_inclusive in range_rules:
                 if not current_grid.empty:
                     val = mis_row[mis_col]
                     if pd.isna(val):
@@ -1633,12 +1719,22 @@ def process_mis_mapping(mis_file_id):
                         )
                     else:
                         min_cond = current_grid[min_col].isna() | (current_grid[min_col] <= val)
-                        max_cond = current_grid[max_col].isna() | (current_grid[max_col] >= val)
+                        if max_inclusive:
+                            max_cond = current_grid[max_col].isna() | (current_grid[max_col] >= val)
+                        else:
+                            max_cond = current_grid[max_col].isna() | (current_grid[max_col] > val)
                         rule_mask = min_cond & max_cond
-                        detail = (
-                            f"{label} value {val} falls outside the range configured on every "
-                            f"remaining candidate rate row."
-                        )
+                        if mis_col == '_mis_age':
+                            detail = (
+                                f"Calculated vehicle age {val:g} (current year - manufacturing year) falls "
+                                f"outside the age band (lower bound inclusive, upper bound exclusive) "
+                                f"configured on every remaining candidate rate row."
+                            )
+                        else:
+                            detail = (
+                                f"{label} value {val} falls outside the range configured on every "
+                                f"remaining candidate rate row."
+                            )
                     current_grid = current_grid[rule_mask]
                     if current_grid.empty:
                         failed_on.append((label, detail))

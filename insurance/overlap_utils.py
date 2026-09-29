@@ -241,6 +241,13 @@ def intervals_overlap(a_min, a_max, b_min, b_max, adjacent_bands_are_separate=Fa
     conflict anyone can act on, and reporting it buried the real findings
     (23,163 partial overlaps, of which 556 survive this rule).
 
+    Vehicle age is the one axis where this excuse is no longer just a
+    convention: RULE 3 reads the calculated age (current year - manufacturing
+    year) against [vehicle_age_min, vehicle_age_max), so an age on the seam
+    between "0 - 1" and "1 - 2" already belongs to exactly one band in the
+    engine too. CC, seating capacity and tariff are still inclusive on both
+    sides there.
+
     Only a bare touch between two bands approaching from opposite sides is
     excused. Two bands that genuinely pin the same single value - both written
     as "1000 - 1000" - still collide, because neither is stopping where the
