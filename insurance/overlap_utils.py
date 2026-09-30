@@ -22,9 +22,10 @@ So every axis below mirrors one rule, using that rule's own semantics:
                              partitioning by it, so two spellings that differ
                              only in case land in the SAME bucket and CAN
                              collide.
-  RULE 2  product /          check_categorical_match treats a blank grid value
-          sub_product /      as a wildcard that matches anything.
-          fuel_type
+  RULE 2  product /          a blank grid value is a wildcard that matches
+          sub_product /      anything. All three are exact, case-insensitive
+          fuel_type          matches (check_exact_match), so two different
+                             values can never co-match one policy.
   RULE 2b make_model_class   blank OR 'na' is the wildcard.
   RULE 3  cc / sc /          a NULL bound is open (see the min_col.isna()
           vehicle_age /      branches); 0 is a real bound, NOT "unset".

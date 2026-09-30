@@ -270,6 +270,30 @@ def check_categorical_match(val, grid_val):
     return False
 
 
+def check_exact_match(val, grid_val):
+    """
+    RULE 2's product, sub product and fuel check: an EXACT, case-insensitive
+    match — no substring and no fuzzy matching, unlike check_categorical_match.
+    The fuzzy scorer rates "GCV 3W" / "GCV 4W" (and "PCV 4W" / "GCV 4W",
+    "PCV 3W" / "PCV 4W", ...) at 83.3 against a threshold of 75, so one
+    product's policy also matched every sibling product's rate rows and
+    surfaced as MULTIPLE MATCHES. These are master values ('GCV 3W', '1+1',
+    'CNG'), not free text to be forgiven.
+
+    Everything else is unchanged from check_categorical_match: surrounding
+    whitespace is ignored, a blank Rate Master value is a wildcard that
+    matches any policy, and a blank/missing MIS value matches nothing but a
+    wildcard row.
+    """
+    if pd.isna(grid_val) or not grid_val or str(grid_val).strip().lower() == 'nan':
+        return True
+
+    if pd.isna(val) or not val or str(val).strip().lower() == 'nan':
+        return False
+
+    return str(val).strip().lower() == str(grid_val).strip().lower()
+
+
 def strict_match_in_cluster(search_term, cluster_string):
     """
     Identical to the function of the same name in views.py — kept in sync
@@ -1641,7 +1665,9 @@ def process_mis_mapping(mis_file_id):
                         f"Insurer resolved to '{val_ins}' but there are 0 active Rate Master rows for that insurer."
                     ))
 
-            # --- RULE 2: Categorical Matches (RapidFuzz-backed) ---
+            # --- RULE 2: Categorical Matches ---
+            # Product, sub product and fuel are all exact, case-insensitive
+            # matches (check_exact_match) — no substring or fuzzy matching.
             # Vehicle class is handled separately below (Rule 2b) with its own
             # direct-match + NA-wildcard logic, so it is excluded here.
             cat_rules = [
@@ -1652,7 +1678,7 @@ def process_mis_mapping(mis_file_id):
             for mis_col, grid_col, label in cat_rules:
                 if not current_grid.empty:
                     val = mis_row[mis_col]
-                    rule_mask = current_grid[grid_col].apply(lambda g: check_categorical_match(val, g))
+                    rule_mask = current_grid[grid_col].apply(lambda g: check_exact_match(val, g))
                     current_grid = current_grid[rule_mask]
                     if current_grid.empty:
                         failed_on.append((
