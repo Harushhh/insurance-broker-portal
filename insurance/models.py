@@ -533,6 +533,37 @@ class GridDocument(models.Model):
         return self.insurer_name
 
 
+class GridArchiveBatch(models.Model):
+    """
+    One row per attempt to archive one calendar month of GridDocuments out of
+    the active database (insurance/grid_archive.py). This is only a log for
+    visibility - the archived data itself is self-describing in the archive
+    storage (manifest-*.json), so losing this table never loses an archive.
+    """
+    STATUS_CHOICES = (
+        ('RUNNING', 'Running'),
+        ('COMPLETED', 'Completed'),
+        ('PARTIAL', 'Partial'),
+        ('FAILED', 'Failed'),
+    )
+
+    month = models.DateField(db_index=True, help_text="First day of the month that was archived.")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='RUNNING')
+    documents_archived = models.PositiveIntegerField(default=0)
+    files_archived = models.PositiveIntegerField(default=0)
+    bytes_archived = models.PositiveBigIntegerField(default=0)
+    manifest_key = models.CharField(max_length=500, blank=True)
+    error_message = models.TextField(blank=True)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+
+    def __str__(self):
+        return f"{self.month:%Y-%m} - {self.status}"
+
+
 # =========================================================
 # AI OCR RULEBOOK MODELS
 # =========================================================

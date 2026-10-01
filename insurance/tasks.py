@@ -78,6 +78,21 @@ def save_grid_document_file_task(self, document_id, filename, file_b64):
 
 @shared_task(
     bind=True,
+    # No retries: per-month failures are recorded on GridArchiveBatch, nothing
+    # is deleted unless it was verified in the archive first, and the next run
+    # (or `manage.py archive_grid_documents`) picks up whatever was left.
+    max_retries=0,
+    soft_time_limit=3300,
+    time_limit=3600,
+)
+def archive_old_grid_documents(self):
+    """Monthly: move Grid Management uploads older than the retention window to the archive."""
+    from .grid_archive import run_retention
+    return run_retention()
+
+
+@shared_task(
+    bind=True,
     max_retries=2,
     default_retry_delay=60,
     soft_time_limit=180,

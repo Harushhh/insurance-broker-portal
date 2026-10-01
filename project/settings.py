@@ -237,6 +237,30 @@ AWS_DEFAULT_ACL = None
 # except one specific duplicate-name check in upload_extract_pdf.
 AWS_S3_FILE_OVERWRITE = False
 
+# Cold storage for Grid Management uploads older than GRID_RETENTION_MONTHS
+# (see insurance/grid_archive.py). On R2 this is a "grid_archive/" prefix; set
+# GRID_ARCHIVE_BUCKET_NAME to put it in a separate bucket instead (the same
+# AWS_* credentials must be able to write to it), so that nothing that touches
+# the main media bucket can reach the archive. Without R2 credentials it falls
+# back to a local folder - fine for dev/tests, but the retention job refuses
+# to purge anything unless the archive is on S3 (it would just move files
+# around on the same disk).
+GRID_RETENTION_MONTHS = 3
+
+if USE_S3_STORAGE:
+    STORAGES["grid_archive"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": {
+            "location": "grid_archive",
+            "bucket_name": os.getenv("GRID_ARCHIVE_BUCKET_NAME") or AWS_STORAGE_BUCKET_NAME,
+        },
+    }
+else:
+    STORAGES["grid_archive"] = {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": os.path.join(BASE_DIR, "media", "grid_archive")},
+    }
+
 # =========================================================
 # MEDIA FILES
 # =========================================================
@@ -271,6 +295,12 @@ CELERY_BEAT_SCHEDULE = {
     "cleanup-security-audit-logs": {
         "task": "insurance.tasks.cleanup_security_audit_logs",
         "schedule": crontab(hour=2, minute=15),
+    },
+    # 03:00 on the 1st: on 1 Oct this archives July and everything before it,
+    # leaving Aug/Sep/Oct active. Safe to re-run - see insurance/grid_archive.py.
+    "archive-old-grid-documents": {
+        "task": "insurance.tasks.archive_old_grid_documents",
+        "schedule": crontab(day_of_month=1, hour=3, minute=0),
     },
 }
 

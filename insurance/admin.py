@@ -13,6 +13,7 @@ from .models import (
     PolicyMISRecord,
     MappingConfiguration,
     MISFile,
+    GridArchiveBatch,
 )
 
 
@@ -252,6 +253,26 @@ class MISFileAdmin(admin.ModelAdmin):
     list_display = ("id", "uploaded_file", "status", "created_at", "processed_at")
     list_filter = ("status", "created_at")
     ordering = ("-created_at",)
+
+
+@admin.register(GridArchiveBatch)
+class GridArchiveBatchAdmin(admin.ModelAdmin):
+    list_display = (
+        "month",
+        "status",
+        "documents_archived",
+        "files_archived",
+        "bytes_archived",
+        "started_at",
+        "finished_at",
+    )
+    list_filter = ("status", "month")
+    ordering = ("-started_at",)
+    # A log of what the retention job did; nothing here should be hand-edited.
+    readonly_fields = [f.name for f in GridArchiveBatch._meta.fields]
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(MappingConfiguration)
