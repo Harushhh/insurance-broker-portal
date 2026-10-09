@@ -222,6 +222,74 @@ def consolidated_rate(rate_type, od_rate, tp_rate, net_rate):
     return None
 
 
+# RateMaster columns the payout/payin rates and their rate types are read from.
+_PAYOUT_COLUMNS = [
+    'po_type', 'po_od_rate', 'po_tp_rate', 'po_net_rate',
+    'pi_type', 'pi_od_rate', 'pi_tp_rate', 'pi_net_rate',
+]
+
+
+def _rounded_or_none(val):
+    return None if pd.isna(val) else round(float(val), 6)
+
+
+def payout_signature(row):
+    """
+    The payout rate and payin rate one matched RateMaster row would map, each
+    with its rate type, as a hashable tuple — what lands in Potype/Porate and
+    Pitype/Pirate. The type is part of the rate: it decides which premium the
+    amount is calculated on (Pitype drives cp premium#), so 'On OD' 10 and
+    'On Net' 10 are different rates. Nothing else on the row is compared
+    (T&C, flat amount, ...): by the time rows reach this point RULE 1-6 have
+    already picked them as the right records for the policy.
+
+    The raw OD/TP pair is part of the signature for 'On OD and TP' rates:
+    Pay-out/Pay-in Amt for those is computed from the two rates separately
+    (against Total OD and TP Premium), not from their consolidated sum, so
+    10+5 and 5+10 both read as 15 yet are different rates.
+    """
+    signature = []
+    for side in ('po', 'pi'):
+        rate_type = row.get(f'{side}_type')
+        rate_type = None if pd.isna(rate_type) else rate_type
+        od_rate = row.get(f'{side}_od_rate')
+        tp_rate = row.get(f'{side}_tp_rate')
+        signature.append(rate_type)
+        signature.append(_rounded_or_none(
+            consolidated_rate(rate_type, od_rate, tp_rate, row.get(f'{side}_net_rate'))
+        ))
+        if rate_type == 'On OD and TP':
+            signature.append(_rounded_or_none(od_rate) or 0.0)
+            signature.append(_rounded_or_none(tp_rate) or 0.0)
+    return tuple(signature)
+
+
+def matched_rows_share_one_payout(matched_grid) -> bool:
+    """
+    True when every row in matched_grid maps the same payout and payin rate
+    (type and value). Collapses to the distinct raw rate columns first (a
+    handful of rows at most) so signatures are only built for those, not for
+    every physical row of a group exploded across many RTOs.
+    """
+    distinct_payouts = matched_grid[_PAYOUT_COLUMNS].drop_duplicates()
+    return len({payout_signature(row) for _, row in distinct_payouts.iterrows()}) == 1
+
+
+def health_matched_rows_share_one_rate(matched_grid, rate_col) -> bool:
+    """
+    Health equivalent of matched_rows_share_one_payout: True when every row in
+    matched_grid carries the same payout rate (the tenure column rate_col that
+    becomes Porate) and the same payin_rate. Only those two rates are
+    compared — not the other tenures' columns, plan names, remarks, etc. Health
+    has no rate-type column to compare: Potype/Pitype are fixed for every row.
+    """
+    distinct_rates = matched_grid[[rate_col, 'payin_rate']].drop_duplicates()
+    return len({
+        (_rounded_or_none(payout), _rounded_or_none(payin))
+        for payout, payin in distinct_rates.itertuples(index=False, name=None)
+    }) == 1
+
+
 def _format_number(n) -> str:
     """12.0 -> '12', 12.5 -> '12.5' — used by format_od_tp_rate so a whole-
     number rate doesn't show a pointless trailing '.0' in the 'OD+TP' string."""
@@ -1175,9 +1243,19 @@ def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
     matched_grid = current_grid
     distinct_ids = matched_grid['id'].unique().tolist() if not matched_grid.empty else []
 
+    # Several rows matched, but every one carries the same payout and payin
+    # rate: which row wins can't change the rate, so it isn't an ambiguity
+    # worth skipping the row for (same rule as Motor's identical-payout
+    # resolution in process_mis_mapping). Use the lowest row id and carry on
+    # through the single-row path below. Only the two rates are compared.
+    tied_row_count = 0
+    if len(distinct_ids) > 1 and health_matched_rows_share_one_rate(matched_grid, rate_col):
+        tied_row_count = len(distinct_ids)
+        distinct_ids = [min(distinct_ids)]
+
     if len(distinct_ids) == 1:
-        best_match = matched_grid.iloc[0]
-        return {
+        best_match = matched_grid[matched_grid['id'] == distinct_ids[0]].iloc[0]
+        result = {
             'Original_Row_ID': row_id,
             'Mapping Status': '✅ MATCH',
             'Failure Reason': 'Matched Successfully',
@@ -1190,6 +1268,15 @@ def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
             'Piflatamount': None,
             'Addtnc': None,
         }
+        if tied_row_count:
+            result['Failure Reason'] = (
+                f"Matched Successfully — {tied_row_count} Health Rate Master rows matched with "
+                f"identical payout and payin rates; used Group {int(best_match.get('id'))} (lowest Group ID)."
+            )
+            # Private marker for the caller's run-summary count; the caller
+            # pops it so it never becomes a column of the results frame.
+            result['_tied_rows'] = tied_row_count
+        return result
 
     if len(distinct_ids) > 1:
         sorted_ids = sorted(int(i) for i in distinct_ids)
@@ -1566,6 +1653,7 @@ def process_mis_mapping(mis_file_id):
             resolve_pincode = lambda _v: set()
 
         results = []
+        total_identical_payout_resolved = 0
 
         # 4. ROW-BY-ROW PROCESSING
         # Iterate a slimmed frame (just the precomputed _mis_* columns + the
@@ -1589,7 +1677,10 @@ def process_mis_mapping(mis_file_id):
             #               chain below)
             #   anything else (blank, 'non_motor', 'life', a typo) -> neither
             if mis_row['_mis_h_is_health']:
-                results.append(_match_health_row(mis_row, health_grid_by_insurer, _empty_health_grid, resolve_pincode))
+                health_result = _match_health_row(mis_row, health_grid_by_insurer, _empty_health_grid, resolve_pincode)
+                if health_result.pop('_tied_rows', 0):
+                    total_identical_payout_resolved += 1
+                results.append(health_result)
                 continue
 
             if not mis_row['_mis_is_motor']:
@@ -1942,6 +2033,18 @@ def process_mis_mapping(mis_file_id):
                         return val
                 return 0
 
+            # Several distinct groups matched, but every matched row carries
+            # the same payout and payin rate: which group wins can't change
+            # the rate, so it isn't an ambiguity worth skipping the row for.
+            # Resolve to the lowest group id (deterministic, not DB order) and
+            # carry on through the single-group path below. Only the rates
+            # (type and value) are compared; a difference in either the payout
+            # or payin rate leaves it as MULTIPLE MATCHES.
+            tied_group_count = 0
+            if len(distinct_keys) > 1 and matched_rows_share_one_payout(matched_grid):
+                tied_group_count = len(distinct_keys)
+                distinct_keys = [min(distinct_keys)]
+
             if len(distinct_keys) == 1:
                 # EXACTLY ONE DISTINCT RATE GROUP — safe to apply, even when
                 # it spans several physical rows. Those are expected to be
@@ -1952,11 +2055,19 @@ def process_mis_mapping(mis_file_id):
                     min((row for _, row in group_rows.iterrows()), key=_effective_rate)
                     if len(group_rows) > 1 else group_rows.iloc[0]
                 )
+                chosen_group_id = best_match.get('group_id') if pd.notna(best_match.get('group_id')) else best_match.get('id')
+                match_reason = 'Matched Successfully'
+                if tied_group_count:
+                    total_identical_payout_resolved += 1
+                    match_reason = (
+                        f"Matched Successfully — {tied_group_count} Rate Master groups matched with "
+                        f"identical payout and payin rates; used Group {int(chosen_group_id)} (lowest Group ID)."
+                    )
                 results.append({
                     'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
                     'Mapping Status': '✅ MATCH',
-                    'Failure Reason': 'Matched Successfully',
-                    'Displaygroupid': best_match.get('group_id') if pd.notna(best_match.get('group_id')) else best_match.get('id'),
+                    'Failure Reason': match_reason,
+                    'Displaygroupid': chosen_group_id,
                     'Potype': best_match.get('po_type'),
                     'Porate': consolidated_rate(
                         best_match.get('po_type'), best_match.get('po_od_rate'),
@@ -2172,9 +2283,15 @@ def process_mis_mapping(mis_file_id):
         mis_obj.status = 'COMPLETED'
         mis_obj.processed_at = timezone.now()
 
+        identical_payout_note = (
+            f"{total_identical_payout_resolved} of them matched several Rate Master groups/rows with "
+            f"identical payout and payin rates and used the lowest Group ID. "
+            if total_identical_payout_resolved else ""
+        )
         mis_obj.error_message = (
             f"Processed {total_processed} rows successfully. "
             f"Mapped {total_matched} rates. "
+            f"{identical_payout_note}"
             f"{total_multiple} rows skipped — multiple Rate Master groups matched "
             f"(refine Rate Master to get a single match). "
             f"{total_bad_data} rows flagged FAILED - BAD DATA (malformed source values — see Failure Reason)."
