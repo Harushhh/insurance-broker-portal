@@ -290,6 +290,14 @@ CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_ACKS_LATE = True
 CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
+# A prefork child that grows during a big job (e.g. a large MIS mapping run)
+# doesn't hand that memory back to the OS, so the worker container stayed at
+# ~1.8 GB for days between jobs. Once a child finishes a task above this size
+# (KiB, ~488 MB) Celery replaces it with a fresh process. Set here rather than
+# as a `--max-memory-per-child` flag in the Procfile because the Railway
+# service has its own start command, which overrides the Procfile.
+CELERY_WORKER_MAX_MEMORY_PER_CHILD = 500000
+
 # Periodic jobs, run by a `celery -A project beat` process (see Procfile's
 # `beat` entry). Requires that process to actually be deployed/running.
 from celery.schedules import crontab  # noqa: E402
