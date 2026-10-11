@@ -39,26 +39,33 @@ else:
         "Refusing to start in production with an open host list."
     )
 
-# URL of the standalone Life Payout Grid app (life-payout-grid/), linked from
-# the sidebar. Defaults to the local Next.js dev server; set this in Railway
-# env vars once that service has a real URL, e.g.
-# LIFE_PAYOUT_GRID_URL=https://life-payout-grid-production.up.railway.app
-LIFE_PAYOUT_GRID_URL = os.getenv("LIFE_PAYOUT_GRID_URL", "http://localhost:3000")
-
-# Shared secret used to sign the handoff token when a permitted user opens
-# the Life Payout Grid's admin page from this portal's sidebar (see
-# views.life_payout_grid_admin_redirect). Must be set to the *same* value
-# as LIFE_PAYOUT_GRID_AUTH_SECRET on the life-payout-grid Railway service --
-# that app trusts a token signed with this secret instead of a password of
-# its own. Set in this repo's .env for local dev (must match
-# life-payout-grid/.env.local); required as a real Railway env var in
-# production.
-LIFE_PAYOUT_GRID_AUTH_SECRET = os.getenv("LIFE_PAYOUT_GRID_AUTH_SECRET")
-if not LIFE_PAYOUT_GRID_AUTH_SECRET and not DEBUG:
-    raise RuntimeError(
-        "LIFE_PAYOUT_GRID_AUTH_SECRET environment variable is not set. "
-        "Refusing to start in production without it."
-    )
+# DISABLED 2026-10-11: the standalone Life Payout Grid app (life-payout-grid/)
+# was decommissioned on Railway, so nothing reads these settings any more and
+# the production startup check below is off -- the LIFE_PAYOUT_GRID_* Railway
+# env vars can be deleted. To re-enable, uncomment this block together with
+# the views/urls/template changes (see the note above _life_payout_grid_handoff
+# in insurance/views.py).
+#
+# # URL of the standalone Life Payout Grid app (life-payout-grid/), linked from
+# # the sidebar. Defaults to the local Next.js dev server; set this in Railway
+# # env vars once that service has a real URL, e.g.
+# # LIFE_PAYOUT_GRID_URL=https://life-payout-grid-production.up.railway.app
+# LIFE_PAYOUT_GRID_URL = os.getenv("LIFE_PAYOUT_GRID_URL", "http://localhost:3000")
+#
+# # Shared secret used to sign the handoff token when a permitted user opens
+# # the Life Payout Grid's admin page from this portal's sidebar (see
+# # views.life_payout_grid_admin_redirect). Must be set to the *same* value
+# # as LIFE_PAYOUT_GRID_AUTH_SECRET on the life-payout-grid Railway service --
+# # that app trusts a token signed with this secret instead of a password of
+# # its own. Set in this repo's .env for local dev (must match
+# # life-payout-grid/.env.local); required as a real Railway env var in
+# # production.
+# LIFE_PAYOUT_GRID_AUTH_SECRET = os.getenv("LIFE_PAYOUT_GRID_AUTH_SECRET")
+# if not LIFE_PAYOUT_GRID_AUTH_SECRET and not DEBUG:
+#     raise RuntimeError(
+#         "LIFE_PAYOUT_GRID_AUTH_SECRET environment variable is not set. "
+#         "Refusing to start in production without it."
+#     )
 
 # Signs the short-lived ticket used to hand an already-logged-in user off
 # from an external partner portal (e.g. ArhamSecure's partner portal) into

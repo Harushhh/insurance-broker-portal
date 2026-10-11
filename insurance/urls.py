@@ -34,7 +34,9 @@ def super_admin_required(view_func):
     page_access_required, being in ADMIN (the "Make Admin" bulk-access
     group) does NOT get you in here. Reserved for the single most
     sensitive action in the app: minting a Life Payout Grid admin token,
-    which grants the ability to overwrite the live commission grid.
+    which grants the ability to overwrite the live commission grid. (No
+    route uses it right now -- that handoff is disabled, see below -- but
+    it stays for the next super-admin-only action.)
     SUPER_ADMIN is deliberately not offered as a Page Permissions checkbox
     on /user-management/ -- grant it via Django's own /admin/ site instead.
     """
@@ -113,8 +115,10 @@ urlpatterns = [
     path("audit-log/export/", page_access_required("Can_View_Audit_Log")(views.export_audit_log_xlsx), name="export_audit_log_xlsx"),
     path("user-management/", staff_required(views.user_management), name="user_management"),
     path("grid-management/", page_access_required("Can_View_Grid_Management")(views.grid_management), name="grid_management"),
-    path("life-payout-grid/", page_access_required("Can_View_Life_Payout_Grid")(views.life_payout_grid_redirect), name="life_payout_grid_redirect"),
-    path("life-payout-grid/admin/", super_admin_required(views.life_payout_grid_admin_redirect), name="life_payout_grid_admin_redirect"),
+    # Life Payout Grid routes disabled 2026-10-11 (service decommissioned) --
+    # see the matching note above _life_payout_grid_handoff in views.py.
+    # path("life-payout-grid/", page_access_required("Can_View_Life_Payout_Grid")(views.life_payout_grid_redirect), name="life_payout_grid_redirect"),
+    # path("life-payout-grid/admin/", super_admin_required(views.life_payout_grid_admin_redirect), name="life_payout_grid_admin_redirect"),
 
     # Special Rate Requests
     path("special-rates/", page_access_required("Can_View_Special_Rates")(views.special_rate_requests), name="special_rate_requests"),

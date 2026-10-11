@@ -20,11 +20,14 @@ link, not a same-page render -- it navigates away like any other link.
         <i class="bi bi-heart-pulse-fill"></i> Health
     </a>
     {% endif %}
+    {% comment %}
+    Life tab disabled 2026-10-11 -- the Life Payout Grid service was decommissioned.
     {% if 'Can_View_Life_Payout_Grid' in nav_pages %}
     <a href="{% url 'life_payout_grid_redirect' %}" class="rc-tab">
         <i class="bi bi-percent"></i> Life
     </a>
     {% endif %}
+    {% endcomment %}
 </div>
 <style>
     .rc-tabs {

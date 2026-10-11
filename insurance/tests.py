@@ -374,7 +374,9 @@ class SSOHandoffViewTests(TestCase):
         self.assertFalse(user.has_usable_password())
         self.assertEqual(
             set(user.groups.values_list("name", flat=True)),
-            {"Can_View_Policy_Locker", "Can_View_Health_Payout_Rates", "Can_View_Life_Payout_Grid"},
+            # Life was part of the bundle until the Life Payout Grid service
+            # was decommissioned (2026-10-11).
+            {"Can_View_Policy_Locker", "Can_View_Health_Payout_Rates"},
         )
 
         # Default landing page is the Rate Checker hub, not a specific tab...
@@ -462,12 +464,33 @@ class RateCheckerEntryTests(TestCase):
         # Motor isn't granted, so Health (next in priority) wins.
         self.assertEqual(response.url, reverse("health_payout_rates"))
 
-    def test_falls_through_to_life_if_thats_all_thats_granted(self):
+    def test_life_group_alone_no_longer_grants_rate_checker_access(self):
+        # The Life tab was disabled with the Life Payout Grid service; the
+        # group still exists (migrations reference it) but opens nothing.
         self.user.groups.add(Group.objects.get(name="Can_View_Life_Payout_Grid"))
         response = self.client.get(reverse("rate_checker"))
-        self.assertEqual(response.url, reverse("life_payout_grid_redirect"))
+        self.assertEqual(response.status_code, 403)
 
-    def test_forbidden_with_none_of_the_three_groups(self):
+    def test_forbidden_with_none_of_the_rate_checker_groups(self):
+        response = self.client.get(reverse("rate_checker"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_life_payout_grid_routes_are_gone(self):
+        # Unmatched paths fall through to urls.py's catch-all (redirect to
+        # login), so assert on what the paths resolve to rather than on a 404.
+        from django.urls import NoReverseMatch, resolve
+        for path in ("/life-payout-grid/", "/life-payout-grid/admin/"):
+            self.assertEqual(resolve(path).url_name, "catch_all")
+        for name in ("life_payout_grid_redirect", "life_payout_grid_admin_redirect"):
+            with self.assertRaises(NoReverseMatch):
+                reverse(name)
+
+    def test_super_admin_still_renders_the_sidebar(self):
+        # The "Update Payout Rates" sidebar link used to {% url %} the admin
+        # handoff route for SUPER_ADMIN; with the route gone that would be a
+        # NoReverseMatch on every page. The 403 page extends base.html, so it
+        # exercises the sidebar.
+        self.user.groups.add(Group.objects.get_or_create(name="SUPER_ADMIN")[0])
         response = self.client.get(reverse("rate_checker"))
         self.assertEqual(response.status_code, 403)
 

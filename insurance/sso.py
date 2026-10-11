@@ -1,7 +1,7 @@
 """
 Inbound SSO handoff from an external partner portal (e.g. ArhamSecure's
 partner.arhamsecure.com) into this app. Mirrors the outbound handoff this
-app already does into the Life Payout Grid app (see
+app used to do into the Life Payout Grid app (see the disabled
 _life_payout_grid_handoff in views.py) -- an HMAC-signed, short-lived token
 carried in a redirect URL -- but adds the properties an *inbound*,
 cross-company handoff needs that an internal sibling-app call didn't:

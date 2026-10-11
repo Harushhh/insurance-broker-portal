@@ -311,7 +311,7 @@
 <script>
     const USERS_DATA = JSON.parse(document.getElementById('users-data').textContent);
     // Mirrors RATE_CHECKER_GROUPS in insurance/views.py.
-    const RATE_CHECKER_GROUPS = ['Can_View_Policy_Locker', 'Can_View_Health_Payout_Rates', 'Can_View_Life_Payout_Grid'];
+    const RATE_CHECKER_GROUPS = ['Can_View_Policy_Locker', 'Can_View_Health_Payout_Rates'];
 
     function openModal(id) { document.getElementById(id).style.display = 'flex'; }
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }

@@ -112,38 +112,45 @@ PAGE_GROUPS = [
 ]
 
 
-def _life_payout_grid_handoff(request, role):
-    """
-    There's no password on the Life Payout Grid app -- instead we sign a
-    short-lived token (this user's username + role + a 2-minute expiry)
-    with a secret shared between the two apps, and hand it off in the URL.
-    The Next.js app verifies the signature and, if valid, trusts the
-    embedded role, since this portal already checked the relevant
-    permission before minting it (see the two callers below).
-    """
-    secret = settings.LIFE_PAYOUT_GRID_AUTH_SECRET
-    if not secret:
-        return HttpResponse(
-            "LIFE_PAYOUT_GRID_AUTH_SECRET is not configured on this portal -- "
-            "the Life Payout Grid app can't be reached until it is.",
-            status=500,
-        )
-    expiry = int(time.time()) + 120
-    payload = f"{request.user.username}:{expiry}:{role}"
-    signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
-    token = f"{payload}.{signature}"
-    url = f"{settings.LIFE_PAYOUT_GRID_URL}/api/admin/portal-login?{urlencode({'token': token})}"
-    return redirect(url)
-
-
-def life_payout_grid_redirect(request):
-    """Entry point for the sidebar's "Life Payout Grid" link -- requires Can_View_Life_Payout_Grid (page_access_required in urls.py, so ADMIN also gets in)."""
-    return _life_payout_grid_handoff(request, "viewer")
-
-
-def life_payout_grid_admin_redirect(request):
-    """Entry point for the sidebar's "Update Payout Rates" link -- requires SUPER_ADMIN specifically (super_admin_required in urls.py), not just ADMIN."""
-    return _life_payout_grid_handoff(request, "admin")
+# DISABLED 2026-10-11: the Life Payout Grid Railway service was decommissioned,
+# so the outbound handoff into it (and the two views below) are switched off.
+# The routes in urls.py, the sidebar / Rate Checker links and the
+# LIFE_PAYOUT_GRID_* settings are disabled with it. To bring it back, restore
+# all of those together (git history has the originals) and redeploy the
+# life-payout-grid/ folder as its own Railway service.
+#
+# def _life_payout_grid_handoff(request, role):
+#     """
+#     There's no password on the Life Payout Grid app -- instead we sign a
+#     short-lived token (this user's username + role + a 2-minute expiry)
+#     with a secret shared between the two apps, and hand it off in the URL.
+#     The Next.js app verifies the signature and, if valid, trusts the
+#     embedded role, since this portal already checked the relevant
+#     permission before minting it (see the two callers below).
+#     """
+#     secret = settings.LIFE_PAYOUT_GRID_AUTH_SECRET
+#     if not secret:
+#         return HttpResponse(
+#             "LIFE_PAYOUT_GRID_AUTH_SECRET is not configured on this portal -- "
+#             "the Life Payout Grid app can't be reached until it is.",
+#             status=500,
+#         )
+#     expiry = int(time.time()) + 120
+#     payload = f"{request.user.username}:{expiry}:{role}"
+#     signature = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+#     token = f"{payload}.{signature}"
+#     url = f"{settings.LIFE_PAYOUT_GRID_URL}/api/admin/portal-login?{urlencode({'token': token})}"
+#     return redirect(url)
+#
+#
+# def life_payout_grid_redirect(request):
+#     """Entry point for the sidebar's "Life Payout Grid" link -- requires Can_View_Life_Payout_Grid (page_access_required in urls.py, so ADMIN also gets in)."""
+#     return _life_payout_grid_handoff(request, "viewer")
+#
+#
+# def life_payout_grid_admin_redirect(request):
+#     """Entry point for the sidebar's "Update Payout Rates" link -- requires SUPER_ADMIN specifically (super_admin_required in urls.py), not just ADMIN."""
+#     return _life_payout_grid_handoff(request, "admin")
 
 
 # =========================================================
@@ -163,7 +170,8 @@ def life_payout_grid_admin_redirect(request):
 RATE_CHECKER_TABS = [
     ("Can_View_Policy_Locker", "policy_lock_checker"),
     ("Can_View_Health_Payout_Rates", "health_payout_rates"),
-    ("Can_View_Life_Payout_Grid", "life_payout_grid_redirect"),
+    # Life tab disabled 2026-10-11 along with the Life Payout Grid service.
+    # ("Can_View_Life_Payout_Grid", "life_payout_grid_redirect"),
 ]
 
 # The single "Rate Checker" checkbox in the /user-management/ Page
@@ -207,7 +215,9 @@ def rate_checker_entry(request):
 PARTNER_ARHAMSECURE_ALLOWED_GROUPS = {
     "Can_View_Policy_Locker",
     "Can_View_Health_Payout_Rates",
-    "Can_View_Life_Payout_Grid",
+    # "Can_View_Life_Payout_Grid" removed 2026-10-11 (Life tab disabled). A
+    # partner that still requests it isn't rejected -- the allow-list
+    # intersection in IssueSSOTicketAPIView just doesn't grant it.
 }
 
 # requested_pages may name this bundle instead of listing the 3 groups
