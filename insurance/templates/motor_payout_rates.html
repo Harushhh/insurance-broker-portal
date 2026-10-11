@@ -121,6 +121,14 @@
     .select2-dropdown { border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border-top: none; padding: 4px; }
     .select2-results__option { border-radius: 8px; margin-bottom: 2px; font-size: 14px; }
 
+    /* Mandatory-field validation (see "MANDATORY FIELD VALIDATION" script) */
+    .text-overline.is-required::after { content: " *"; color: #dc2626; }
+    .form-control-saas.is-invalid, .segmented-control.is-invalid,
+    .form-select-saas.is-invalid + .select2-container .select2-selection--single { border-color: #dc2626; }
+    .form-control-saas.is-invalid:focus { box-shadow: 0 0 0 4px rgba(220, 38, 38, 0.12); }
+    .field-error { color: #dc2626; font-size: 12px; font-weight: 600; margin-top: 6px; }
+    .form-required-msg { color: #dc2626; font-size: 13px; font-weight: 600; }
+
     /* Action Area */
     .action-bar { border-top: 1px solid #f1f5f9; padding-top: 24px; margin-top: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
     .btn-gradient { background: #2563eb; color: white; border: none; border-radius: 10px; padding: 0 28px; font-weight: 600; font-size: 14px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2); height: 44px; display: inline-flex; align-items: center;}
@@ -218,16 +226,21 @@
             </div>
         </div>
 
-        <form method="GET" id="mainSearchForm">
+        {% comment %}
+            novalidate: the "required" attributes below are enforced by the
+            "MANDATORY FIELD VALIDATION" script (native bubbles can't focus the
+            Select2-hidden <select>s and would skip the hidden Exact SC rule).
+        {% endcomment %}
+        <form method="GET" id="mainSearchForm" novalidate>
             <div class="row g-4">
                 <div class="col-12 col-md-4 col-lg-3">
                     <label class="text-overline">Select Date</label>
-                    <input type="date" name="target_date" value="{{ selected.target_date }}" class="form-control-saas">
+                    <input type="date" name="target_date" value="{{ selected.target_date }}" class="form-control-saas" required>
                 </div>
 
                 <div class="col-12 col-md-4 col-lg-3">
                     <label class="text-overline">Product</label>
-                    <select name="product" class="form-select-saas select2-init">
+                    <select name="product" class="form-select-saas select2-init" required>
                         <option value="">Select...</option>
                         {% for p in product_list %}
                             <option value="{{ p.id }}" {% if selected.product|stringformat:"s" == p.id|stringformat:"s" %}selected{% endif %}>{{ p.name }}</option>
@@ -237,7 +250,7 @@
 
                 <div class="col-12 col-md-4 col-lg-3">
                     <label class="text-overline">Make Model Class</label>
-                    <select name="make_model_class" class="form-select-saas select2-init">
+                    <select name="make_model_class" class="form-select-saas select2-init" required>
                         <option value="">Select...</option>
                         <!-- Removed hardcoded NA option to fulfill logic requirements -->
                         {% for mmc in make_model_class_list %}
@@ -251,14 +264,14 @@
 
                 <div class="col-12 col-md-4 col-lg-3">
                     <label class="text-overline">Make Name (Code)</label>
-                    <select name="make_names" class="form-select-saas select2-init">
+                    <select name="make_names" class="form-select-saas select2-init" required>
                         <option value="">Select...</option>
                         </select>
                 </div>
 
                 <div class="col-12 col-md-4 col-lg-3">
                     <label class="text-overline">Sub Product</label>
-                    <select name="sub_product" class="form-select-saas select2-init">
+                    <select name="sub_product" class="form-select-saas select2-init" required>
                         <option value="">Select...</option>
                         {% for sp in sub_product_list %}
                             <option value="{{ sp.id }}" {% if selected.sub_product|stringformat:"s" == sp.id|stringformat:"s" %}selected{% endif %}>{{ sp.name }}</option>
@@ -268,17 +281,17 @@
 
                 <div class="col-12 col-md-4 col-lg-3">
                     <label class="text-overline">RTO Code</label>
-                    <input type="text" name="rto_code" placeholder="e.g. MH03" value="{{ selected.rto_code|default_if_none:'' }}" class="form-control-saas">
+                    <input type="text" name="rto_code" placeholder="e.g. MH03" value="{{ selected.rto_code|default_if_none:'' }}" class="form-control-saas" required>
                 </div>
                 
                 <div class="col-12 col-md-4 col-lg-3">
                     <label class="text-overline">CC / GVW</label>
-                    <input type="number" name="cc" placeholder="e.g. 1197" value="{{ selected.cc|default_if_none:'' }}" class="form-control-saas">
+                    <input type="number" name="cc" placeholder="e.g. 1197" value="{{ selected.cc|default_if_none:'' }}" class="form-control-saas" required>
                 </div>
                 
                 <div class="col-12 col-md-4 col-lg-3">
                     <label class="text-overline">Fuel</label>
-                    <select name="fuel" class="form-select-saas select2-init">
+                    <select name="fuel" class="form-select-saas select2-init" required>
                         <option value="">Select...</option>
                         {% for f in fuel_list %}
                             <option value="{{ f.id }}" {% if selected.fuel|stringformat:"s" == f.id|stringformat:"s" %}selected{% endif %}>{{ f.name }}</option>
@@ -288,23 +301,23 @@
 
                 <div class="col-12 col-md-4 col-lg-3" id="scFieldGroup">
                     <label class="text-overline">Exact SC</label>
-                    <input type="number" step="any" name="sc" placeholder="e.g. 4" value="{{ selected.sc|default_if_none:'' }}" class="form-control-saas">
+                    <input type="number" step="any" name="sc" placeholder="e.g. 4" value="{{ selected.sc|default_if_none:'' }}" class="form-control-saas" required>
                 </div>
 
                 <div class="col-12 col-md-4 col-lg-3">
                     <label class="text-overline">Manufacturing Year</label>
-                    <input type="number" name="mfg_year" placeholder="e.g. 2021" value="{{ selected.mfg_year|default_if_none:'' }}" class="form-control-saas">
+                    <input type="number" name="mfg_year" placeholder="e.g. 2021" value="{{ selected.mfg_year|default_if_none:'' }}" class="form-control-saas" required>
                 </div>
 
                 <div class="col-12 col-md-4 col-lg-2">
                     <label class="text-overline">Zero Dep (ZD)</label>
                     <div class="segmented-control">
                         <label>
-                            <input type="radio" name="is_zd" value="YES" {% if selected.is_zd == 'YES' %}checked{% endif %}>
+                            <input type="radio" name="is_zd" value="YES" {% if selected.is_zd == 'YES' %}checked{% endif %} required>
                             <span>YES</span>
                         </label>
                         <label>
-                            <input type="radio" name="is_zd" value="NO" {% if selected.is_zd == 'NO' or not selected.is_zd %}checked{% endif %}>
+                            <input type="radio" name="is_zd" value="NO" {% if selected.is_zd == 'NO' or not selected.is_zd %}checked{% endif %} required>
                             <span>NO</span>
                         </label>
                     </div>
@@ -314,11 +327,11 @@
                     <label class="text-overline">CPA</label>
                     <div class="segmented-control">
                         <label>
-                            <input type="radio" name="is_cpa" value="YES" {% if selected.is_cpa == 'YES' %}checked{% endif %}>
+                            <input type="radio" name="is_cpa" value="YES" {% if selected.is_cpa == 'YES' %}checked{% endif %} required>
                             <span>YES</span>
                         </label>
                         <label>
-                            <input type="radio" name="is_cpa" value="NO" {% if selected.is_cpa == 'NO' or not selected.is_cpa %}checked{% endif %}>
+                            <input type="radio" name="is_cpa" value="NO" {% if selected.is_cpa == 'NO' or not selected.is_cpa %}checked{% endif %} required>
                             <span>NO</span>
                         </label>
                     </div>
@@ -328,11 +341,11 @@
                     <label class="text-overline">NCB</label>
                     <div class="segmented-control">
                         <label>
-                            <input type="radio" name="is_ncb" value="YES" {% if selected.is_ncb == 'YES' %}checked{% endif %}>
+                            <input type="radio" name="is_ncb" value="YES" {% if selected.is_ncb == 'YES' %}checked{% endif %} required>
                             <span>YES</span>
                         </label>
                         <label>
-                            <input type="radio" name="is_ncb" value="NO" {% if selected.is_ncb == 'NO' or not selected.is_ncb %}checked{% endif %}>
+                            <input type="radio" name="is_ncb" value="NO" {% if selected.is_ncb == 'NO' or not selected.is_ncb %}checked{% endif %} required>
                             <span>NO</span>
                         </label>
                     </div>
@@ -343,6 +356,7 @@
                 <div class="d-flex align-items-center">
                     <button class="btn-gradient me-3" type="submit">Check Eligibility</button>
                     <a class="btn-clear" href="{% url 'motor_payout_rates' %}">Clear All</a>
+                    <span id="formRequiredMsg" class="form-required-msg" role="alert" hidden></span>
                 </div>
                 
                 <div class="d-flex gap-2 align-items-center">
@@ -614,6 +628,103 @@
         document.documentElement.style.setProperty('--tb-font', currentFont + 'px');
         document.documentElement.style.setProperty('--tb-pad', `${currentPadV}px ${currentPadH}px`);
     }
+
+    // --- MANDATORY FIELD VALIDATION ---
+    // Every control carrying `required` must be filled before the search form
+    // submits (button click or Enter key — both go through the submit event).
+    // Exact SC is hidden for most products (updateScVisibility above): a
+    // control whose field group isn't displayed is skipped, otherwise the
+    // form could never be completed for those products.
+    // Client-side only on purpose: ticket_dashboard deep-links into this page
+    // with only the parameters a ticket captured, and those must keep working.
+    $(function () {
+        const form = document.getElementById('mainSearchForm');
+        const summary = document.getElementById('formRequiredMsg');
+        let attempted = false;
+
+        const groupOf = (el) => el.closest('.col-12');
+
+        // One entry per field name (a radio group has several [required] inputs).
+        function requiredFields() {
+            const seen = new Set();
+            return Array.from(form.querySelectorAll('[required]')).filter(function (el) {
+                if (seen.has(el.name)) return false;
+                seen.add(el.name);
+                return true;
+            });
+        }
+
+        function isFilled(el) {
+            if (el.type === 'radio') {
+                return !!form.querySelector('input[type="radio"][name="' + el.name + '"]:checked');
+            }
+            return el.value.trim() !== '';
+        }
+
+        function markField(el, invalid) {
+            const group = groupOf(el);
+            const box = el.type === 'radio' ? group.querySelector('.segmented-control') : el;
+            box.classList.toggle('is-invalid', invalid);
+            el.setAttribute('aria-invalid', invalid ? 'true' : 'false');
+
+            let msg = group.querySelector('.field-error');
+            if (invalid && !msg) {
+                msg = document.createElement('div');
+                msg.className = 'field-error';
+                msg.textContent = 'This field is required';
+                group.appendChild(msg);
+            } else if (!invalid && msg) {
+                msg.remove();
+            }
+        }
+
+        // Returns the first unfilled visible field, or null when the form is complete.
+        function validate() {
+            let firstInvalid = null;
+            let missing = 0;
+            requiredFields().forEach(function (el) {
+                const invalid = groupOf(el).offsetParent !== null && !isFilled(el);
+                markField(el, invalid);
+                if (invalid) {
+                    missing += 1;
+                    if (!firstInvalid) firstInvalid = el;
+                }
+            });
+            summary.hidden = missing === 0;
+            summary.textContent = missing === 1
+                ? 'Please fill in the 1 missing required field.'
+                : 'Please fill in the ' + missing + ' missing required fields.';
+            return firstInvalid;
+        }
+
+        function focusField(el) {
+            groupOf(el).scrollIntoView({ block: 'center', behavior: 'smooth' });
+            if ($(el).data('select2')) {
+                // The native <select> is visually hidden by Select2; focus its widget.
+                $(el).next('.select2-container').find('.select2-selection').trigger('focus');
+            } else {
+                el.focus({ preventScroll: true });
+            }
+        }
+
+        requiredFields().forEach(function (el) {
+            groupOf(el).querySelector('.text-overline').classList.add('is-required');
+        });
+
+        $(form).on('submit', function (e) {
+            attempted = true;
+            const firstInvalid = validate();
+            if (firstInvalid) {
+                e.preventDefault();
+                focusField(firstInvalid);
+            }
+        });
+
+        // After a failed attempt, keep the errors live as the user fills things in.
+        $(form).on('input change', '[required]', function () {
+            if (attempted) validate();
+        });
+    });
 </script>
 
 <script>
