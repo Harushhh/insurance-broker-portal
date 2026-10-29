@@ -1,7 +1,9 @@
 from pathlib import Path
 import os
+import sys
 from dotenv import load_dotenv
 import dj_database_url
+from celery.schedules import crontab
 
 # =========================================================
 # BASE SETUP
@@ -87,8 +89,13 @@ if not PARTNER_SSO_TICKET_SECRET and not DEBUG:
 # own app to some-other-name.up.railway.app. A wildcard entry here would
 # trust that app's Origin/Referer for CSRF purposes on this one too, so list
 # only the exact production hostname(s) actually in use.
+# Comma-separated list in the CSRF_TRUSTED_ORIGINS env var. The default is the current
+# production hostname, so behaviour is unchanged until the variable is set (a blank
+# value counts as unset, so a copied-over .env.example line can't empty the list).
 CSRF_TRUSTED_ORIGINS = [
-    "https://web-production-23c64.up.railway.app",
+    origin.strip()
+    for origin in (os.getenv("CSRF_TRUSTED_ORIGINS") or "https://web-production-23c64.up.railway.app").split(",")
+    if origin.strip()
 ]
 if DEBUG:
     CSRF_TRUSTED_ORIGINS += ["http://127.0.0.1:8000", "http://localhost:8000"]
@@ -113,7 +120,6 @@ INSTALLED_APPS = [
     # LOCAL APPS
     'insurance',
     'config',
-    'dashboard',
 ]
 
 # =========================================================
@@ -225,6 +231,13 @@ STORAGES = {
     },
 }
 
+# `manage.py test` forces DEBUG off, and the hashed-manifest storage then refuses every {% static %} tag whose file
+# is not in the manifest written by a previous `collectstatic` -- so the suite only passed on a machine that had
+# run it recently. Plain storage for test runs keeps the suite runnable from a fresh checkout; real runs
+# (runserver, gunicorn, collectstatic) are unaffected.
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    STORAGES["staticfiles"] = {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"}
+
 AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
 AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL")  # https://<ACCOUNT_ID>.r2.cloudflarestorage.com
 AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")
@@ -300,8 +313,6 @@ CELERY_WORKER_MAX_MEMORY_PER_CHILD = 500000
 
 # Periodic jobs, run by a `celery -A project beat` process (see Procfile's
 # `beat` entry). Requires that process to actually be deployed/running.
-from celery.schedules import crontab  # noqa: E402
-
 CELERY_BEAT_SCHEDULE = {
     "cleanup-points-search-logs": {
         "task": "insurance.tasks.cleanup_points_search_logs",
@@ -417,6 +428,7 @@ SPECTACULAR_SETTINGS = {
     'DESCRIPTION': 'API documentation for Insurance Broker Portal',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+    'PREPROCESSING_HOOKS': ['insurance.api.schema.hide_legacy_paths'],
     'SECURITY': [{'ApiKeyAuth': []}],
     'COMPONENTS': {
         'securitySchemes': {
@@ -445,6 +457,13 @@ LOGGING = {
         "console": {"class": "logging.StreamHandler"},
     },
     "loggers": {
+        # Module loggers (logging.getLogger(__name__)) under insurance.* land on the console too,
+        # so failures that used to be print()ed now arrive with a level and a traceback.
+        "insurance": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
+        },
         "security": {
             "handlers": ["console"],
             "level": "INFO",

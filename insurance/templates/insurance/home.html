@@ -4,66 +4,7 @@
 {% block content %}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
-<style>
-    /* Premium Dashboard Cards */
-    .dash-card { 
-        background: #ffffff; 
-        border-radius: 20px; 
-        border: 1px solid rgba(226, 232, 240, 0.8); 
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03); 
-        height: 100%; 
-        transition: all 0.3s ease; 
-    }
-    .dash-card:hover { 
-        transform: translateY(-4px); 
-        box-shadow: 0 15px 35px rgba(0, 0, 0, 0.06); 
-    }
-    
-    .icon-box { 
-        width: 56px; 
-        height: 56px; 
-        border-radius: 16px; 
-        display: flex; 
-        align-items: center; 
-        justify-content: center; 
-        font-size: 26px; 
-    }
-    .bg-gradient-primary { background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); color: #2563eb; }
-    .bg-gradient-success { background: linear-gradient(135deg, #f0fdf4 0%, #d1fae5 100%); color: #059669; }
-    .bg-gradient-warning { background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); color: #d97706; }
-    
-    /* Table Styling */
-    .table-card {
-        background: #fff;
-        border-radius: 20px;
-        border: 1px solid rgba(226, 232, 240, 0.8);
-        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.03);
-        overflow: hidden;
-    }
-    .table-modern { border-collapse: separate; border-spacing: 0; width: 100%; }
-    .table-modern th { 
-        background: #f8fafc; 
-        padding: 16px 24px; 
-        color: #64748b; 
-        font-size: 12px; 
-        text-transform: uppercase; 
-        letter-spacing: 0.08em; 
-        border-bottom: 1px solid #e2e8f0; 
-        font-weight: 600;
-    }
-    .table-modern td { 
-        padding: 18px 24px; 
-        font-size: 14px; 
-        vertical-align: middle; 
-        border-bottom: 1px solid #f1f5f9; 
-        color: #334155;
-    }
-    .table-modern tbody tr { transition: background-color 0.2s; }
-    .table-modern tbody tr:hover { background-color: #f8fafc; }
-    
-    /* Center chart constraint */
-    .chart-wrapper { width: 100%; height: 180px; position: relative; }
-</style>
+<link rel="stylesheet" href="{% static 'insurance/css/pages/insurance_home.css' %}">
 
 <div class="container-fluid py-4 mx-auto" style="max-width: 1400px;">
     

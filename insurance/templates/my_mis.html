@@ -2,40 +2,7 @@
 {% load static %}
 
 {% block content %}
-<style>
-    /* Premium Styling Overrides */
-    .premium-card { background: #ffffff; border-radius: 16px; border: 1px solid rgba(226, 232, 240, 0.8); box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03); overflow: hidden; }
-    
-    .table-modern { border-collapse: separate; border-spacing: 0; width: 100%; }
-    .table-modern th { background: #f8fafc; padding: 16px 24px; color: #64748b; font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; border-bottom: 1px solid #e2e8f0; font-weight: 600; }
-    .table-modern td { padding: 18px 24px; font-size: 14px; vertical-align: middle; border-bottom: 1px solid #f1f5f9; color: #334155; }
-    .table-modern tbody tr { transition: background-color 0.2s; }
-    .table-modern tbody tr:hover { background-color: #f8fafc; }
-    
-    .search-input { border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 16px; font-size: 14px; width: 100%; transition: all 0.2s; background: #f8fafc; color: #0f172a; }
-    .search-input:focus { outline: none; border-color: #2563eb; background: #ffffff; box-shadow: 0 0 0 4px rgba(37,99,235,0.1); }
-    
-    .btn-dark-custom { background: #0f172a; color: white; border: none; border-radius: 8px; padding: 10px 24px; font-weight: 600; transition: background 0.2s; }
-    .btn-dark-custom:hover { background: #1e293b; color: white; }
-    .btn-light-custom { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 24px; font-weight: 600; text-decoration: none; transition: all 0.2s; }
-    .btn-light-custom:hover { background: #e2e8f0; color: #0f172a; }
-
-    .missing-text { color: #ef4444; font-style: italic; font-size: 13px; font-weight: 500; }
-
-    /* New Reconciliation Badges */
-    .recon-badge {
-        display: inline-block;
-        padding: 4px 10px;
-        border-radius: 6px;
-        font-size: 12px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }
-    .recon-pending { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
-    .recon-match { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
-    .recon-discrepancy { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-</style>
+<link rel="stylesheet" href="{% static 'insurance/css/pages/my_mis.css' %}">
 
 <div class="container-fluid py-5 mx-auto" style="max-width: 1400px; padding-left: 2rem; padding-right: 2rem;">
     

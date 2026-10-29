@@ -392,7 +392,7 @@ def restore_orphans(months=None, include_all=False, status="PENDING", dry_run=Fa
     the object's last-modified time. By default only files inside the active
     retention window are brought back.
     """
-    from .views import GRID_INSURER_CHOICES
+    from .constants import GRID_INSURER_CHOICES
 
     live = _live_storage()
     known = _known_keys()

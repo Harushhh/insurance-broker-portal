@@ -1,0 +1,82 @@
+
+    /* Premium Card Styling */
+    .premium-card { 
+        background: #ffffff; 
+        border-radius: 16px; 
+        border: 1px solid rgba(226, 232, 240, 0.8); 
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03); 
+        overflow: hidden; 
+        height: 100%; 
+    }
+    .card-header-custom { 
+        background: #f8fafc; 
+        padding: 16px 24px; 
+        border-bottom: 1px solid #e2e8f0; 
+        font-weight: 700; 
+        color: #0f172a; 
+        font-size: 16px; 
+    }
+    
+    /* Form Inputs */
+    .form-group { margin-bottom: 20px; }
+    .form-label { font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 8px; display: block; }
+    .mandatory-star { color: #dc2626; margin-left: 4px; }
+    
+    /* Standardized height and styling for both inputs and dropdowns */
+    .form-control-custom { 
+        border: 1px solid #cbd5e1; 
+        border-radius: 8px; 
+        padding: 10px 14px; 
+        font-size: 14px; 
+        width: 100%; 
+        background: #fff; 
+        color: #0f172a; 
+        transition: border-color 0.2s, box-shadow 0.2s; 
+        height: 42px; 
+    }
+    .form-control-custom:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+    .form-control-error { border-color: #f87171; background-color: #fef2f2; }
+    
+    /* Specifically style the select dropdown */
+    select.form-control-custom { cursor: pointer; appearance: auto; }
+    
+    /* Buttons */
+    .btn-gradient { 
+        background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%); 
+        color: white; border: none; font-weight: 600; border-radius: 8px; 
+        padding: 12px 24px; cursor: pointer; transition: all 0.2s; width: 100%; font-size: 15px; 
+    }
+    .btn-gradient:hover { box-shadow: 0 8px 20px rgba(37, 99, 235, 0.2); transform: translateY(-1px); color: white; }
+    .btn-back { 
+        background: #64748b; color: white; border: none; border-radius: 8px; 
+        padding: 8px 16px; font-weight: 600; text-decoration: none; font-size: 13px; transition: all 0.2s; 
+    }
+    .btn-back:hover { background: #475569; color: white; }
+
+    /* UNBREAKABLE LAYOUT (Fixes the overlapping bug) */
+    .review-layout {
+        display: flex;
+        gap: 24px;
+        align-items: flex-start;
+        width: 100%;
+    }
+    .pdf-panel {
+        flex: 1.5; /* Takes up ~60% of the screen */
+        position: sticky;
+        top: 90px;
+        height: calc(100vh - 120px);
+        min-width: 0;
+    }
+    .form-panel {
+        flex: 1; /* Takes up ~40% of the screen */
+        min-width: 0;
+        position: relative;
+        z-index: 50; /* Guarantees the form is absolutely clickable and on top */
+    }
+    .pdf-viewer { width: 100%; height: calc(100% - 55px); border: none; background-color: #f1f5f9; }
+
+    @media (max-width: 1024px) {
+        .review-layout { flex-direction: column; }
+        .pdf-panel { position: relative; top: 0; height: 600px; width: 100%; }
+        .form-panel { width: 100%; }
+    }

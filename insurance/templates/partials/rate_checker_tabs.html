@@ -1,3 +1,4 @@
+{% load static %}
 {% comment %}
 Shared pill tab bar for the "Rate Checker" sidebar entry point.
 Included at the top of policy_lock_checker.html and health_payout_rates.html
@@ -29,34 +30,4 @@ link, not a same-page render -- it navigates away like any other link.
     {% endif %}
     {% endcomment %}
 </div>
-<style>
-    .rc-tabs {
-        display: inline-flex;
-        gap: 4px;
-        background: #f1f5f9;
-        padding: 6px;
-        border-radius: 999px;
-        margin-bottom: 20px;
-    }
-    .rc-tab {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        padding: 10px 20px;
-        border-radius: 999px;
-        font-weight: 600;
-        font-size: 14px;
-        color: #64748b;
-        text-decoration: none;
-        transition: color .15s ease, background-color .15s ease, box-shadow .15s ease;
-    }
-    .rc-tab:hover {
-        color: #0f172a;
-        text-decoration: none;
-    }
-    .rc-tab.active {
-        background: #2563eb;
-        color: #fff;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, .3);
-    }
-</style>
+<link rel="stylesheet" href="{% static 'insurance/css/pages/partials_rate_checker_tabs.css' %}">

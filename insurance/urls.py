@@ -1,81 +1,15 @@
-from functools import wraps
-
 from django.urls import path, reverse_lazy
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.conf import settings
 from django.conf.urls.static import static
-from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect
 from . import views
+from .api.urls import urlpatterns as api_urlpatterns
+from .access import page_access_required, staff_required, super_admin_required  # noqa: F401
 
 
-def staff_required(view_func):
-    """
-    Requires login AND (is_staff or is_superuser or in the ADMIN group).
-    A logged-in user who fails the check gets a 403, not a redirect back to
-    the login page — user_passes_test's default redirect-on-failure would
-    otherwise loop forever, since the login view sends already-authenticated
-    users straight back to `next`.
-    """
-    @login_required
-    @wraps(view_func)
-    def _wrapped(request, *args, **kwargs):
-        u = request.user
-        if not (u.is_staff or u.is_superuser or u.groups.filter(name="ADMIN").exists()):
-            raise PermissionDenied("Staff access required.")
-        return view_func(request, *args, **kwargs)
-    return _wrapped
 
-
-def super_admin_required(view_func):
-    """
-    Requires login AND membership in SUPER_ADMIN specifically -- unlike
-    page_access_required, being in ADMIN (the "Make Admin" bulk-access
-    group) does NOT get you in here. Reserved for the single most
-    sensitive action in the app: minting a Life Payout Grid admin token,
-    which grants the ability to overwrite the live commission grid. (No
-    route uses it right now -- that handoff is disabled, see below -- but
-    it stays for the next super-admin-only action.)
-    SUPER_ADMIN is deliberately not offered as a Page Permissions checkbox
-    on /user-management/ -- grant it via Django's own /admin/ site instead.
-    """
-    @login_required
-    @wraps(view_func)
-    def _wrapped(request, *args, **kwargs):
-        if not request.user.groups.filter(name="SUPER_ADMIN").exists():
-            raise PermissionDenied("You don't have access to this page.")
-        return view_func(request, *args, **kwargs)
-    return _wrapped
-
-
-def page_access_required(group_name):
-    """
-    Requires login AND (in the ADMIN group or in the named per-page group).
-    This is the enforcement half of the Access Control checkboxes on
-    /user-management/ — those already store real Group membership, this just
-    checks it instead of letting every logged-in user through regardless of
-    what's ticked for them.
-
-    Deliberately does NOT give is_superuser a free pass here — ADMIN
-    (assigned via the "Make Admin" button) is this app's one deliberate
-    "full admin" flag, and unchecking a box for a superuser account should
-    actually take effect. A superuser who isn't in ADMIN and gets locked out
-    of a page can't get locked out of Access Control itself, though:
-    staff_required (guarding /user-management/) still honors is_staff /
-    is_superuser, so there's always a way back in to re-grant access.
-    """
-    def decorator(view_func):
-        @login_required
-        @wraps(view_func)
-        def _wrapped(request, *args, **kwargs):
-            u = request.user
-            if not (u.groups.filter(name="ADMIN").exists()
-                    or u.groups.filter(name=group_name).exists()):
-                raise PermissionDenied("You don't have access to this page.")
-            return view_func(request, *args, **kwargs)
-        return _wrapped
-    return decorator
 
 
 urlpatterns = [
@@ -126,19 +60,19 @@ urlpatterns = [
     path("api/update-special-rate-status/", page_access_required("Can_Review_Special_Rates")(views.update_special_rate_request_status), name="update_special_rate_request_status"),
 
     # Ticketing System
-    path('tickets/', page_access_required("Can_View_Tickets")(views.ticket_dashboard), name='ticket_dashboard'),
+    path("tickets/", page_access_required("Can_View_Tickets")(views.ticket_dashboard), name="ticket_dashboard"),
     # Left on plain login_required (not gated by Can_View_Tickets): also called
     # from policy_lock_checker.html as a standalone "raise an issue" action.
-    path('api/create-ticket/', login_required(views.create_ticket_api), name='create_ticket_api'),
-    path('api/update-ticket-status/', page_access_required("Can_View_Tickets")(views.update_ticket_status), name='update_ticket_status'),
+    path("api/create-ticket/", login_required(views.create_ticket_api), name="create_ticket_api"),
+    path("api/update-ticket-status/", page_access_required("Can_View_Tickets")(views.update_ticket_status), name="update_ticket_status"),
 
     # AI OCR & PDF extraction Pipeline
     path("upload-extract-pdf/", page_access_required("Can_View_OCR_Pipeline")(views.upload_extract_pdf), name="upload_extract_pdf"),
     path("my-mis/", page_access_required("Can_View_MIS_Register")(views.my_mis), name="my_mis"),
-    path('mis-review/<int:pk>/', page_access_required("Can_View_MIS_Register")(views.mis_review), name='mis_review'),
-    path('configurator/', page_access_required("Can_View_AI_Rulebook")(views.field_configurator), name='field_configurator'),
-    path('configurator/edit/<int:pk>/', page_access_required("Can_View_AI_Rulebook")(views.edit_field), name='edit_field'),
-    path('configurator/delete/<int:pk>/', page_access_required("Can_View_AI_Rulebook")(views.delete_field), name='delete_field'),
+    path("mis-review/<int:pk>/", page_access_required("Can_View_MIS_Register")(views.mis_review), name="mis_review"),
+    path("configurator/", page_access_required("Can_View_AI_Rulebook")(views.field_configurator), name="field_configurator"),
+    path("configurator/edit/<int:pk>/", page_access_required("Can_View_AI_Rulebook")(views.edit_field), name="edit_field"),
+    path("configurator/delete/<int:pk>/", page_access_required("Can_View_AI_Rulebook")(views.delete_field), name="delete_field"),
 
     # Rate Checker -- unified Motor/Health/Life entry point (see
     # views.RATE_CHECKER_TABS). Any-of-three check, so it's plain
@@ -219,8 +153,8 @@ urlpatterns = [
     # even though the page itself now covers both Motor and Health search
     # logs -- renaming the group would silently drop access for every user
     # it's already assigned to (see insurance/migrations/0021_seed_page_access_groups.py).
-    path('points-logs/', page_access_required("Can_View_Motor_Points_Logs")(views.points_audit_logs), name='points_audit_logs'),
-    path('points-logs/export/', page_access_required("Can_View_Motor_Points_Logs")(views.export_points_audit_logs_xlsx), name='export_points_audit_logs_xlsx'),
+    path("points-logs/", page_access_required("Can_View_Motor_Points_Logs")(views.points_audit_logs), name="points_audit_logs"),
+    path("points-logs/export/", page_access_required("Can_View_Motor_Points_Logs")(views.export_points_audit_logs_xlsx), name="export_points_audit_logs_xlsx"),
 
     # ==========================================
     # AUTOMATED MIS PAYOUT CALCULATION ROUTES
@@ -233,23 +167,13 @@ urlpatterns = [
     path("mis-mapping/edit/<int:pk>/", page_access_required("Can_View_MIS_Payout_Engine")(views.edit_mis_mapping), name="edit_mis_mapping"),
     path("mis-mapping/delete/<int:pk>/", page_access_required("Can_View_MIS_Payout_Engine")(views.delete_mis_mapping), name="delete_mis_mapping"),
 
-    # ==========================================
-    # REST API ENDPOINTS
-    # ==========================================
-    path('api/v1/export-rates/', page_access_required("Can_View_Dashboard")(views.ExportRatesAPIView.as_view()), name='api-export-rates'),
+    # =========================================================
+    # REST API ENDPOINTS (see insurance/api/urls.py: versioned /api/v1/ paths plus the legacy unversioned ones)
+    # =========================================================
+    *api_urlpatterns,
 
-    # Pure API-key auth (no session) -- same reasoning as the SSO issue-ticket
-    # route below: this is meant to be called server-to-server, not from a
-    # logged-in browser, so it deliberately skips page_access_required.
-    path('api/policy-lock-checker/', views.PolicyLockCheckerAPIView.as_view(), name='api_policy_lock_checker'),
-    path('api/health-payout-rates/', views.HealthPayoutRatesAPIView.as_view(), name='api_health_payout_rates'),
-    path('api/make-model-master/', views.MakeModelMasterAPIView.as_view(), name='api_make_model_master'),
-
-    # Inbound partner-portal SSO handoff (see insurance/sso.py). Both routes
-    # are intentionally public/unauthenticated -- issue-ticket is gated by
-    # its own HasAPIKey permission instead of a session, and consume is the
-    # landing page a not-yet-logged-in browser is redirected to.
-    path("api/sso/issue-ticket/", views.IssueSSOTicketAPIView.as_view(), name="sso_issue_ticket"),
+    # Inbound partner-portal SSO handoff (see insurance/sso.py). The ticket request is the API route above;
+    # consume is the landing page a not-yet-logged-in browser is redirected to, so it is intentionally public.
     path("sso/consume/", views.sso_consume_view, name="sso_consume"),
 
     # Catch-all — must stay last. Any unmatched route redirects to login.

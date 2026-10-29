@@ -1,16 +1,21 @@
 import pandas as pd
 import io
 import re
-import traceback
 from collections import Counter
-from rapidfuzz import fuzz, process as rf_process
+from rapidfuzz import fuzz
 from django.core.files.base import ContentFile
 from django.utils import timezone
 from django.db import connection
+from .constants import HEALTH_TENURE_RATE_COLUMNS
 from .models import (
     MISFile, RateMaster, RTOMaster, MakeModelMaster, MISFailedRow,
     HealthRateMaster, PincodeMaster,
 )
+from .services.make_model import strict_match_in_cluster
+import logging
+
+
+logger = logging.getLogger(__name__)
 
 
 # ── Tunable thresholds ───────────────────────────────────────────────────────
@@ -68,18 +73,6 @@ MAKE_MODEL_UNRESOLVED_REASON_PREFIX = (
 # 'Optima Restore' scored 70.6 / 60.0 (correctly BELOW 80 and meant to fail —
 # a bare "Optima" doesn't tell you which Optima variant was actually sold).
 HEALTH_PLAN_NAME_FUZZY_THRESHOLD = 80
-
-# Which HealthRateMaster rate column a computed policy tenure (in years,
-# from Policy: inception date -> Policy: expiry date) reads Porate from.
-# Mirrors HEALTH_POLICY_TERM_FIELD in views.py (health_payout_rates) — same
-# concept, keyed by int here since the tenure is computed, not a form choice.
-HEALTH_TENURE_RATE_COLUMNS = {
-    1: 'one_year_rate',
-    2: 'multi_year_2_rate',
-    3: 'multi_year_3_rate',
-    4: 'multi_year_4_rate',
-    5: 'multi_year_5_rate',
-}
 
 # Words that appear in almost every insurer name and carry zero discriminative value.
 # Stripping these before matching lets the unique identifying tokens (Magma, Liberty,
@@ -360,27 +353,6 @@ def check_exact_match(val, grid_val):
         return False
 
     return str(val).strip().lower() == str(grid_val).strip().lower()
-
-
-def strict_match_in_cluster(search_term, cluster_string):
-    """
-    Identical to the function of the same name in views.py — kept in sync
-    deliberately so RTO/Make matching behaves the same way here as it does
-    in the dashboard, motor payout rates, and policy lock checker views.
-    Word-boundary regex match against comma-separated cluster items, so
-    'MH09' won't accidentally match inside 'MH090' or similar.
-    """
-    if not cluster_string:
-        return False
-    term = str(search_term).strip().upper()
-    items = [x.strip().upper() for x in str(cluster_string).split(",")]
-    if term in items:
-        return True
-    pattern = rf"(?<![A-Z0-9]){re.escape(term)}(?![A-Z0-9])"
-    for item in items:
-        if re.search(pattern, item):
-            return True
-    return False
 
 
 def build_master_lookup(master_qs, name_field, cluster_field):
@@ -1312,8 +1284,8 @@ def process_mis_mapping(mis_file_id):
         mis_obj = MISFile.objects.get(id=mis_file_id)
         mis_obj.status = 'PROCESSING'
         mis_obj.save(update_fields=['status'])
-    except Exception as init_err:
-        print(f"Failed to initialize processing state: {init_err}")
+    except Exception:
+        logger.exception("Failed to initialize processing state for MISFile %s", mis_file_id)
         connection.close()
         return
 
@@ -2303,8 +2275,7 @@ def process_mis_mapping(mis_file_id):
         try:
             mis_obj.coverage_gaps = build_coverage_gap_summary(df_final)
         except Exception:
-            print("Coverage gap summary failed to build (non-fatal):")
-            print(traceback.format_exc())
+            logger.exception("Coverage gap summary failed to build (non-fatal) for MISFile %s", mis_file_id)
             mis_obj.coverage_gaps = None
 
         # Persist failed rows straight from the in-memory df_final — this is
@@ -2318,17 +2289,14 @@ def process_mis_mapping(mis_file_id):
             _bulk_save_failed_rows(mis_obj, failed_rows)
             mis_obj.health_synced_at = timezone.now()
         except Exception:
-            print("Failed to persist MIS failure rows (non-fatal):")
-            print(traceback.format_exc())
+            logger.exception("Failed to persist MIS failure rows (non-fatal) for MISFile %s", mis_file_id)
 
         mis_obj.save()
 
     except Exception as e:
         # FIX: was `except BaseException`, which also catches KeyboardInterrupt /
         # SystemExit and can block graceful container shutdown. Narrowed to Exception.
-        error_trace = traceback.format_exc()
-        print(f"\n❌ MIS Mapping Error: {str(e)}")
-        print(error_trace)
+        logger.exception("MIS mapping failed for MISFile %s", mis_file_id)
 
         try:
             connection.close()
@@ -2338,7 +2306,7 @@ def process_mis_mapping(mis_file_id):
             mis_obj.processed_at = timezone.now()
             mis_obj.save()
         except Exception as recovery_err:
-            print(f"CRITICAL FAULT: Could not write Failure state to DB: {recovery_err}")
+            logger.critical("Could not write the FAILED state for MISFile %s to the DB: %s", mis_file_id, recovery_err, exc_info=True)
 
     finally:
         connection.close()

@@ -33,8 +33,8 @@
     <svg class="denied-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m0 3.75h.008v.008H12v-.008zM21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
     </svg>
-    <h2>Access Denied</h2>
-    <p>You're signed in, but this page is restricted to staff accounts. If you think this is a mistake, ask an admin to grant you access from User Management.</p>
+    <h2>{% block error_title %}Access Denied{% endblock %}</h2>
+    <p>{% block error_message %}You're signed in, but this page is restricted to staff accounts. If you think this is a mistake, ask an admin to grant you access from User Management.{% endblock %}</p>
     <a href="{% url 'home_dashboard' %}" class="denied-back">Back to Dashboard</a>
 </div>
 {% endblock %}

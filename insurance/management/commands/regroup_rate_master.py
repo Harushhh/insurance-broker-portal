@@ -38,7 +38,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from insurance.models import RateMaster, RateGroup
-from insurance.views import GROUP_FIELDS, build_key_hash
+from insurance.services.rate_master import GROUP_FIELDS, build_key_hash
 
 # Maps each GROUP_FIELDS entry to the column to read it from. FK fields read
 # the raw *_id column rather than fetching the related object — build_key_hash()

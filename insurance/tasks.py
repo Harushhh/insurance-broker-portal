@@ -1,9 +1,7 @@
 from celery import shared_task
 
+from .constants import POINTS_SEARCH_ACTIONS, SECURITY_AUDIT_LOG_ACTIONS
 
-# Keep in sync with POINTS_SEARCH_ACTIONS in insurance/views.py - the set of
-# action types shown on the unified Points Search Logs page.
-POINTS_SEARCH_ACTIONS = ["MOTOR_POINTS_SEARCH", "HEALTH_POINTS_SEARCH"]
 
 
 @shared_task
@@ -19,13 +17,6 @@ def cleanup_points_search_logs():
     ).delete()
     return deleted_count
 
-
-# Keep in sync with SECURITY_AUDIT_LOG_ACTIONS in insurance/views.py - the
-# set of action types shown on the Security Audit & History Log page.
-SECURITY_AUDIT_LOG_ACTIONS = [
-    "MANUAL EDIT", "BULK UPDATE", "HEALTH RATE EDIT", "HEALTH BULK UPDATE",
-    "OVERLAP DEACTIVATE",
-]
 
 
 @shared_task
@@ -99,12 +90,11 @@ def archive_old_grid_documents(self):
     time_limit=240,
 )
 def process_policy_document_task(self, document_id):
-    # Deferred import: views.py imports this module at module level to call
-    # .delay(), so importing views.process_policy_document up here at module
-    # level would create a circular import. Importing inside the task body
-    # instead breaks the cycle without needing to relocate that function.
+    # Imported inside the task body like the other tasks here, so loading this
+    # module (Celery task discovery, and every view that calls .delay()) does
+    # not pull in the Gemini/OCR stack.
     from .models import PolicyDocumentUpload
-    from .views import process_policy_document
+    from .services.policy_documents import process_policy_document
     document_obj = PolicyDocumentUpload.objects.get(id=document_id)
     process_policy_document(document_obj)
 

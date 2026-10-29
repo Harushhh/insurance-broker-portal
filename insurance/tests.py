@@ -212,6 +212,11 @@ class ApiKeyGatedRouteTests(TestCase):
                 "api_health_payout_rates",
                 "api_make_model_master",
                 "sso_issue_ticket",
+                # /api/v1/ aliases of the four routes above (same views, see insurance/api/urls.py)
+                "api_v1_policy_lock_checker",
+                "api_v1_health_payout_rates",
+                "api_v1_make_model_master",
+                "api_v1_sso_issue_ticket",
             },
             "The set of HasAPIKey-gated routes changed. If that was deliberate, update "
             "this list; if not, _api_key_gated may have stopped seeing through as_view() "

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% load static %}
 {% load custom_filters %}
 {% block title %}Health Payout Rates - Insurance Portal{% endblock %}
 
@@ -7,81 +8,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 
-<style>
-    :root {
-        --tb-font: 13px;
-        --tb-pad: 12px 16px;
-        --radius-card: 24px;
-        --radius-inner: 16px;
-        --radius-input: 12px;
-        --input-height: 48px;
-    }
-
-    .master-card {
-        background: #ffffff;
-        border-radius: var(--radius-card);
-        box-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
-        padding: 32px;
-        margin-bottom: 24px;
-        border: 1px solid #f1f5f9;
-    }
-
-    .page-title { font-size: 28px; font-weight: 800; color: #0f172a; margin-bottom: 8px; letter-spacing: -0.02em; }
-    .page-subtitle { font-size: 15px; color: #64748b; margin-bottom: 24px; font-weight: 500; }
-
-    .inner-form-box { border: 1px solid #e0e7ff; border-radius: var(--radius-inner); padding: 24px; background: #ffffff; }
-    .inner-form-header { font-size: 16px; font-weight: 700; color: #2563eb; margin-bottom: 24px; display: flex; align-items: center; gap: 8px; }
-
-    .text-overline { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #475569; margin-bottom: 8px; display: block; }
-    .form-control-saas, .form-select-saas {
-        border: 1px solid #cbd5e1; border-radius: var(--radius-input); padding: 10px 16px; font-size: 14px; color: #334155;
-        background-color: #ffffff; transition: all 0.2s ease; height: var(--input-height); width: 100%; font-weight: 500;
-    }
-    .form-control-saas::placeholder { color: #94a3b8; font-weight: 400; }
-    .form-select-saas { cursor: pointer; appearance: auto; color: #64748b; }
-    .form-control-saas:focus, .form-select-saas:focus {
-        outline: none; border-color: #3b82f6; box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1);
-    }
-
-    .segmented-control {
-        display: flex; width: 100%; height: var(--input-height); background: #f8fafc; border: 1px solid #e2e8f0;
-        padding: 4px; border-radius: var(--radius-input); box-sizing: border-box;
-    }
-    .segmented-control label { flex: 1; margin: 0; position: relative; cursor: pointer; }
-    .segmented-control input[type="radio"] { position: absolute; opacity: 0; }
-    .segmented-control span {
-        display: flex; align-items: center; justify-content: center; height: 100%; width: 100%;
-        font-size: 13px; font-weight: 700; color: #64748b; border-radius: 8px; transition: all 0.2s ease;
-    }
-    .segmented-control input[type="radio"]:checked + span {
-        background: #ffffff; color: #2563eb; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-    }
-
-    .select2-container--default .select2-selection--single {
-        border: 1px solid #cbd5e1; border-radius: var(--radius-input); height: var(--input-height); display: flex; align-items: center; background: #fff;
-    }
-    .select2-container--default .select2-selection--single .select2-selection__rendered { color: #64748b; font-size: 14px; font-weight: 500; padding-left: 16px; }
-    .select2-container--default .select2-selection--single .select2-selection__arrow { height: calc(var(--input-height) - 2px); right: 10px; }
-    .select2-container--default .select2-selection--multiple {
-        border: 1px solid #cbd5e1; border-radius: var(--radius-input); min-height: var(--input-height); padding: 2px 8px; background: #fff;
-    }
-    .select2-dropdown { border: 1px solid #cbd5e1; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border-top: none; padding: 4px; }
-    .select2-results__option { border-radius: 8px; margin-bottom: 2px; font-size: 14px; }
-
-    .action-bar { border-top: 1px solid #f1f5f9; padding-top: 24px; margin-top: 8px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
-    .btn-gradient { background: #2563eb; color: white; border: none; border-radius: 10px; padding: 0 28px; font-weight: 600; font-size: 14px; transition: all 0.2s; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2); height: 44px; display: inline-flex; align-items: center;}
-    .btn-gradient:hover { background: #1d4ed8; transform: translateY(-1px); color: white; }
-    .btn-clear { color: #64748b; font-weight: 600; font-size: 14px; text-decoration: none; padding: 0 16px; display: inline-flex; align-items: center; height: 44px; transition: color 0.2s; }
-    .btn-clear:hover { color: #0f172a; }
-
-    .table-responsive-custom { max-height: 60vh; overflow-y: auto; overflow-x: auto; border: 1px solid #e2e8f0; border-radius: var(--radius-inner); margin-top: 24px; }
-    .table-modern { width: 100%; border-collapse: separate; border-spacing: 0; min-width: max-content; }
-    .table-modern th { background: #f8fafc; color: #475569; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 800; padding: 16px 24px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 10; white-space: nowrap; }
-    .table-modern td { padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; border-bottom: 1px solid #f1f5f9; vertical-align: middle; white-space: nowrap; font-weight: 500;}
-    .table-modern tbody tr:hover td { background-color: #f8fafc; }
-    .cell-wrap { white-space: normal !important; word-wrap: break-word; min-width: 220px; max-width: 360px; line-height: 1.5; }
-    .rate-highlight { font-weight: 800; color: #166534; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 4px 10px; display: inline-block; }
-</style>
+<link rel="stylesheet" href="{% static 'insurance/css/pages/health_payout_rates.css' %}">
 
 {% include "partials/rate_checker_tabs.html" %}
 
@@ -100,48 +27,7 @@
             </button>
         </div>
 
-        <div id="ticketModal" class="modal" tabindex="-1" style="display: none; background: rgba(0,0,0,0.6); position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 9999; align-items: center; justify-content: center;">
-            <div class="modal-dialog" style="background: white; border-radius: 8px; padding: 20px; width: 90%; max-width: 500px;">
-                <div class="modal-content border-0">
-                    <div class="modal-header border-0 pb-0 d-flex justify-content-between align-items-center mb-2">
-                        <h5 class="modal-title fw-bold">Raise a Ticket</h5>
-                        <button type="button" class="btn-close" onclick="closeTicketModal()" style="background: none; border: none; font-size: 1.5rem; cursor: pointer;">&times;</button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="alert alert-info py-2 px-3 small border-0">
-                            <i class="bi bi-info-circle"></i> The parameters currently entered in the search form will automatically be attached to this ticket.
-                        </div>
-                        <div class="mb-3">
-                            <label for="ticketType" class="form-label fw-bold">Ticket Type</label>
-                            <select id="ticketType" class="form-select">
-                                <option value="">Select...</option>
-                                <option value="WRONG_RATE">Wrong Rate</option>
-                                <option value="DOUBLE_RATE">Double Rate</option>
-                                <option value="MISSING_RATE">Missing Rate</option>
-                                <option value="OTHERS">Others</option>
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label for="ticketInsurer" class="form-label fw-bold">Insurer</label>
-                            <select id="ticketInsurer" class="form-select">
-                                <option value="">Select...</option>
-                                {% for insurer in insurer_list %}
-                                    <option value="{{ insurer }}">{{ insurer }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <div class="mb-3">
-                            <label for="ticketRemarks" class="form-label fw-bold">Remarks / Issue Details</label>
-                            <textarea id="ticketRemarks" class="form-control" rows="4" placeholder="Please explain what is missing or incorrect with the current rates..."></textarea>
-                        </div>
-                    </div>
-                    <div class="modal-footer border-0 pt-0 d-flex justify-content-end gap-2">
-                        <button type="button" class="btn btn-secondary" onclick="closeTicketModal()">Cancel</button>
-                        <button type="button" class="btn btn-primary" onclick="submitTicket()">Submit Ticket</button>
-                    </div>
-                </div>
-            </div>
-        </div>
+        {% include "partials/ticket_modal.html" %}
 
         <form method="GET" id="healthCheckForm">
             <div class="row g-4">

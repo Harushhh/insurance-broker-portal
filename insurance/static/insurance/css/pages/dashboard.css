@@ -1,0 +1,129 @@
+
+    /* =========================================
+       PREMIUM DESIGN SYSTEM 
+       ========================================= */
+    :root {
+        --tb-font: 13px;
+        --tb-pad: 12px 16px;
+    }
+
+    /* Cards */
+    .premium-card {
+        background: #ffffff;
+        border-radius: 16px;
+        border: 1px solid #e2e8f0;
+        box-shadow: 0 4px 20px rgba(15, 23, 42, 0.03);
+        margin-bottom: 24px;
+        overflow: visible; 
+    }
+    .card-header-premium {
+        background: #f8fafc;
+        padding: 16px 24px;
+        border-bottom: 1px solid #e2e8f0;
+        border-radius: 16px 16px 0 0;
+    }
+
+    /* Typography & Badges */
+    .text-overline { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; margin-bottom: 6px; display: block; }
+    .stat-badge { display: flex; flex-direction: column; align-items: center; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 8px 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+    .status-pill { padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; letter-spacing: 0.02em; }
+    .pill-unlocked { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .pill-locked { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+
+    /* Form Controls */
+    .form-control-premium, .form-select-premium {
+        border: 1px solid #cbd5e1;
+        border-radius: 8px;
+        padding: 8px 14px;
+        font-size: 13px;
+        color: #0f172a;
+        background-color: #fff;
+        transition: all 0.2s ease;
+        height: 40px;
+        width: 100%;
+    }
+    .form-select-premium { cursor: pointer; appearance: auto; }
+    .form-control-premium:focus, .form-select-premium:focus {
+        outline: none;
+        border-color: #3b82f6;
+        box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+    }
+
+    /* Buttons */
+    .btn-gradient { background: linear-gradient(135deg, #2563eb 0%, #0ea5e9 100%); color: white; border: none; border-radius: 8px; padding: 8px 24px; font-weight: 600; font-size: 14px; transition: all 0.2s; box-shadow: 0 2px 4px rgba(37, 99, 235, 0.1); display: inline-flex; align-items: center; gap: 8px; height: 40px;}
+    .btn-gradient:hover { transform: translateY(-1px); box-shadow: 0 6px 15px rgba(37, 99, 235, 0.25); color: white; }
+    
+    .btn-soft { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 20px; font-weight: 600; font-size: 14px; transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px; height: 40px;}
+    .btn-soft:hover { background: #e2e8f0; color: #0f172a; border-color: #cbd5e1; }
+    
+    .btn-text { background: transparent; color: #3b82f6; border: none; font-weight: 600; font-size: 13px; padding: 8px 12px; display: inline-flex; align-items: center; gap: 6px; transition: all 0.2s; border-radius: 8px;}
+    .btn-text:hover { background: #eff6ff; color: #1d4ed8; }
+
+    /* Modern Table */
+    .table-responsive-custom { max-height: 65vh; overflow-y: auto; overflow-x: auto; border-top: 1px solid #e2e8f0; }
+    .table-modern { width: 100%; border-collapse: separate; border-spacing: 0; min-width: max-content; }
+    .table-modern th {
+        background: #f8fafc; color: #64748b; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+        padding: 14px 20px; border-bottom: 1px solid #e2e8f0; position: sticky; top: 0; z-index: 10;
+        white-space: nowrap;
+    }
+    .table-modern td {
+        padding: var(--tb-pad); font-size: var(--tb-font); color: #334155; border-bottom: 1px solid #f1f5f9; vertical-align: middle; white-space: nowrap; transition: all 0.15s ease;
+    }
+    .table-modern tbody tr:hover td { background-color: #f8fafc; }
+    .cell-wrap { white-space: normal !important; word-wrap: break-word; min-width: 250px; max-width: 350px; line-height: 1.5; }
+
+    /* Clickable group-name tokens in Display RTO List / New Vehicle Makes cells */
+    .cluster-chip { color: #2563eb; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+    .cluster-chip:hover { color: #1d4ed8; text-decoration-style: solid; }
+
+    /* Expanded cluster items shown inside the popup (editable) */
+    .cluster-item-chip {
+        display: inline-flex; align-items: center; gap: 6px; padding: 4px 6px 4px 10px; border-radius: 999px;
+        background: #f1f5f9; color: #334155; font-size: 12px; font-weight: 600;
+        border: 1px solid #e2e8f0;
+    }
+    .cluster-item-remove {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 16px; height: 16px; border-radius: 50%; cursor: pointer;
+        color: #94a3b8; font-size: 13px; line-height: 1;
+    }
+    .cluster-item-remove:hover { background: #fee2e2; color: #dc2626; }
+
+    /* UI Overrides for Libraries */
+    .select2-container--default .select2-selection--single {
+        border: 1px solid #cbd5e1; border-radius: 8px; height: 40px; display: flex; align-items: center; background: #fff;
+    }
+    .select2-container--default .select2-selection--single .select2-selection__rendered { color: #0f172a; font-size: 13px; padding-left: 14px; }
+    .select2-container--default .select2-selection--single .select2-selection__arrow { height: 38px; }
+    .select2-dropdown { border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border-top: none; }
+    
+    .daterangepicker { border-radius: 12px; font-family: 'Inter', sans-serif; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+    .daterangepicker .drp-buttons .btn-primary { background: #2563eb; border: none; border-radius: 6px; }
+
+    /* Rate Master line-of-business switcher */
+    .rm-tabs { display: inline-flex; background: #f1f5f9; border: 1px solid #e2e8f0; border-radius: 12px; padding: 4px; gap: 4px; align-self: center; }
+    .rm-tab { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; border-radius: 9px; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; color: #64748b; text-decoration: none; transition: all .15s ease; cursor: pointer; white-space: nowrap; }
+    .rm-tab:hover { color: #0f172a; }
+    .rm-tab.active { background: #ffffff; color: #2563eb; box-shadow: 0 2px 6px rgba(15,23,42,.08); }
+    .rm-tab-disabled { color: #cbd5e1 !important; cursor: not-allowed; }
+    .rm-tab-disabled:hover { color: #cbd5e1 !important; }
+    .rm-soon { font-size: 9px; font-weight: 800; background: #e2e8f0; color: #475569; padding: 1px 6px; border-radius: 999px; margin-left: 2px; text-transform: uppercase; }
+
+    /* Pagination */
+    .pager { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 20px; border-top: 1px solid #e2e8f0; }
+    .pager a, .pager span { padding: 7px 14px; border-radius: 8px; font-size: 13px; font-weight: 600; text-decoration: none; }
+    .pager a { background: #f8fafc; color: #334155; border: 1px solid #e2e8f0; }
+    .pager a:hover { background: #eff6ff; color: #1d4ed8; }
+    .pager .disabled { color: #cbd5e1; }
+    .pager .ellipsis { color: #94a3b8; padding: 7px 4px; border: none; }
+    .pager .page-num { min-width: 36px; text-align: center; }
+    .pager .page-num.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+    .page-size-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 14px 20px 0; }
+    .page-size-bar label { font-size: 12.5px; font-weight: 600; color: #64748b; display: flex; align-items: center; gap: 8px; margin: 0; }
+    .page-size-bar select {
+        border: 1px solid #cbd5e1; border-radius: 8px; padding: 5px 10px; font-size: 13px;
+        font-weight: 600; color: #0f172a; background-color: #fff; cursor: pointer;
+    }
+    .page-size-bar select:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15); }
