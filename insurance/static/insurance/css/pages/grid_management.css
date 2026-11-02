@@ -87,10 +87,53 @@
     }
     .gm-month-select:hover { border-color: #94a3b8; }
     .gm-month-select:focus { border-color: #60a5fa; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1); }
-    .gm-month-filter-form { display: flex; align-items: center; gap: 10px; }
+    .gm-month-filter-form { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .gm-month-filter-form label {
         font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;
         letter-spacing: 0.04em; white-space: nowrap;
+    }
+
+    /* Month basis toggle: Upload Month / Work Effected Date Month. Two native
+       radios (keyboard-operable, submitted with the form) restyled as a switch;
+       the thumb slides under whichever one is checked. */
+    .gm-basis-toggle {
+        position: relative;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        padding: 3px;
+        background: #f1f5f9;
+        border: 1px solid #dbe2ea;
+        border-radius: 12px;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .gm-basis-toggle:has(input:focus-visible) { border-color: #60a5fa; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.1); }
+    .gm-basis-toggle input { position: absolute; opacity: 0; width: 0; height: 0; margin: 0; }
+    .gm-month-filter-form .gm-basis-toggle label {
+        position: relative; z-index: 1;
+        padding: 8px 18px;
+        font-size: 13px; font-weight: 700; color: #64748b;
+        text-align: center; text-transform: none; letter-spacing: 0;
+        cursor: pointer; transition: color 0.2s ease;
+    }
+    .gm-basis-toggle label:hover { color: #334155; }
+    .gm-basis-toggle input:checked + label { color: #1d4ed8; }
+    .gm-basis-thumb {
+        position: absolute; top: 3px; bottom: 3px; left: 3px;
+        width: calc((100% - 6px) / 2);
+        background: #fff; border-radius: 9px;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.15), 0 0 0 1px rgba(37, 99, 235, 0.12);
+        transition: transform 0.2s ease;
+    }
+    .gm-basis-toggle input:nth-of-type(2):checked ~ .gm-basis-thumb { transform: translateX(100%); }
+    .gm-sr-only {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+    @media (max-width: 640px) {
+        .gm-month-filter-form .gm-basis-toggle label { white-space: normal; padding: 8px 12px; line-height: 1.25; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .gm-basis-thumb, .gm-basis-toggle label { transition: none; }
     }
 
     /* Status summary / filter cards */

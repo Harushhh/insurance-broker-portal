@@ -49,6 +49,16 @@
         return true;
     }
 
+    // The month filter controls submit on change, so the Back button can bring
+    // the page back with them at the value the user last picked (which already
+    // navigated away) rather than the one this page is filtering by. The form's
+    // autocomplete="off" covers a normal history load; this covers the
+    // back/forward cache, which restores the live DOM as it was left.
+    window.addEventListener('pageshow', function (e) {
+        const filterForm = document.querySelector('.gm-month-filter-form');
+        if (e.persisted && filterForm) filterForm.reset();
+    });
+
     document.addEventListener('click', function (e) {
         const combobox = document.getElementById('insurerCombobox');
         if (combobox && !combobox.contains(e.target)) {
