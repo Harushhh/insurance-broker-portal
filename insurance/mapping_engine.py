@@ -593,41 +593,64 @@ def is_combined_cc_gvw(raw_value) -> bool:
     return bool(_CC_COMBINED_PATTERN.search(str(raw_value)))
 
 
-# The failed_on label RULE 3's vehicle-age check reports under. The age is no
-# longer read from the MIS 'Policy: vehage' column — it is calculated from
-# 'Policy: manufacturing year' (see calculate_vehicle_age), so that is the
-# column a human has to fix when this rule fails.
-VEHICLE_AGE_RULE_LABEL = 'Policy: manufacturing year'
+# 'Policy: sub product' values that mark a brand-new vehicle, whose age is
+# counted from the policy's inception year instead of a registration year.
+# Compared against the already stripped + lower-cased _mis_sub_prod column.
+NEW_VEHICLE_SUB_PRODUCTS = frozenset({'1+3', '1+5'})
+
+# The failed_on labels RULE 3's vehicle-age check reports under. The age is no
+# longer read from the MIS 'Policy: vehage' column, nor calculated from
+# 'Policy: manufacturing year' — it comes from the year in one of these two
+# columns (see calculate_vehicle_age), and which one a human has to fix when
+# this rule fails depends on the row.
+VEHICLE_AGE_REGISTRATION_LABEL = 'Policy: date of registration'
+VEHICLE_AGE_NEW_VEHICLE_LABEL = 'Policy: inception date'
 
 # A calendar year (1900-2099) standing on its own inside the cell, so "2024",
-# "2024.0", "15/03/2024" and an Excel "2024-03-15 00:00:00" all yield 2024.
-_MFG_YEAR_PATTERN = re.compile(r'(?<!\d)((?:19|20)\d{2})(?!\d)')
+# "2024.0", "15-03-2024" (dd-mm-yyyy), "15/03/2024" and an Excel
+# "2024-03-15 00:00:00" all yield 2024. Day and month order never matters —
+# only the 4-digit year is read.
+_YEAR_PATTERN = re.compile(r'(?<!\d)((?:19|20)\d{2})(?!\d)')
 
 
-def calculate_vehicle_age(mfg_year_series, current_year):
+def extract_year(date_series):
+    """The 4-digit calendar year in each cell of a raw MIS date column; NaN where there is none."""
+    return pd.to_numeric(
+        date_series.astype(str).str.extract(_YEAR_PATTERN, expand=False),
+        errors='coerce',
+    )
+
+
+def calculate_vehicle_age(registration_series, inception_series, is_new_vehicle, current_year):
     """
     Motor vehicle age for RULE 3, as a whole number of years:
 
-        Calculated_Age = CURRENT_YEAR - Manufacturing_Year
+        Calculated_Age = (CURRENT_YEAR + 1) - Year
+
+    Year is the year of 'Policy: date of registration' for a standard/rollover
+    policy, and the year of 'Policy: inception date' for a new vehicle
+    (is_new_vehicle is True: sub product 1+3 / 1+5). The "+ 1" counts the year
+    of registration as age 1 — with a current year of 2026, a vehicle
+    registered in 2025 is age 2 and one registered in 2026 is age 1.
 
     CURRENT_YEAR is the calendar year the mapping run happens in (2026 now,
     2027 once the clock rolls over), passed in by process_mis_mapping from
     timezone.localdate() rather than hard-coded here.
 
-    The result is NaN when the manufacturing year is blank or has no 4-digit
-    year in it; RULE 3 then treats it like any other blank value (only a rate
-    row with an open, fully blank age range can pass). It is NOT clamped: a
-    manufacturing year later than the current year gives a negative age, which
-    matches no band.
+    The result is NaN when the year's source cell is blank or has no 4-digit
+    year in it, with no fallback to the other date column or to the
+    manufacturing year; RULE 3 then treats it like any other blank value (only
+    a rate row with an open, fully blank age range can pass). It is NOT
+    clamped: a year later than the current year gives an age of 0 or less,
+    which falls below the exclusive lower bound of every band that has one.
 
     RULE 3 then reads this against each rate row's age band as
-    [vehicle_age_min, vehicle_age_max) — see the range_rules loop.
+    (vehicle_age_min, vehicle_age_max] — lower bound exclusive, upper bound
+    inclusive, so the current year's age 1 sits in the '0 to 1' band — see
+    the range_rules loop.
     """
-    mfg_year = pd.to_numeric(
-        mfg_year_series.astype(str).str.extract(_MFG_YEAR_PATTERN, expand=False),
-        errors='coerce',
-    )
-    return current_year - mfg_year
+    year = extract_year(inception_series).where(is_new_vehicle, extract_year(registration_series))
+    return (current_year + 1) - year
 
 
 def normalize_rto_code(raw_value):
@@ -849,9 +872,9 @@ MATCHING_RULE_COLUMNS = [
     'Policy: cc cubic capacity',        # Rule 3 (CC, or GVW below for GCV 3W/4W)
     'Policy: gvw gross vehicle weight', # Rule 3 (GCV 3W/4W only)
     'Policy: seating capacity',         # Rule 3
-    'Policy: manufacturing year',       # Rule 3 (vehicle age = current year - this)
+    'Policy: date of registration',     # Rule 3 (vehicle age = current year + 1 - this year)
     'Policy: tariff rate',              # Rule 3
-    'Policy: inception date',           # Rule 4
+    'Policy: inception date',           # Rule 4 (and Rule 3's vehicle age for new vehicles)
     'Policy: vehicle make',             # Rule 5a
     'Policy: model',                    # Rule 5a
     'Policy: rto no',                   # Rule 5b
@@ -1365,11 +1388,21 @@ def process_mis_mapping(mis_file_id):
         df_mis['_mis_date'] = pd.to_datetime(safe_get_col(df_mis, 'Policy: inception date'), errors='coerce', dayfirst=True)
 
         # Vehicle age (RULE 3) is calculated, not read: the current year (the
-        # year this run happens in) minus the manufacturing year.
+        # year this run happens in) + 1, minus the year of the registration
+        # date — or of the inception date for a new vehicle (sub product
+        # 1+3 / 1+5). The label records which column the year came from, for
+        # RULE 3's failure messages.
+        _is_new_vehicle = df_mis['_mis_sub_prod'].isin(NEW_VEHICLE_SUB_PRODUCTS)
         df_mis['_mis_age'] = calculate_vehicle_age(
-            safe_get_col(df_mis, 'Policy: manufacturing year'),
+            safe_get_col(df_mis, 'Policy: date of registration'),
+            safe_get_col(df_mis, 'Policy: inception date'),
+            _is_new_vehicle,
             timezone.localdate().year,
         )
+        df_mis['_mis_age_source_label'] = _is_new_vehicle.map({
+            True: VEHICLE_AGE_NEW_VEHICLE_LABEL,
+            False: VEHICLE_AGE_REGISTRATION_LABEL,
+        })
 
         df_mis['_mis_ncb'] = pd.to_numeric(safe_get_col(df_mis, 'Policy: no claim bonus'), errors='coerce')
         df_mis['_mis_cpa'] = pd.to_numeric(safe_get_col(df_mis, 'Policy: cpa'), errors='coerce')
@@ -1782,22 +1815,26 @@ def process_mis_mapping(mis_file_id):
                     ))
 
             # --- RULE 3: Numeric Ranges ---
-            # Last element: is the band's upper bound inclusive? True for CC/
-            # GVW, seating capacity and tariff, exactly as before. Vehicle age
-            # is a whole number (current year - manufacturing year), and the
-            # grids write consecutive bands as '0 to 1', '1 to 2', ... meaning
-            # age 0, age 1, ... — so an age band is [min, max): the lower bound
-            # is inclusive and the upper bound EXCLUSIVE, which puts the age on
-            # a seam (age 1 between '0 to 1' and '1 to 2') in exactly one band.
-            # Bands written with an x.01 upper bound ('0 to 1.01') still cover
-            # the whole number below it, as no whole-number age equals x.01.
+            # Last element: is the band's LOWER bound inclusive? True for CC/
+            # GVW, seating capacity and tariff, exactly as before — all of them
+            # are inclusive on both ends. Vehicle age is a whole number
+            # ((current year + 1) - registration year, or inception year for a
+            # new vehicle), so a vehicle registered in the current year is age
+            # 1 and always belongs to the '0 to 1' slab, last year's is age 2
+            # and belongs to '1 to 2', and so on. An age band is therefore
+            # (min, max]: the lower bound is EXCLUSIVE and the upper bound
+            # inclusive, which puts an age on a seam (age 1 between '0 to 1'
+            # and '1 to 5.01') in exactly one band — the lower one. Bands
+            # written with an x.01 bound still behave: '0 to 1.01' covers age 1
+            # and '1.01 to 5.01' starts at age 2, as no whole-number age
+            # equals x.01.
             range_rules = [
                 ('_mis_cc', 'cc_min', 'cc_max', mis_row['_mis_cc_source_label'], True),
                 ('_mis_sc', 'sc_min', 'sc_max', 'Policy: seating capacity', True),
-                ('_mis_age', 'vehicle_age_min', 'vehicle_age_max', VEHICLE_AGE_RULE_LABEL, False),
+                ('_mis_age', 'vehicle_age_min', 'vehicle_age_max', mis_row['_mis_age_source_label'], False),
                 ('_mis_tariff', 'tariff_min', 'tariff_max', 'Policy: tariff rate', True),
             ]
-            for mis_col, min_col, max_col, label, max_inclusive in range_rules:
+            for mis_col, min_col, max_col, label, min_inclusive in range_rules:
                 if not current_grid.empty:
                     val = mis_row[mis_col]
                     if pd.isna(val):
@@ -1807,16 +1844,16 @@ def process_mis_mapping(mis_file_id):
                             f"candidate rate row has an open (blank) range."
                         )
                     else:
-                        min_cond = current_grid[min_col].isna() | (current_grid[min_col] <= val)
-                        if max_inclusive:
-                            max_cond = current_grid[max_col].isna() | (current_grid[max_col] >= val)
+                        if min_inclusive:
+                            min_cond = current_grid[min_col].isna() | (current_grid[min_col] <= val)
                         else:
-                            max_cond = current_grid[max_col].isna() | (current_grid[max_col] > val)
+                            min_cond = current_grid[min_col].isna() | (current_grid[min_col] < val)
+                        max_cond = current_grid[max_col].isna() | (current_grid[max_col] >= val)
                         rule_mask = min_cond & max_cond
                         if mis_col == '_mis_age':
                             detail = (
-                                f"Calculated vehicle age {val:g} (current year - manufacturing year) falls "
-                                f"outside the age band (lower bound inclusive, upper bound exclusive) "
+                                f"Calculated vehicle age '{val:g}' ((current year + 1) - the year in {label}) "
+                                f"falls outside the age band (lower bound exclusive, upper bound inclusive) "
                                 f"configured on every remaining candidate rate row."
                             )
                         else:
