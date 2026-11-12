@@ -93,7 +93,12 @@ class ExactMatchMappingTests(TestCase):
         )
 
     def _run(self, rows):
-        base = {"Product": "motor", "Policy: insurance company": INSURER}
+        # Premium in both columns: the valid split for the 1+1 row below (SAOD
+        # rows clear tp premium themselves) — see
+        # test_mapping_engine_premium_validation — so only RULE 2 decides
+        # what these rows do.
+        base = {"Product": "motor", "Policy: insurance company": INSURER,
+                "Policy: total od": 1000, "Policy: tp premium": 500}
         buf = io.StringIO()
         pd.DataFrame([{**base, **r} for r in rows]).to_csv(buf, index=False)
         mis = MISFile.objects.create(
@@ -151,20 +156,20 @@ class ExactMatchMappingTests(TestCase):
 
     def test_sub_product_is_exact_and_case_insensitive(self):
         saod = self._rate("TW", payout=10, sub_product="SAOD")
-        out = self._run([{"Policy: vehproduct": "TW", "Policy: sub product": "saod"}])
+        out = self._run([{"Policy: vehproduct": "TW", "Policy: sub product": "saod", "Policy: tp premium": 0}])
         self.assertEqual(out.loc[0, "Mapping Status"], MATCH)
         self.assertEqual(out.loc[0, "Displaygroupid"], saod.id)
 
     def test_a_longer_sub_product_no_longer_matches_by_containment(self):
         self._rate("TW", payout=10, sub_product="SAOD (Own Damage)")
-        out = self._run([{"Policy: vehproduct": "TW", "Policy: sub product": "SAOD"}])
+        out = self._run([{"Policy: vehproduct": "TW", "Policy: sub product": "SAOD", "Policy: tp premium": 0}])
         self.assertEqual(out.loc[0, "Mapping Status"], NO_MATCH)
         self.assertTrue(out.loc[0, "Failure Reason"].startswith("Failed on: Policy: sub product —"))
 
     def test_a_near_miss_sub_product_group_is_not_a_second_match(self):
         exact = self._rate("TW", payout=10, sub_product="SAOD")
         self._rate("TW", payout=20, sub_product="SAOD (Own Damage)")
-        out = self._run([{"Policy: vehproduct": "TW", "Policy: sub product": "SAOD"}])
+        out = self._run([{"Policy: vehproduct": "TW", "Policy: sub product": "SAOD", "Policy: tp premium": 0}])
         self.assertEqual(out.loc[0, "Mapping Status"], MATCH)
         self.assertEqual(out.loc[0, "Displaygroupid"], exact.id)
 

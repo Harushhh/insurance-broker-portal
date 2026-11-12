@@ -125,8 +125,12 @@ class AgeBandMatchingTests(TestCase):
         )
 
     def _run(self, rows, run_year=RUN_YEAR):
+        # Premium in both columns: the valid split for the 1+1 / 1+3 / 1+5 rows
+        # below (see test_mapping_engine_premium_validation), so only the age
+        # rule decides what these rows do.
         base = {"Product": "motor", "Policy: insurance company": INSURER,
-                "Policy: inception date": "01/08/2026"}
+                "Policy: inception date": "01/08/2026",
+                "Policy: total od": 1000, "Policy: tp premium": 500}
         buf = io.StringIO()
         pd.DataFrame([{**base, **r} for r in rows]).to_csv(buf, index=False)
         mis = MISFile.objects.create(

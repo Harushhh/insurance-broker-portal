@@ -481,9 +481,17 @@ def build_make_model_lookup(master_qs, name_field, cluster_field, min_shared_wor
     fuzzy_match_make_model). Mirrors build_master_lookup's shape and caching,
     but is specific to Rule 5a's fuzzy word-overlap matching — RTO (Rule 5b)
     still uses build_master_lookup/strict_match_in_cluster unchanged.
+
+    Answers come from build_make_model_cluster_index: every cluster item is
+    tokenised ONCE here, so resolving a new term walks only the items that share
+    one of its words. Walking every master row and re-tokenising every cluster
+    item for each new term (fuzzy_match_make_model over the whole master) cost
+    ~0.4s a term on real data, which is what dominated a mapping run once every
+    row reaches this rule (a failed rule no longer ends a row's checks — see
+    narrow_candidates). The decision is identical (fuzzy_match_make_model stays
+    as the reference implementation, and a test asserts the two agree).
     """
-    master_rows = list(master_qs.values_list(name_field, cluster_field))
-    parsed = [(name, cluster) for name, cluster in master_rows if cluster]
+    index = build_make_model_cluster_index(master_qs, name_field, cluster_field)
 
     resolution_cache = {}
 
@@ -494,10 +502,7 @@ def build_make_model_lookup(master_qs, name_field, cluster_field, min_shared_wor
         if key in resolution_cache:
             return resolution_cache[key]
 
-        matched_names = set()
-        for name, cluster in parsed:
-            if fuzzy_match_make_model(key, cluster, min_shared_words):
-                matched_names.add(str(name).strip().lower())
+        matched_names = resolve_make_model_with_index(index, key, min_shared_words)
 
         resolution_cache[key] = matched_names
         return matched_names
@@ -653,6 +658,166 @@ def calculate_vehicle_age(registration_series, inception_series, is_new_vehicle,
     return (current_year + 1) - year
 
 
+# ── Premium split / NCB validation (Motor rows) ──────────────────────────────
+# Rules a Motor MIS row must pass before it is allowed anywhere near RULE 1-6.
+# Each is keyed on 'Policy: sub product' (matched stripped + lower-cased, like
+# _mis_sub_prod) and reads 'Policy: total od', 'Policy: tp premium' and
+# 'Policy: no claim bonus'. A cell that is blank, zero or one of the null
+# strings clean_cp_numeric knows ('null'/'nul'/'nill'/'na') is ABSENT; any
+# other number is PRESENT, negatives included (an endorsement can refund
+# premium).
+#
+#   STP              premium in 'Policy: tp premium' ONLY   (total od absent)
+#   SAOD             premium in 'Policy: total od' ONLY     (tp premium absent)
+#   1+1 / 1+3 / 1+5  premium in BOTH total od and tp premium — except Private
+#                    Car ('Policy: vehproduct'), where total od alone is fine
+#                    too: total od must be present, tp premium may or may not be
+#   1+3 / 1+5        'Policy: no claim bonus' ABSENT (a brand-new vehicle has
+#                    none). Stacks on the premium rule above — both must hold.
+#
+# Any other sub product (3+3, 5+5, a blank one, ...) isn't covered. The rules
+# only ever run for Motor rows (see the PRODUCT ROUTING block in
+# process_mis_mapping): STP/SAOD/1+x are Motor concepts and a Health row has no
+# OD/TP split.
+STP_SUB_PRODUCT = 'stp'
+SAOD_SUB_PRODUCT = 'saod'
+PACKAGE_SUB_PRODUCTS = frozenset({'1+1', '1+3', '1+5'})
+# The same two sub products as NEW_VEHICLE_SUB_PRODUCTS, but a separate rule
+# with its own constant: widening one must not silently widen the other.
+NO_NCB_SUB_PRODUCTS = frozenset({'1+3', '1+5'})
+PREMIUM_VALIDATED_SUB_PRODUCTS = PACKAGE_SUB_PRODUCTS | {STP_SUB_PRODUCT, SAOD_SUB_PRODUCT}
+PRIVATE_CAR_PRODUCT = 'private car'
+
+TOTAL_OD_LABEL = 'Policy: total od'
+TP_PREMIUM_LABEL = 'Policy: tp premium'
+NCB_LABEL = 'Policy: no claim bonus'
+
+VALIDATION_ERROR_PREFIX = 'Validation error — '
+VALIDATION_ERROR_SUFFIX = ' Correct the source MIS data and re-run mapping for this row.'
+
+
+def _format_amount(value):
+    """4151.0 -> '4,151', 6725.88 -> '6,725.88': a cleaned amount as it reads in a failure reason."""
+    return f"{value:,.2f}".rstrip('0').rstrip('.')
+
+
+def _raw_cell_text(raw):
+    """The cell as the MIS file has it, for quoting an unreadable value back to the user."""
+    return '(blank)' if pd.isna(raw) else str(raw).strip()
+
+
+def _premium_validation_problems(sub, is_private_car, od, tp, ncb, raw_od, raw_tp, raw_ncb):
+    """
+    The validation sentences one covered row earns, in rule order (an empty
+    list means it passes). `od` / `tp` / `ncb` are the cleaned amounts from
+    clean_cp_numeric — NaN when the cell isn't a number at all — and the raw_*
+    values are the cells as written, only used to quote an unreadable one.
+    """
+    label = sub.upper()
+    od_unreadable, tp_unreadable = pd.isna(od), pd.isna(tp)
+    has_od = not od_unreadable and od != 0
+    has_tp = not tp_unreadable and tp != 0
+    # "Known to be zero/blank" is not the same as "not present": an amount
+    # that can't be read is neither, and is reported as such instead of being
+    # guessed at (a typo like '1870..00' is not a missing premium).
+    od_zero = not od_unreadable and not has_od
+    tp_zero = not tp_unreadable and not has_tp
+
+    problems = []
+    for unreadable, column, raw in (
+        (od_unreadable, TOTAL_OD_LABEL, raw_od),
+        (tp_unreadable, TP_PREMIUM_LABEL, raw_tp),
+    ):
+        if unreadable:
+            problems.append(
+                f"{column} value '{_raw_cell_text(raw)}' is not a valid number, so the "
+                f"premium split of this {label} policy could not be checked."
+            )
+
+    if sub == STP_SUB_PRODUCT:
+        if tp_zero:
+            problems.append(f"{TP_PREMIUM_LABEL} is zero/blank, but STP policies must carry their premium there.")
+        if has_od:
+            problems.append(
+                f"{TOTAL_OD_LABEL} is {_format_amount(od)}, but STP policies must have it zero/blank "
+                f"(the premium belongs in {TP_PREMIUM_LABEL} only)."
+            )
+    elif sub == SAOD_SUB_PRODUCT:
+        if od_zero:
+            problems.append(f"{TOTAL_OD_LABEL} is zero/blank, but SAOD policies must carry their premium there.")
+        if has_tp:
+            problems.append(
+                f"{TP_PREMIUM_LABEL} is {_format_amount(tp)}, but SAOD policies must have it zero/blank "
+                f"(the premium belongs in {TOTAL_OD_LABEL} only)."
+            )
+    elif is_private_car:
+        # 1+1 / 1+3 / 1+5 on a Private Car: total od is mandatory, tp premium isn't.
+        if od_zero:
+            problems.append(
+                f"{TOTAL_OD_LABEL} is zero/blank, but Private Car {label} policies must carry premium "
+                f"in {TOTAL_OD_LABEL} ({TP_PREMIUM_LABEL} is optional)."
+            )
+    else:
+        # 1+1 / 1+3 / 1+5 on anything else: premium in both.
+        both = f"{label} policies must carry premium in both {TOTAL_OD_LABEL} and {TP_PREMIUM_LABEL}"
+        if od_zero and tp_zero:
+            problems.append(f"{TOTAL_OD_LABEL} and {TP_PREMIUM_LABEL} are both zero/blank, but {both}.")
+        elif od_zero:
+            problems.append(f"{TOTAL_OD_LABEL} is zero/blank, but {both}.")
+        elif tp_zero:
+            problems.append(f"{TP_PREMIUM_LABEL} is zero/blank, but {both}.")
+
+    if sub in NO_NCB_SUB_PRODUCTS:
+        if pd.isna(ncb):
+            problems.append(
+                f"{NCB_LABEL} value '{_raw_cell_text(raw_ncb)}' is not a valid number, so it could "
+                f"not be checked against the {label} rule (zero/blank required)."
+            )
+        elif ncb != 0:
+            problems.append(f"{NCB_LABEL} is {_format_amount(ncb)}, but {label} policies must have it zero/blank.")
+
+    return problems
+
+
+def premium_validation_errors(sub_product, vehicle_product, total_od, tp_premium, no_claim_bonus):
+    """
+    The premium split / NCB rules above, over whole MIS columns:
+    'Policy: sub product', 'Policy: vehproduct', 'Policy: total od',
+    'Policy: tp premium' and 'Policy: no claim bonus', as Series sharing one
+    index. The two product columns are stripped and lower-cased here, so raw
+    and already-normalised values both work; the three amount columns are
+    cleaned with clean_cp_numeric, the same cleaning cp premium# uses, so
+    '4,151.00' is 4151 and a blank, 0 or 'null' is simply absent.
+
+    Returns a Series of strings on that index: '' for a row that passes or
+    whose sub product isn't covered, otherwise the whole failure reason —
+    every rule the row breaks, so one run shows everything to correct. It does
+    not look at Product: process_mis_mapping applies it to Motor rows only.
+    """
+    subs = sub_product.astype(str).str.strip().str.lower()
+    is_private_car = (
+        vehicle_product.astype(str).str.strip().str.lower() == PRIVATE_CAR_PRODUCT
+    ).fillna(False).astype(bool)
+    od = clean_cp_numeric(total_od)
+    tp = clean_cp_numeric(tp_premium)
+    ncb = clean_cp_numeric(no_claim_bonus)
+
+    reasons = []
+    for sub, private_car, od_val, tp_val, ncb_val, raw_od, raw_tp, raw_ncb in zip(
+        subs, is_private_car, od, tp, ncb, total_od, tp_premium, no_claim_bonus
+    ):
+        problems = (
+            _premium_validation_problems(
+                sub, private_car, od_val, tp_val, ncb_val, raw_od, raw_tp, raw_ncb
+            )
+            if sub in PREMIUM_VALIDATED_SUB_PRODUCTS else []
+        )
+        reasons.append(
+            f"{VALIDATION_ERROR_PREFIX}{' '.join(problems)}{VALIDATION_ERROR_SUFFIX}" if problems else ''
+        )
+    return pd.Series(reasons, index=sub_product.index, dtype=object)
+
+
 def normalize_rto_code(raw_value):
     """
     Normalizes a raw MIS RTO value before the two-step RTOMaster lookup.
@@ -781,6 +946,76 @@ _QUOTED_VALUE_PATTERN = re.compile(r"'([^']*)'")
 _FAILED_ON_PATTERN = re.compile(r"^Failed on:\s*([^—]+)—\s*(.*)$")
 _GROUP_IDS_PATTERN = re.compile(r"Matching Group IDs:\s*(.*)$")
 
+
+# ── Batch error collection ───────────────────────────────────────────────────
+# No check stops at the first failure. A row that fails several checks reports
+# ALL of them in its one Failure Reason, so fixing a row (or a Rate Master /
+# master-data gap) never just uncovers the next error on the next run. The
+# rate-matching chains (RULE 1-6, Health H1-H6) collect their failures as
+# (label, detail) pairs in rule order, and format_failed_on renders them on ONE
+# line:
+#
+#   Failed on: <label 1> — <detail 1> | Also failed on: <label 2> — <detail 2> | ...
+#
+# The first segment is exactly the Failure Reason a row that stopped at its
+# first failed rule always had, byte for byte: the Missing Make/Model page and
+# the coverage-gap panel read it from the start of the text. Everything after
+# it is additional. It has to stay one line — the coverage-gap pattern above
+# does not cross a newline.
+FAILURE_SEGMENT_SEPARATOR = ' | '
+ALSO_FAILED_ON_PREFIX = 'Also failed on: '
+
+
+def format_failed_on(failed_on):
+    """
+    The NO MATCH Failure Reason for the (label, detail) failures one row
+    collected, in rule order: 'Failed on: <first> | Also failed on: <next> | ...'.
+    """
+    segments = []
+    for position, (label, detail) in enumerate(failed_on):
+        prefix = 'Failed on: ' if position == 0 else ALSO_FAILED_ON_PREFIX
+        segments.append(f"{prefix}{label} — {detail}")
+    return FAILURE_SEGMENT_SEPARATOR.join(segments)
+
+
+def split_failed_on(reason):
+    """
+    The (label, detail) pairs inside a stored 'Failed on:' Failure Reason —
+    format_failed_on in reverse. Empty when the reason isn't of that shape
+    (e.g. 'No rates found for criteria'). A reason written before failures were
+    collected has just the one pair.
+    """
+    first, *others = str(reason).split(FAILURE_SEGMENT_SEPARATOR + ALSO_FAILED_ON_PREFIX)
+    match = _FAILED_ON_PATTERN.match(first)
+    if not match:
+        return []
+    failures = [(match.group(1).strip(), match.group(2).strip())]
+    for segment in others:
+        label, _, detail = segment.partition('—')
+        failures.append((label.strip(), detail.strip()))
+    return failures
+
+
+def narrow_candidates(current_grid, rule_mask, failed_on, label, detail):
+    """
+    Applies one rate-matching rule to the candidate Rate Master rows. If rows
+    survive, they are the new candidates. If NONE do, the rule has failed: it is
+    recorded in failed_on and the candidates from before it are kept, so every
+    later rule is still evaluated (and reported) instead of being skipped.
+
+    Every rule is a row-wise test of a Rate Master row against one MIS value, so
+    keeping the pre-failure candidates changes nothing about which rows survive
+    the rules that PASSED; and a rule that fails still fails exactly as it did
+    when it was the last one standing. The catch: current_grid is no longer
+    empty after a failure, so a caller must decide NO MATCH from failed_on, not
+    from current_grid.empty.
+    """
+    narrowed = current_grid[rule_mask]
+    if narrowed.empty:
+        failed_on.append((label, detail))
+        return current_grid
+    return narrowed
+
 # Pulls the failing make/model back out of a stored failure_reason, for the
 # Missing Make/Model page. Deliberately NOT _QUOTED_VALUE_PATTERN: that stops
 # at the first apostrophe, so a value like "bmw 3's series" would come back
@@ -815,19 +1050,21 @@ def build_coverage_gap_summary(df_final, max_entries=25):
     instead of someone reading Failure Reason for every row individually.
     Runs once per processed file, purely over the already-computed output —
     it doesn't touch or re-run any matching logic, so it carries zero risk
-    to the match/no-match decisions themselves.
+    to the match/no-match decisions themselves. A NO MATCH row that failed
+    several checks is counted under each of them (see format_failed_on).
     """
     no_match_counts = Counter()
     no_match_reasons = df_final.loc[df_final['Mapping Status'] == '❌ NO MATCH', 'Failure Reason']
     for reason in no_match_reasons:
         reason = str(reason)
-        m = _FAILED_ON_PATTERN.match(reason)
-        if not m:
+        failures = split_failed_on(reason)
+        if not failures:
             no_match_counts[('Other', reason[:60].strip())] += 1
             continue
-        rule_label = m.group(1).strip()
-        detail = m.group(2).strip()
-        no_match_counts[(rule_label, _extract_gap_key(detail))] += 1
+        # Every failed check is a gap to close, so a row that failed several
+        # counts once under each of them, not only under the first.
+        for rule_label, detail in failures:
+            no_match_counts[(rule_label, _extract_gap_key(detail))] += 1
 
     no_match_ranked = [
         {'rule': rule, 'value': value, 'count': count}
@@ -859,10 +1096,12 @@ MIS_STATUS_KEYS = {
 
 # The exact raw MIS columns RULE 1-6 above read from (every safe_get_col(...)
 # call feeding a _mis_* column, plus 'Policy: vehicle make' / 'Policy: model'
-# which together feed _mis_make_model) — kept in sync with that logic so a
-# failed row's "policy details" only ever shows fields a human could plausibly
-# need to fix a mapping failure, not the ~100 other MIS columns (customer
-# address, agent, QC status, etc.) that have no bearing on why it didn't map.
+# which together feed _mis_make_model), and the 'Policy: total od' / 'Policy:
+# tp premium' pair the premium split validation reads — kept in sync with that
+# logic so a failed row's "policy details" only ever shows fields a human could
+# plausibly need to fix a mapping failure, not the ~100 other MIS columns
+# (customer address, agent, QC status, etc.) that have no bearing on why it
+# didn't map.
 MATCHING_RULE_COLUMNS = [
     'Policy: insurance company',       # Rule 1
     'Policy: vehproduct',               # Rule 2
@@ -878,7 +1117,7 @@ MATCHING_RULE_COLUMNS = [
     'Policy: vehicle make',             # Rule 5a
     'Policy: model',                    # Rule 5a
     'Policy: rto no',                   # Rule 5b
-    'Policy: no claim bonus',           # Rule 6
+    'Policy: no claim bonus',           # Rule 6 (and the 1+3 / 1+5 NCB validation)
     'Policy: cpa',                      # Rule 6
     'Policy: nil dep',                  # Rule 6
     'Policy: product name',             # Rule H2 (Health)
@@ -890,6 +1129,11 @@ MATCHING_RULE_COLUMNS = [
     'Customer: age',                    # Rule H4 (Health)
     'Customer: pin code',               # Rule H5 (Health)
     'Policy: expiry date',              # Rule H-tenure (Health)
+    # Last, so the order every column above reaches a failed row's details in
+    # (and the first-few-entries fallback for rows with no vehicle columns)
+    # stays exactly as it was.
+    'Policy: total od',                 # Premium split validation (BAD DATA)
+    'Policy: tp premium',               # Premium split validation (BAD DATA)
 ]
 
 
@@ -1073,10 +1317,11 @@ def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
             'Addtnc': None,
         }
 
-    # --- TENURE GUARD: must resolve to a supported 1-5 year bucket ---
+    # --- TENURE CHECK: must resolve to a supported 1-5 year bucket ---
     # A real match on every other field is still useless without a rate
-    # column to read Porate from, so this is checked up front, the same way
-    # Motor's combined-CC/GVW bad-data guard runs before any elimination rule.
+    # column to read Porate from, so an unsupported tenure makes the row NO
+    # MATCH by itself. It is recorded as the row's first failure but no longer
+    # ends it: every rule below still runs, so the reason lists them all.
     inception = mis_row['_mis_date']
     expiry = mis_row['_mis_h_expiry']
     tenure_years = None
@@ -1085,15 +1330,17 @@ def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
         if days > 0:
             tenure_years = round(days / 365.25)
 
-    if tenure_years not in HEALTH_TENURE_RATE_COLUMNS:
-        computed = f"{tenure_years} year(s)" if tenure_years is not None else "an unparseable tenure"
-        return _no_match(
-            f"Failed on: Policy tenure — computed {computed} from Policy: inception date / "
-            f"Policy: expiry date, but the Health Grid only defines payout rates for 1-5 year tenures."
-        )
-    rate_col = HEALTH_TENURE_RATE_COLUMNS[tenure_years]
-
     failed_on = []
+    if tenure_years in HEALTH_TENURE_RATE_COLUMNS:
+        rate_col = HEALTH_TENURE_RATE_COLUMNS[tenure_years]
+    else:
+        rate_col = None
+        computed = f"{tenure_years} year(s)" if tenure_years is not None else "an unparseable tenure"
+        failed_on.append((
+            'Policy tenure',
+            f"computed {computed} from Policy: inception date / "
+            f"Policy: expiry date, but the Health Grid only defines payout rates for 1-5 year tenures."
+        ))
 
     # --- RULE H1: Insurance Company ---
     val_ins_raw = mis_row['_mis_ins']
@@ -1130,9 +1377,7 @@ def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
                 f"Inception date {inception.date()} falls outside the active date window "
                 f"on every remaining candidate Health Grid row."
             )
-        current_grid = current_grid[rule_mask]
-        if current_grid.empty:
-            failed_on.append(('Policy: inception date', detail))
+        current_grid = narrow_candidates(current_grid, rule_mask, failed_on, 'Policy: inception date', detail)
 
     # --- RULE H3: Categorical matches (product name / policy category / business type) ---
     cat_rules = [
@@ -1144,13 +1389,11 @@ def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
         if not current_grid.empty:
             val = mis_row[mis_col]
             rule_mask = current_grid[grid_col].apply(lambda g: check_categorical_match(val, g))
-            current_grid = current_grid[rule_mask]
-            if current_grid.empty:
-                failed_on.append((
-                    label,
-                    f"Value '{val}' did not match any remaining candidate Health Grid row's "
-                    f"{grid_col.replace('_', ' ')}."
-                ))
+            current_grid = narrow_candidates(
+                current_grid, rule_mask, failed_on, label,
+                f"Value '{val}' did not match any remaining candidate Health Grid row's "
+                f"{grid_col.replace('_', ' ')}."
+            )
 
     # --- RULE H4: Plan name — fuzzy match against the grid row's own plan_names cluster ---
     if not current_grid.empty:
@@ -1167,9 +1410,7 @@ def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
                 f"Plan name '{val_plan}' did not fuzzy-match any plan listed on the "
                 f"remaining candidate Health Grid rows."
             )
-        current_grid = current_grid[rule_mask]
-        if current_grid.empty:
-            failed_on.append(('Policy: plan name', detail))
+        current_grid = narrow_candidates(current_grid, rule_mask, failed_on, 'Policy: plan name', detail)
 
     # --- RULE H5: Numeric ranges (deductible / sum insured / age) ---
     range_rules = [
@@ -1194,9 +1435,7 @@ def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
                     f"{label} value {val} falls outside the range configured on every "
                     f"remaining candidate Health Grid row."
                 )
-            current_grid = current_grid[rule_mask]
-            if current_grid.empty:
-                failed_on.append((label, detail))
+            current_grid = narrow_candidates(current_grid, rule_mask, failed_on, label, detail)
 
     # --- RULE H6: Pincode zone — two-step PincodeMaster lookup ---
     # Same resolve-then-check-membership shape as Motor's RTO rule (Rule 5b),
@@ -1227,9 +1466,13 @@ def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
             rule_mask = current_grid['pincode_zone'].apply(
                 lambda g: check_resolved_cluster_match(resolved_zone_names, g)
             )
-        current_grid = current_grid[rule_mask]
-        if current_grid.empty:
-            failed_on.append(('Customer: pin code', detail))
+        current_grid = narrow_candidates(current_grid, rule_mask, failed_on, 'Customer: pin code', detail)
+
+    # Any failed check — the tenure included — means NO MATCH, however many
+    # candidates are left: narrow_candidates keeps the pre-failure candidates so
+    # the later rules still run, which means current_grid is NOT empty here.
+    if failed_on:
+        return _no_match(format_failed_on(failed_on))
 
     # --- FINAL RESOLUTION ---
     # No group_id concept on HealthRateMaster — "each imported row already is
@@ -1291,12 +1534,7 @@ def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
             'Addtnc': None,
         }
 
-    if failed_on:
-        first_label, first_detail = failed_on[0]
-        reason = f"Failed on: {first_label} — {first_detail}"
-    else:
-        reason = "No rates found for criteria"
-    return _no_match(reason)
+    return _no_match("No rates found for criteria")
 
 
 def process_mis_mapping(mis_file_id):
@@ -1416,6 +1654,21 @@ def process_mis_mapping(mis_file_id):
         # fuzzy-matched or fetched for a row before its table is known.
         df_mis['_mis_product'] = safe_get_col(df_mis, 'Product').astype(str).str.strip().str.lower()
         df_mis['_mis_is_motor'] = df_mis['_mis_product'] == 'motor'
+
+        # --- PREMIUM / NCB VALIDATION (Motor rows) ---
+        # STP / SAOD / 1+1 / 1+3 / 1+5 must have their premium split between
+        # 'Policy: total od' and 'Policy: tp premium' in one fixed way, and
+        # 1+3 / 1+5 must carry no NCB — see premium_validation_errors for the
+        # rules. Worked out for the whole frame here; the row loop turns a
+        # non-blank value into FAILED - BAD DATA before any rate lookup. Kept
+        # to Motor rows (.where) so a Health row is never touched by it.
+        df_mis['_mis_validation_error'] = premium_validation_errors(
+            df_mis['_mis_sub_prod'],
+            df_mis['_mis_prod'],
+            safe_get_col(df_mis, 'Policy: total od'),
+            safe_get_col(df_mis, 'Policy: tp premium'),
+            safe_get_col(df_mis, 'Policy: no claim bonus'),
+        ).where(df_mis['_mis_is_motor'], '')
 
         # --- HEALTH PRE-COMPUTE ---
         # Mirrors the Motor _mis_* block above, but for the fields Health
@@ -1678,7 +1931,7 @@ def process_mis_mapping(mis_file_id):
             # compared against, before any other check, range test, fuzzy
             # match or rate logic runs:
             #   'health' -> HealthRateMaster only (_match_health_row)
-            #   'motor'  -> RateMaster only (the BAD DATA guard and RULE 1-6
+            #   'motor'  -> RateMaster only (the BAD DATA guards and RULE 1-6
             #               chain below)
             #   anything else (blank, 'non_motor', 'life', a typo) -> neither
             if mis_row['_mis_h_is_health']:
@@ -1706,30 +1959,29 @@ def process_mis_mapping(mis_file_id):
                 })
                 continue
 
-            # --- BAD DATA GUARD: combined CC/GVW value ---
-            # Flagged during pre-compute (is_combined_cc_gvw). Never enters the
-            # elimination rules — a fabricated CC number could otherwise cause
-            # a false NO MATCH, or worse, a false MATCH against the wrong rate.
-            # Motor rows only: it runs after the Product routing above, so it
-            # never fires for (or blocks) a Health row.
+            # --- DATA VALIDATION: every check runs, every error is kept ---
+            # Both are flagged during pre-compute: a combined CC/GVW cell
+            # (is_combined_cc_gvw) and the premium split / NCB rules
+            # (premium_validation_errors). Neither stops the row: a row with
+            # any data error ends as FAILED - BAD DATA (decided after the rate
+            # chain below, which still runs so the row's reason can list the
+            # rate-matching failures too — see FINAL RESOLUTION), and one with
+            # both lists both. Motor rows only: this sits after the Product
+            # routing above, so it never fires for (or blocks) a Health row.
+            data_errors = []
             if mis_row['_mis_cc_bad_data']:
-                results.append({
-                    'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
-                    'Mapping Status': 'FAILED - BAD DATA',
-                    'Failure Reason': (
-                        f"{mis_row['_mis_cc_source_label']} value '{mis_row['_mis_cc_raw']}' looks like a "
-                        f"combined CC/GVW figure (two numbers separated by '/'). Not auto-parsed — "
-                        f"correct the source MIS data and re-run mapping for this row."
-                    ),
-                    'Displaygroupid': None,
-                    'Potype': None, 'Porate': None, 'Poflatamount': None,
-                    'Pitype': None, 'Pirate': None, 'Piflatamount': None,
-                    'Addtnc': None
-                })
-                continue
+                data_errors.append(
+                    f"{mis_row['_mis_cc_source_label']} value '{mis_row['_mis_cc_raw']}' looks like a "
+                    f"combined CC/GVW figure (two numbers separated by '/'). Not auto-parsed — "
+                    f"correct the source MIS data and re-run mapping for this row."
+                )
+            if mis_row['_mis_validation_error']:
+                data_errors.append(mis_row['_mis_validation_error'])
 
             # Motor row (Product == 'motor'): the RULE 1-6 chain below runs
-            # exactly as before, against RateMaster only.
+            # against RateMaster only. A failed rule no longer ends the chain —
+            # it is recorded in failed_on and the next rule still runs (see
+            # narrow_candidates), so a NO MATCH row reports every rule it fails.
             failed_on = []
 
             # --- RULE 1: Insurance Company ---
@@ -1775,13 +2027,11 @@ def process_mis_mapping(mis_file_id):
                 if not current_grid.empty:
                     val = mis_row[mis_col]
                     rule_mask = current_grid[grid_col].apply(lambda g: check_exact_match(val, g))
-                    current_grid = current_grid[rule_mask]
-                    if current_grid.empty:
-                        failed_on.append((
-                            label,
-                            f"Value '{val}' did not match any remaining candidate Rate Master row's "
-                            f"{grid_col.replace('_', ' ')} (after the previous rules narrowed the field)."
-                        ))
+                    current_grid = narrow_candidates(
+                        current_grid, rule_mask, failed_on, label,
+                        f"Value '{val}' did not match any remaining candidate Rate Master row's "
+                        f"{grid_col.replace('_', ' ')} (after the previous rules narrowed the field)."
+                    )
 
             # --- RULE 2b: Vehicle Class — direct match + NA wildcard ---
             # Uses case-insensitive exact match only (no fuzzy/substring).
@@ -1806,13 +2056,11 @@ def process_mis_mapping(mis_file_id):
                     return val_class == g
 
                 rule_mask = current_grid['make_model_class'].apply(match_vehicle_class)
-                current_grid = current_grid[rule_mask]
-                if current_grid.empty:
-                    failed_on.append((
-                        'Policy: vehicle class',
-                        f"Vehicle class '{val_class}' has no exact match among remaining candidate "
-                        f"rate rows, and none of them has an NA-wildcard class."
-                    ))
+                current_grid = narrow_candidates(
+                    current_grid, rule_mask, failed_on, 'Policy: vehicle class',
+                    f"Vehicle class '{val_class}' has no exact match among remaining candidate "
+                    f"rate rows, and none of them has an NA-wildcard class."
+                )
 
             # --- RULE 3: Numeric Ranges ---
             # Last element: is the band's LOWER bound inclusive? True for CC/
@@ -1835,6 +2083,10 @@ def process_mis_mapping(mis_file_id):
                 ('_mis_tariff', 'tariff_min', 'tariff_max', 'Policy: tariff rate', True),
             ]
             for mis_col, min_col, max_col, label, min_inclusive in range_rules:
+                # A combined CC/GVW cell has no usable number to range-check; it
+                # is already reported as a data error above.
+                if mis_col == '_mis_cc' and mis_row['_mis_cc_bad_data']:
+                    continue
                 if not current_grid.empty:
                     val = mis_row[mis_col]
                     if pd.isna(val):
@@ -1861,9 +2113,7 @@ def process_mis_mapping(mis_file_id):
                                 f"{label} value {val} falls outside the range configured on every "
                                 f"remaining candidate rate row."
                             )
-                    current_grid = current_grid[rule_mask]
-                    if current_grid.empty:
-                        failed_on.append((label, detail))
+                    current_grid = narrow_candidates(current_grid, rule_mask, failed_on, label, detail)
 
             # --- RULE 4: Dates ---
             if not current_grid.empty:
@@ -1882,9 +2132,7 @@ def process_mis_mapping(mis_file_id):
                         f"Inception date {val.date()} falls outside the active date window "
                         f"on every remaining candidate rate row."
                     )
-                current_grid = current_grid[rule_mask]
-                if current_grid.empty:
-                    failed_on.append(('Policy: inception date', detail))
+                current_grid = narrow_candidates(current_grid, rule_mask, failed_on, 'Policy: inception date', detail)
 
             # --- RULE 5a: Vehicle Make/Model — two-step lookup, fuzzy word-overlap ---
             # Input is "Policy: vehicle make" + "Policy: model" concatenated with a
@@ -1922,9 +2170,7 @@ def process_mis_mapping(mis_file_id):
                         lambda g: check_resolved_cluster_match(resolved_make_names, g)
                     )
 
-                current_grid = current_grid[rule_mask]
-                if current_grid.empty:
-                    failed_on.append((MAKE_MODEL_RULE_LABEL, detail))
+                current_grid = narrow_candidates(current_grid, rule_mask, failed_on, MAKE_MODEL_RULE_LABEL, detail)
 
             # --- RULE 5b: RTO — two-step master lookup ---
             # _mis_rto is already normalized (normalize_rto_code): spaces/hyphens
@@ -1960,9 +2206,7 @@ def process_mis_mapping(mis_file_id):
                     rule_mask = current_grid['new_rto_list'].apply(
                         lambda g: check_resolved_cluster_match(resolved_rto_names, g)
                     )
-                current_grid = current_grid[rule_mask]
-                if current_grid.empty:
-                    failed_on.append(('Policy: rto no', detail))
+                current_grid = narrow_candidates(current_grid, rule_mask, failed_on, 'Policy: rto no', detail)
 
             # --- RULE 6: Complex Codes (NCB, CPA, ZD) ---
             if not current_grid.empty:
@@ -1971,13 +2215,11 @@ def process_mis_mapping(mis_file_id):
                 m_ncb_no = (current_grid['is_ncb'] == 'NO') & (val_ncb == 0)
                 m_ncb_na = (current_grid['is_ncb'] == 'NA') | current_grid['is_ncb'].isna()
                 rule_mask = m_ncb_yes | m_ncb_no | m_ncb_na
-                current_grid = current_grid[rule_mask]
-                if current_grid.empty:
-                    failed_on.append((
-                        'Policy: no claim bonus',
-                        f"NCB value {val_ncb} doesn't satisfy the YES/NO/NA requirement on any "
-                        f"remaining candidate rate row."
-                    ))
+                current_grid = narrow_candidates(
+                    current_grid, rule_mask, failed_on, 'Policy: no claim bonus',
+                    f"NCB value {val_ncb} doesn't satisfy the YES/NO/NA requirement on any "
+                    f"remaining candidate rate row."
+                )
 
             if not current_grid.empty:
                 val_cpa = mis_row['_mis_cpa']
@@ -1985,13 +2227,11 @@ def process_mis_mapping(mis_file_id):
                 m_cpa_no = (current_grid['is_cpa'] == 'NO') & (val_cpa == 0)
                 m_cpa_na = (current_grid['is_cpa'] == 'NA') | current_grid['is_cpa'].isna()
                 rule_mask = m_cpa_yes | m_cpa_no | m_cpa_na
-                current_grid = current_grid[rule_mask]
-                if current_grid.empty:
-                    failed_on.append((
-                        'Policy: cpa',
-                        f"CPA value {val_cpa} doesn't satisfy the YES/NO/NA requirement on any "
-                        f"remaining candidate rate row."
-                    ))
+                current_grid = narrow_candidates(
+                    current_grid, rule_mask, failed_on, 'Policy: cpa',
+                    f"CPA value {val_cpa} doesn't satisfy the YES/NO/NA requirement on any "
+                    f"remaining candidate rate row."
+                )
 
             if not current_grid.empty:
                 # FIX: original code computed `val_zd in [...]` once as a Python bool
@@ -2006,16 +2246,36 @@ def process_mis_mapping(mis_file_id):
                 m_zd_no = (current_grid['is_zd'] == 'NO') & zd_is_no_value
                 m_zd_na = (current_grid['is_zd'] == 'NA') | current_grid['is_zd'].isna()
                 rule_mask = m_zd_yes | m_zd_no | m_zd_na
-                current_grid = current_grid[rule_mask]
-                if current_grid.empty:
-                    failed_on.append((
-                        'Policy: nil dep',
-                        f"Nil Dep value '{val_zd}' doesn't satisfy the YES/NO/NA requirement on any "
-                        f"remaining candidate rate row."
-                    ))
+                current_grid = narrow_candidates(
+                    current_grid, rule_mask, failed_on, 'Policy: nil dep',
+                    f"Nil Dep value '{val_zd}' doesn't satisfy the YES/NO/NA requirement on any "
+                    f"remaining candidate rate row."
+                )
 
             # --- FINAL RESOLUTION ---
-            matched_grid = current_grid
+            if data_errors:
+                # A data error makes the row FAILED - BAD DATA whatever the rate
+                # chain found — it never gets a payout from a rate card matched
+                # on source data that can't be right. The chain still ran so the
+                # reason is complete: the data errors first, then every
+                # rate-matching failure (each introduced as "Also failed on:").
+                results.append({
+                    'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
+                    'Mapping Status': 'FAILED - BAD DATA',
+                    'Failure Reason': FAILURE_SEGMENT_SEPARATOR.join(
+                        data_errors + [f"{ALSO_FAILED_ON_PREFIX}{label} — {detail}" for label, detail in failed_on]
+                    ),
+                    'Displaygroupid': None,
+                    'Potype': None, 'Porate': None, 'Poflatamount': None,
+                    'Pitype': None, 'Pirate': None, 'Piflatamount': None,
+                    'Addtnc': None
+                })
+                continue
+
+            # Any failed rule means NO MATCH, however many candidates are left:
+            # narrow_candidates keeps the pre-failure candidates so the later
+            # rules still run, which means current_grid is NOT empty here.
+            matched_grid = current_grid.iloc[0:0] if failed_on else current_grid
 
             # Rows sharing a group_id are the SAME rate card exploded across
             # many physical DB rows (e.g. one per RTO in its cluster) - not
@@ -2127,11 +2387,12 @@ def process_mis_mapping(mis_file_id):
                 })
 
             else:
-                # ZERO MATCHES — record the first rule that eliminated candidates,
+                # ZERO MATCHES — every rule that eliminated all candidates, each
                 # with the specific value/reason for that rule so it's actionable.
+                # The first is what a row that stopped at its first failure always
+                # reported; the rest follow it (see format_failed_on).
                 if failed_on:
-                    first_label, first_detail = failed_on[0]
-                    reason = f"Failed on: {first_label} — {first_detail}"
+                    reason = format_failed_on(failed_on)
                 else:
                     reason = "No rates found for criteria"
                 results.append({
@@ -2303,7 +2564,7 @@ def process_mis_mapping(mis_file_id):
             f"{identical_payout_note}"
             f"{total_multiple} rows skipped — multiple Rate Master groups matched "
             f"(refine Rate Master to get a single match). "
-            f"{total_bad_data} rows flagged FAILED - BAD DATA (malformed source values — see Failure Reason)."
+            f"{total_bad_data} rows flagged FAILED - BAD DATA (invalid source values — see Failure Reason)."
         )
 
         # Coverage-gap breakdown is a reporting nicety, not core output — a
