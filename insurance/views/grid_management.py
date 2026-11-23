@@ -9,6 +9,7 @@ from datetime import datetime
 from ..constants import GRID_INSURER_CHOICES
 from ..models import GridDocument
 from ..tasks import save_grid_document_file_task
+from ..services.activity import STATUS, UPLOAD, record_activity
 from ..services.email import send_email_background
 
 
@@ -37,8 +38,15 @@ def grid_management(request):
             new_status = request.POST.get("status")
             if doc_id and new_status:
                 doc = get_object_or_404(GridDocument, id=doc_id)
+                old_status, old_label = doc.status, doc.get_status_display()
                 doc.status = new_status
                 doc.save()
+                if new_status != old_status:
+                    record_activity(
+                        request.user, STATUS, "grid.status.changed",
+                        f"Changed the {doc.insurer_name} grid from {old_label} to {doc.get_status_display()}",
+                        target=doc, extra={"from": old_status, "to": new_status},
+                    )
             # The row's status form has no action=, so it posts to the page's
             # own URL and request.GET still holds the filters (month,
             # month_basis, status card): go back to that same view of the list.
@@ -70,6 +78,10 @@ def grid_management(request):
                 uploaded_file="",
                 uploaded_by=request.user,
                 status="PENDING"
+            )
+            record_activity(
+                request.user, UPLOAD, "grid.uploaded", f"Uploaded the grid '{file_name}' for {insurer_name}",
+                target=doc,
             )
             # Writing uploaded_file to storage (Cloudflare R2) here used to
             # block this request until the write finished -- when R2 was slow

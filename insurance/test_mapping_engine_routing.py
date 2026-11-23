@@ -89,10 +89,11 @@ class ProductRoutingTests(TestCase):
         self.assertEqual(out.loc[0, "Porate"], 12.5)
 
     # NOTE: the health-match tests below put a matched Motor row ahead of the
-    # Health row on purpose. A file whose ONLY matches are Health rows currently
-    # crashes in process_mis_mapping's Pay-out/Pay-in split step under the pinned
-    # pandas 3.0.0 (an empty object-dtype assignment into a float64 column), which
-    # is unrelated to routing - so the routing behaviour is exercised in a mixed file.
+    # Health row; they were written when a file whose ONLY matches were Health rows
+    # crashed in process_mis_mapping's Pay-out/Pay-in split step under pandas 3.0.0
+    # (an empty object-dtype assignment into a float64 column). That is fixed (the
+    # split rate columns are made numeric first; test_mapping_engine_life covers
+    # Health-only and Life-only files), the mixed file is simply still a fine test.
     def test_health_row_matches_against_health_rate_master(self):
         out = self._run([_motor(), _health()])
         self.assertEqual(out.loc[1, "Mapping Status"], MATCH)
@@ -100,8 +101,10 @@ class ProductRoutingTests(TestCase):
         self.assertEqual(out.loc[1, "Porate"], 5)
 
     def test_mixed_file_routes_every_row_by_its_own_product(self):
+        # A 'life' row goes to the Life grid (test_mapping_engine_life); with no Life grid live it ends NO MATCH there.
         out = self._run([_motor(), _health(), _motor(product="life")])
         self.assertEqual(list(out["Mapping Status"]), [MATCH, MATCH, NO_MATCH])
+        self.assertTrue(out.loc[2, "Failure Reason"].startswith("Failed on: Life grid — No Life grid is live"))
 
     # ---- the other table is never consulted -------------------------------
 
@@ -128,15 +131,16 @@ class ProductRoutingTests(TestCase):
     def test_unrecognised_products_are_rejected_before_any_matching(self):
         # Every one of these carries an insurer that WOULD match the motor
         # wildcard row, so the old fall-through-to-motor behaviour matched them.
-        rows = [_motor(product="life"), _motor(product="non_motor"), _motor(product="")]
+        # ('life' is no longer one of them: it has its own table now.)
+        rows = [_motor(product="non_motor"), _motor(product=""), _motor(product="lyfe")]
         out = self._run(rows)
         for i in range(len(rows)):
             self.assertEqual(out.loc[i, "Mapping Status"], NO_MATCH)
             self.assertTrue(out.loc[i, "Failure Reason"].startswith("Failed on: Product —"))
             self.assertTrue(pd.isna(out.loc[i, "Displaygroupid"]))
-        self.assertIn("'life'", out.loc[0, "Failure Reason"])
-        self.assertIn("'non_motor'", out.loc[1, "Failure Reason"])
-        self.assertIn("'(blank)'", out.loc[2, "Failure Reason"])
+        self.assertIn("'non_motor'", out.loc[0, "Failure Reason"])
+        self.assertIn("'(blank)'", out.loc[1, "Failure Reason"])
+        self.assertIn("'lyfe'", out.loc[2, "Failure Reason"])
 
     def test_missing_product_column_is_rejected(self):
         out = self._run([{"Policy: insurance company": MOTOR_INSURER}])
@@ -154,6 +158,6 @@ class ProductRoutingTests(TestCase):
         self.assertEqual(out.loc[1, "Mapping Status"], MATCH)
 
     def test_combined_cc_gvw_does_not_mask_an_unrecognised_product(self):
-        out = self._run([_motor(product="life", **{"Policy: cc cubic capacity": "6702/47500"})])
+        out = self._run([_motor(product="non_motor", **{"Policy: cc cubic capacity": "6702/47500"})])
         self.assertEqual(out.loc[0, "Mapping Status"], NO_MATCH)
         self.assertTrue(out.loc[0, "Failure Reason"].startswith("Failed on: Product —"))

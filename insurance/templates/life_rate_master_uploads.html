@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Life Rate Master Uploads - Insurance Portal{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{% static 'insurance/css/pages/health_rate_master.css' %}">
+<link rel="stylesheet" href="{% static 'insurance/css/pages/life_rate_master.css' %}">
+<link rel="stylesheet" href="{% static 'insurance/css/pages/life_review.css' %}">
+
+{% include "partials/life_master_header.html" %}
+
+{% if upload_problems %}
+<div class="premium-card life-problems-card">
+    <div class="card-header-premium">
+        <h6 class="mb-0 fw-bold" style="color: #991b1b;"><i class="bi bi-x-octagon-fill me-2"></i> '{{ upload_problems.file }}' was not uploaded</h6>
+    </div>
+    <div class="p-4">
+        <p class="life-help mb-3">
+            The whole file is checked before anything is saved, so the live grid is unchanged. Fix {{ upload_problems.total }} problem{{ upload_problems.total|pluralize }}
+            and upload the file again:
+        </p>
+        <ol class="life-problem-list">
+            {% for problem in upload_problems.problems %}<li>{{ problem }}</li>{% endfor %}
+        </ol>
+        {% if upload_problems.more %}<p class="life-help mt-3 mb-0">... and {{ upload_problems.more }} more. Fix these first; the rest will show on the next try.</p>{% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if pending_uploads %}
+<div class="life-banner">
+    <span><i class="bi bi-hourglass-split"></i>
+        {% for item in pending_uploads %}<strong>{{ item.label }}</strong>{% if not forloop.last %}, {% endif %}{% endfor %}
+        {% if pending_uploads|length == 1 %}is{% else %}are{% endif %} stored but not live: the Rate Checker and the MIS engine still use
+        {% if live_upload %}<strong>{{ live_upload.label }}</strong>{% else %}no grid{% endif %}.
+    </span>
+    {% for item in pending_uploads %}
+        <a href="{% url 'life_rate_master_review' item.id %}" class="btn-soft" style="padding: 4px 12px; font-size: 12px; height: auto;">Review {{ item.label }}</a>
+    {% endfor %}
+</div>
+{% endif %}
+
+<div class="premium-card">
+    <div class="card-header-premium">
+        <h6 class="mb-0 fw-bold" style="color: #0f172a;">
+            <i class="bi bi-table text-primary me-2"></i> Upload the standard file
+            <span class="life-recommended">Recommended</span>
+        </h6>
+    </div>
+    <div class="p-4">
+        <form method="POST" action="{% url 'life_rate_master_upload_standard' %}" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="row g-3 align-items-end">
+                <div class="col-12 col-lg-6">
+                    <label class="text-overline" for="lifeStandardFile">Standard file (.xlsx or .csv, up to {{ max_upload_mb }} MB)</label>
+                    <input type="file" id="lifeStandardFile" name="standard_file" accept=".xlsx,.csv" required class="form-control-premium" style="height: auto; padding: 8px 12px;">
+                </div>
+                <div class="col-12 col-md-6 col-lg-3">
+                    <label class="text-overline" for="lifeStandardLabel">Name (optional)</label>
+                    <input type="text" id="lifeStandardLabel" name="label" maxlength="100" placeholder="e.g. Nov'26" class="form-control-premium">
+                </div>
+                <div class="col-12 col-md-6 col-lg-3">
+                    <button type="submit" class="btn-gradient w-100 justify-content-center"><i class="bi bi-upload"></i> Upload and review</button>
+                </div>
+            </div>
+            <p class="life-help mt-3 mb-0">
+                One flat table for every insurer, whatever their own grid looks like: one row per payout row, with the column names
+                in the first row (<code>insurer</code>, <code>product</code>, <code>payout_yr1</code> ... <code>payout_yr6_plus</code>,
+                <code>mg_yr1</code> ..., <code>remarks</code>). Payouts are percent numbers (35.5 means 35.5%).
+                Optional <code>from_date</code> and <code>to_date</code> limit a row to a window of dates (both included).
+                A sheet named Notes can hold each insurer's terms and conditions.
+                The whole file is checked first: one bad row stops the upload and every problem is listed with its row number.
+                An accepted file is stored but <strong>not live</strong>: you see what it changes against the live grid, then make it live.
+            </p>
+        </form>
+        <div class="d-flex flex-wrap gap-2 mt-3">
+            <a href="{% url 'life_rate_master_template' %}" class="btn-soft"><i class="bi bi-download"></i> Download the template</a>
+            {% if live_upload %}
+            <a href="{% url 'life_rate_master_export' %}" class="btn-soft"><i class="bi bi-file-earmark-excel"></i> Export the live grid in this format</a>
+            {% endif %}
+            <a href="{% url 'life_rate_master_dashboard' %}" class="btn-soft"><i class="bi bi-bar-chart-line"></i> The one-sheet file for a dashboard</a>
+        </div>
+    </div>
+</div>
+
+<div class="premium-card">
+    <div class="card-header-premium">
+        <h6 class="mb-0 fw-bold" style="color: #0f172a;"><i class="bi bi-cloud-arrow-up text-primary me-2"></i> Upload the Life workbook (the old layout)</h6>
+    </div>
+    <div class="p-4">
+        <form method="POST" action="{% url 'life_rate_master_upload' %}" enctype="multipart/form-data">
+            {% csrf_token %}
+            <div class="row g-3 align-items-end">
+                <div class="col-12 col-lg-6">
+                    <label class="text-overline" for="lifeWorkbook">Workbook (.xlsx, up to {{ max_upload_mb }} MB)</label>
+                    <input type="file" id="lifeWorkbook" name="workbook" accept=".xlsx" required class="form-control-premium" style="height: auto; padding: 8px 12px;">
+                </div>
+                <div class="col-12 col-md-6 col-lg-3">
+                    <label class="text-overline" for="lifeLabel">Name (optional)</label>
+                    <input type="text" id="lifeLabel" name="label" maxlength="100" placeholder="e.g. Nov'26" class="form-control-premium">
+                </div>
+                <div class="col-12 col-md-6 col-lg-3">
+                    <button type="submit" class="btn-soft w-100 justify-content-center"><i class="bi bi-upload"></i> Upload workbook</button>
+                </div>
+            </div>
+            <div class="form-check mt-3">
+                <input class="form-check-input" type="checkbox" name="review" value="1" id="lifeReviewOld">
+                <label class="form-check-label life-help" for="lifeReviewOld">Do not make it live yet: show me what changed first (recommended)</label>
+            </div>
+            <p class="life-help mt-2 mb-0">
+                The workbook has to keep its usual layout: one sheet per insurer with the "Final BG" payout block.
+                Only the partner payouts and the Final MG beside them are read; the margin columns are never stored, and the file itself is not kept.
+                Unless the box above is ticked, the new upload goes live at once, and edits made on screen to the previous one stay with it.
+                If the layout has changed, nothing is uploaded and the message says which sheet to look at; the standard file does not depend on any layout.
+            </p>
+        </form>
+    </div>
+</div>
+
+<div class="premium-card">
+    <div class="card-header-premium">
+        <h6 class="mb-0 fw-bold" style="color: #0f172a;"><i class="bi bi-clock-history text-primary me-2"></i> Uploads</h6>
+    </div>
+    {% if uploads %}
+    <div class="table-responsive-custom">
+        <table class="table-modern life-plain">
+            <thead>
+                <tr>
+                    <th>Status</th>
+                    <th>Name</th>
+                    <th>File</th>
+                    <th>Uploaded</th>
+                    <th>By</th>
+                    <th>Rows</th>
+                    <th>Insurers</th>
+                    <th class="cell-wrap">Warnings</th>
+                    <th>Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in uploads %}
+                <tr>
+                    <td>
+                        {% if item.is_active %}
+                            <span class="status-pill pill-active"><i class="bi bi-check-circle-fill"></i> LIVE</span>
+                        {% elif item.is_pending %}
+                            <span class="status-pill pill-pending"><i class="bi bi-hourglass-split"></i> WAITING FOR REVIEW</span>
+                        {% else %}
+                            <span class="status-pill pill-inactive"><i class="bi bi-pause-circle-fill"></i> OLD</span>
+                        {% endif %}
+                    </td>
+                    <td style="font-weight: 700; color: #0f172a;">{{ item.label }}</td>
+                    <td>{{ item.file_name|default:"-" }}</td>
+                    <td>{{ item.uploaded_at|date:"d M Y, H:i" }}</td>
+                    <td>{% if item.uploaded_by %}{{ item.uploaded_by.get_full_name|default:item.uploaded_by.username }}{% else %}-{% endif %}</td>
+                    <td>{{ item.row_count }}</td>
+                    <td>{{ item.insurer_count }}</td>
+                    <td class="cell-wrap">
+                        {% if item.warnings %}
+                        <details>
+                            <summary class="text-primary fw-medium" style="cursor:pointer; font-size:12px;">{{ item.warnings.splitlines|length }} to look at</summary>
+                            <div class="mt-2 text-wrap">{{ item.warnings|linebreaksbr }}</div>
+                        </details>
+                        {% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    <td>
+                        <div class="d-flex flex-wrap gap-2">
+                            {% if item.is_pending %}
+                            <a href="{% url 'life_rate_master_review' item.id %}" class="btn-gradient" style="padding: 4px 12px; font-size: 11px; height: auto;">Review</a>
+                            {% endif %}
+                            <a href="{% url 'life_rate_master' %}{% if not item.is_active %}?upload={{ item.id }}{% endif %}" class="btn-soft" style="padding: 4px 12px; font-size: 11px; height: auto;">View rows</a>
+                            {% if item.is_pending %}
+                            <form method="POST" action="{% url 'life_rate_master_discard' item.id %}" onsubmit="return confirm('Discard {{ item.label|escapejs }}? Its rows are deleted; the live grid is not touched.');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn-soft" style="padding: 4px 12px; font-size: 11px; height: auto;">Discard</button>
+                            </form>
+                            {% elif not item.is_active %}
+                            <form method="POST" action="{% url 'life_rate_master_activate' item.id %}" onsubmit="return confirm('Make {{ item.label|escapejs }} the live Life grid?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn-soft" style="padding: 4px 12px; font-size: 11px; height: auto;">Make live</button>
+                            </form>
+                            {% endif %}
+                            {% if item.is_active %}
+                            <button type="button" class="btn-soft life-btn-off" disabled title="This is the live grid. Make another upload live first, then delete this one." style="padding: 4px 12px; font-size: 11px; height: auto;">Delete</button>
+                            {% elif not item.is_pending %}
+                            <form method="POST" action="{% url 'life_rate_master_delete_upload' item.id %}" onsubmit="return confirm('Delete {{ item.label|escapejs }} ({{ item.file_name|default:'no file name'|escapejs }}, uploaded {{ item.uploaded_at|date:'d M Y, H:i'|escapejs }}, {{ item.row_count }} row{{ item.row_count|pluralize }})? Its rows and notes are deleted for good. The live grid is not touched.');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn-soft life-btn-danger" style="padding: 4px 12px; font-size: 11px; height: auto;">Delete</button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="life-help px-4 py-3 mb-0">
+        Delete removes an upload with all its rows and notes, for good. The live upload cannot be deleted:
+        make another upload live first. An upload waiting for review is thrown away with Discard.
+    </p>
+    {% else %}
+    <div class="text-center py-5">
+        <i class="bi bi-file-earmark-spreadsheet" style="font-size: 48px; color: #cbd5e1;"></i>
+        <h5 class="mt-3 fw-bold text-slate-700">Nothing uploaded yet</h5>
+        <p class="text-muted">Download the template above, fill it with the Life grid and upload it to start.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

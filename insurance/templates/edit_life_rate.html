@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}{% if adding %}Add Life Rate{% else %}Edit Life Rate{% endif %}{% endblock %}
+
+{% block content %}
+<div class="edit-wrapper">
+    <div class="edit-card">
+
+        <div class="edit-header">
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <div class="header-icon">
+                    <i class="bi {% if adding %}bi-plus-circle-fill{% else %}bi-shield-fill-plus{% endif %}" style="font-size: 22px;"></i>
+                </div>
+                <div>
+                    {% if adding %}
+                    <h2 style="margin: 0; color: #0f172a; font-size: 22px;">Add a Life payout row</h2>
+                    <p style="margin: 4px 0 0; color: #64748b; font-size: 13.5px;">To the {{ upload.label }} upload{% if upload.is_active %} (live){% endif %}</p>
+                    {% else %}
+                    <h2 style="margin: 0; color: #0f172a; font-size: 22px;">Edit Life Rate #{{ record.id }}</h2>
+                    <p style="margin: 4px 0 0; color: #64748b; font-size: 13.5px;">{{ record.insurer }} &middot; {{ record.product|default:"-" }}</p>
+                    {% endif %}
+                </div>
+            </div>
+            <a href="{{ next_url }}" class="btn-back">&larr; Back</a>
+        </div>
+
+        {% if adding %}
+        <p style="color: #64748b; font-size: 13px; margin-bottom: 24px;">
+            Pick an insurer that is already in this upload, or type a new one. The row goes after the last row of that insurer, is marked as added on screen,
+            and shows in the Rate Checker at once if this is the live upload. Like every change made on screen, it lasts until the next workbook is uploaded.
+        </p>
+        {% else %}
+        <div class="edit-meta">
+            <div><span>Insurer</span><strong>{{ record.insurer }}</strong></div>
+            <div><span>Source (cell or file row)</span><strong>{{ record.source_ref|default:"-" }}</strong></div>
+            <div><span>Section</span><strong>{{ record.section|default:"-" }}</strong></div>
+            <div><span>Upload</span><strong>{{ record.upload.label }}{% if record.upload.is_active %} (live){% endif %}</strong></div>
+            {% if record.is_edited %}
+            <div><span>{% if record.added_on_screen %}Added{% else %}Last edited{% endif %}</span><strong>{{ record.edited_at|date:"d M Y, H:i" }}{% if record.edited_by %} by {{ record.edited_by.username }}{% endif %}</strong></div>
+            {% endif %}
+        </div>
+        <p style="color: #64748b; font-size: 13px; margin-bottom: 24px;">
+            A change made here applies to this upload only; uploading the next workbook replaces it.
+        </p>
+        {% endif %}
+
+        <form method="POST">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next_url }}">
+            {% if adding %}<input type="hidden" name="upload" value="{{ upload.id }}">{% endif %}
+            {% if form.non_field_errors %}
+                <div class="error-text" style="margin-bottom: 16px;">{{ form.non_field_errors|striptags }}</div>
+            {% endif %}
+            {% for title, hint, fields in field_groups %}
+            {% if title %}<h3 class="form-section">{{ title }}{% if hint %} <small>{{ hint }}</small>{% endif %}</h3>{% endif %}
+            <div class="form-grid">
+                {% for field in fields %}
+                <div class="form-group">
+                    <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+                    {{ field }}
+                    {% if field.errors %}
+                        <div class="error-text">{{ field.errors|striptags }}</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endfor %}
+            {% if adding %}
+            <datalist id="lifeInsurers">{% for name in insurers %}<option value="{{ name }}">{% endfor %}</datalist>
+            {% endif %}
+
+            <div class="form-actions">
+                <button type="submit" class="btn-submit">
+                    <i class="bi bi-check-circle-fill"></i>
+                    {% if adding %}Add Row{% else %}Save Changes{% endif %}
+                </button>
+                <a href="{{ next_url }}" class="btn-cancel">Cancel</a>
+            </div>
+        </form>
+
+        {% if not adding %}
+        <div class="danger-zone">
+            <div>
+                <strong>Delete this row</strong>
+                <span>Removes it from the {{ record.upload.label }} upload{% if record.upload.is_active %}, so the Rate Checker stops showing it{% endif %}. The audit log keeps every value it had.</span>
+            </div>
+            <form method="POST" action="{% url 'life_rate_master_delete' record.id %}"
+                  onsubmit="return confirm('Delete row #{{ record.id }} ({{ record.insurer|escapejs }} | {{ record.product|default:'no product'|escapejs }})? This cannot be undone.');">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ next_url }}">
+                <button type="submit" class="btn-delete"><i class="bi bi-trash3"></i> Delete row</button>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<link rel="stylesheet" href="{% static 'insurance/css/pages/edit_health_rate.css' %}">
+<link rel="stylesheet" href="{% static 'insurance/css/pages/edit_life.css' %}">
+{% endblock %}

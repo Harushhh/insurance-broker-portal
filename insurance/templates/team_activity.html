@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Team Activity{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.css" />
+<link rel="stylesheet" href="{% static 'insurance/css/pages/team_activity.css' %}">
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/momentjs/latest/moment.min.js"></script>
+<script type="text/javascript" src="https://cdn.jsdelivr.net/npm/daterangepicker/daterangepicker.min.js"></script>
+
+<div class="ta-card ta-head">
+    <h2>👥 Team Activity</h2>
+    <p class="ta-sub">
+        {% if is_admin_view %}
+            Runs, uploads, tests and status changes across every team. Pick a team to narrow it.
+        {% elif has_team %}
+            Runs, uploads, tests and status changes by everyone who reports to you, directly or through others ({{ people|length }} in all).
+        {% else %}
+            Runs, uploads, tests and status changes by the people who report to you.
+        {% endif %}
+        Events are kept for {{ retention_days }} days.
+    </p>
+
+    {% if has_team %}
+    <form method="GET" action="{% url 'team_activity' %}" id="taFilterForm" class="ta-filters">
+        {% if is_admin_view %}
+        <div class="ta-field">
+            <label for="taTeam">Team</label>
+            <select id="taTeam" name="team" data-autosubmit>
+                <option value="">All teams</option>
+                {% for m in managers %}
+                <option value="{{ m.id }}" {% if selected.team and selected.team.pk == m.id %}selected{% endif %}>Team of {{ m.get_full_name|default:m.username }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
+        <div class="ta-field">
+            <label for="taPerson">Person</label>
+            <select id="taPerson" name="person" data-autosubmit>
+                <option value="">Everyone</option>
+                {% for p in people %}
+                <option value="{{ p.id }}" {% if selected.person == p.id %}selected{% endif %}>{{ p.get_full_name|default:p.username }} ({{ p.username }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="ta-field">
+            <label for="taCategory">Category</label>
+            <select id="taCategory" name="category" data-autosubmit>
+                <option value="">All categories</option>
+                {% for code, label in categories %}
+                <option value="{{ code }}" {% if selected.category == code %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="ta-field">
+            <label for="taDateRange">Dates</label>
+            <input type="text" id="taDateRange" name="date_range" placeholder="Any date" value="{{ selected.date_range }}" autocomplete="off">
+        </div>
+        <div class="ta-field">
+            <label for="taSearch">Search</label>
+            <input type="search" id="taSearch" name="q" placeholder="What happened…" value="{{ selected.q }}" maxlength="100">
+        </div>
+        <div class="ta-actions">
+            <button type="submit" class="ta-btn ta-btn-primary">Apply</button>
+            <a href="{% url 'team_activity' %}" class="ta-btn ta-btn-light">Clear</a>
+            <a href="{% url 'export_team_activity_xlsx' %}?{{ export_query }}" class="ta-btn ta-btn-light" title="Excel file: the events, plus pivot sheets by person and category and by person and day">⬇️ Export XLSX</a>
+        </div>
+    </form>
+    {% endif %}
+</div>
+
+{% if not has_team %}
+<div class="ta-card ta-empty">
+    <strong>Nobody reports to you yet.</strong>
+    <span>Ask an admin to set “Reports To” for your teammates in Access Control, and their activity will show up here.</span>
+</div>
+{% else %}
+
+{% if strip %}
+<div class="ta-card ta-strip">
+    <h3>Team at a glance <small>for the dates above; click a name or a number to filter</small></h3>
+    <div class="ta-strip-scroll">
+        <table class="ta-table ta-people">
+            <thead>
+                <tr>
+                    <th>Person</th>
+                    {% for code, label in strip_columns %}<th class="ta-num">{{ label }}</th>{% endfor %}
+                    <th class="ta-num">Total</th>
+                    <th>Last active</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in strip %}
+                <tr class="{% if row.active %}ta-row-active{% endif %}">
+                    <td>
+                        <a href="{{ row.url }}" class="ta-person-link"><strong>{{ row.name }}</strong></a>
+                        <span class="ta-muted">@{{ row.username }}{% if row.designation %} · {{ row.designation }}{% endif %}</span>
+                    </td>
+                    {% for cell in row.cells %}
+                    <td class="ta-num">{% if cell.n %}<a href="{{ cell.url }}">{{ cell.n }}</a>{% else %}<span class="ta-zero">0</span>{% endif %}</td>
+                    {% endfor %}
+                    <td class="ta-num"><strong>{{ row.total }}</strong></td>
+                    <td class="ta-last">{% if row.last %}{{ row.last|date:"d M, h:i A" }}{% else %}no activity{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<div class="ta-card ta-feed">
+    <div class="ta-feed-head">
+        <h3>Activity <small>{{ total }} event{{ total|pluralize }}</small></h3>
+        {% if page_obj.paginator.num_pages > 1 or page_size != 50 %}
+        <form method="GET" action="{% url 'team_activity' %}" class="ta-size-form">
+            {% for key, value in request.GET.items %}{% if key != "page" and key != "page_size" %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endif %}{% endfor %}
+            <label for="taPageSize">Rows per page</label>
+            <select id="taPageSize" name="page_size" data-autosubmit>
+                {% for n in page_size_options %}<option value="{{ n }}" {% if n == page_size %}selected{% endif %}>{{ n }}</option>{% endfor %}
+            </select>
+        </form>
+        {% endif %}
+    </div>
+
+    <div class="ta-feed-scroll">
+        <table class="ta-table">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Person</th>
+                    <th>Category</th>
+                    <th>What happened</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for event in page_obj %}
+                <tr>
+                    <td class="ta-time">{{ event.occurred_at|date:"d M Y" }}<br><span class="ta-muted">{{ event.occurred_at|date:"h:i A" }}</span></td>
+                    <td>
+                        <strong>{{ event.actor_name|default:event.actor_username }}</strong>
+                        <span class="ta-muted">@{{ event.actor_username }}{% if event.actor %}{% if event.actor.profile.designation %} · {{ event.actor.profile.designation }}{% endif %}{% else %} · account removed{% endif %}</span>
+                    </td>
+                    <td><span class="ta-badge ta-cat-{{ event.category|lower }}">{{ event.get_category_display }}</span></td>
+                    <td class="ta-what">{{ event.summary }}<br><span class="ta-code">{{ event.action }}</span></td>
+                </tr>
+                {% empty %}
+                <tr><td colspan="4" class="ta-none">No activity matches these filters.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    {% if page_obj.paginator.num_pages > 1 %}
+    <div class="ta-pager">
+        {% if page_obj.has_previous %}<a href="?{{ page_query }}&page={{ page_obj.previous_page_number }}">← Newer</a>{% else %}<span></span>{% endif %}
+        <span>Page {{ page_obj.number }} of {{ page_obj.paginator.num_pages }}</span>
+        {% if page_obj.has_next %}<a href="?{{ page_query }}&page={{ page_obj.next_page_number }}">Older →</a>{% else %}<span></span>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<script src="{% static 'insurance/js/pages/team_activity.js' %}"></script>
+{% endblock %}

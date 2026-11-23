@@ -4,6 +4,7 @@ from django.db.models import Count, Sum
 from ..models import ExtractionField, PolicyDocumentUpload, PolicyMISRecord
 from ..tasks import process_policy_document_task
 from ..forms import PolicyDocumentUploadForm
+from ..services.activity import UPLOAD, record_activity
 import logging
 
 
@@ -35,6 +36,11 @@ def upload_extract_pdf(request):
                     doc_obj.save()
 
                     process_policy_document_task.delay(doc_obj.id)
+                    # No file name: a policy document's name can carry a policy number or a person's name.
+                    record_activity(
+                        request.user, UPLOAD, "ocr.document.uploaded",
+                        "Uploaded a policy document for AI extraction", target=doc_obj,
+                    )
                     return redirect("upload_extract_pdf")
 
                 except Exception as e:

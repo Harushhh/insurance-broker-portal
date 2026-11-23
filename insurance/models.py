@@ -1,8 +1,10 @@
 import random
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.core.validators import RegexValidator
 from django.db import models
+from django.utils import timezone
 
 PAN_VALIDATOR = RegexValidator(
     regex=r'^[A-Z]{5}[0-9]{4}[A-Z]$',
@@ -305,6 +307,171 @@ class HealthRateMaster(models.Model):
         return f"{self.insurance_company} | {self.product_name or 'No Product'}"
 
 
+# ---------- LIFE PAYOUT GRID ----------
+class LifeGridUpload(models.Model):
+    """One upload of the Life working workbook (see services/life_workbook.py).
+
+    Only the partner payout (the workbook's "Final BG" block) is stored -- never the
+    insurer rate -- and the workbook file itself is not kept. The active upload is
+    the one the Life Rate Checker searches; earlier uploads stay so an admin can
+    switch back. Edits made on screen live on that upload's own rows, so the next
+    upload starts clean.
+
+    An upload can also arrive as the standard file (services/life_standard.py). That one is
+    stored but not live: `is_pending` marks it as waiting for review, and it only becomes the
+    live grid when someone presses Make live on its review page (services/life_review.py).
+    """
+    label = models.CharField(max_length=100)
+    file_name = models.CharField(max_length=255, blank=True)
+    uploaded_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=False, db_index=True)
+    is_pending = models.BooleanField(default=False)          # stored, not yet reviewed and made live
+    row_count = models.PositiveIntegerField(default=0)
+    insurer_count = models.PositiveSmallIntegerField(default=0)
+    warnings = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-uploaded_at", "-id"]
+
+    def __str__(self):
+        return f"{self.label} ({self.row_count} rows)"
+
+
+class LifeRate(models.Model):
+    """One payout row of a Life upload: who pays it, for what plan, and the partner payout per year (percent)."""
+    upload = models.ForeignKey(LifeGridUpload, on_delete=models.CASCADE, related_name="rates")
+    insurer = models.CharField(max_length=100)
+    sheet = models.CharField(max_length=60, blank=True)
+    section = models.CharField(max_length=100, blank=True)
+    category = models.CharField(max_length=120, blank=True)
+    product = models.CharField(max_length=255, blank=True)
+    variant = models.CharField(max_length=255, blank=True)
+    ppt = models.CharField(max_length=80, blank=True)
+    pt = models.CharField(max_length=80, blank=True)
+    condition = models.CharField(max_length=255, blank=True)
+
+    # The window the row applies in, as on Rate Master and Health Rate Master: both ends included, blank = no limit on
+    # that side (a row with neither date applies to any date). The MIS engine reads it against the policy's inception
+    # date and the Rate Checker against the date typed on the page.
+    from_date = models.DateField(null=True, blank=True)
+    to_date = models.DateField(null=True, blank=True)
+
+    payout_yr1 = models.FloatField(null=True, blank=True)
+    payout_deferred = models.FloatField(null=True, blank=True)       # the part paid at the 2nd year on persistency
+    payout_yr2 = models.FloatField(null=True, blank=True)
+    payout_yr3 = models.FloatField(null=True, blank=True)
+    payout_yr4 = models.FloatField(null=True, blank=True)
+    payout_yr5 = models.FloatField(null=True, blank=True)
+    payout_yr6_plus = models.FloatField(null=True, blank=True)
+
+    # The Final MG (what the insurer pays the broker) of the same years, read from the block beside the BG payouts.
+    # Shown on the Life Rate Master only, never on the Rate Checker. Blank in uploads made before it was kept.
+    mg_yr1 = models.FloatField(null=True, blank=True)
+    mg_deferred = models.FloatField(null=True, blank=True)
+    mg_yr2 = models.FloatField(null=True, blank=True)
+    mg_yr3 = models.FloatField(null=True, blank=True)
+    mg_yr4 = models.FloatField(null=True, blank=True)
+    mg_yr5 = models.FloatField(null=True, blank=True)
+    mg_yr6_plus = models.FloatField(null=True, blank=True)
+
+    remarks = models.TextField(blank=True)
+    source_ref = models.CharField(max_length=60, blank=True)         # sheet!cell the payout was read from
+    position = models.PositiveIntegerField(default=0)
+
+    is_edited = models.BooleanField(default=False)
+    edited_at = models.DateTimeField(null=True, blank=True)
+    edited_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+
+    PAYOUT_FIELDS = [
+        "payout_yr1", "payout_deferred", "payout_yr2", "payout_yr3",
+        "payout_yr4", "payout_yr5", "payout_yr6_plus",
+    ]
+    MG_FIELDS = [
+        "mg_yr1", "mg_deferred", "mg_yr2", "mg_yr3",
+        "mg_yr4", "mg_yr5", "mg_yr6_plus",
+    ]
+    # The source_ref of a row typed in on the Life Rate Master instead of read from a workbook.
+    MANUAL_SOURCE_REF = "Added on screen"
+
+    class Meta:
+        ordering = ["position", "id"]
+        indexes = [
+            models.Index(fields=["upload", "insurer"], name="liferate_upload_insurer_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.insurer} | {self.product or 'No Product'}"
+
+    @property
+    def added_on_screen(self):
+        return self.source_ref == self.MANUAL_SOURCE_REF
+
+
+class LifeInsurerNote(models.Model):
+    """The terms and conditions text under an insurer's tables in the workbook (GST basis, persistency, clawback ...)."""
+    upload = models.ForeignKey(LifeGridUpload, on_delete=models.CASCADE, related_name="notes")
+    insurer = models.CharField(max_length=100)
+    text = models.TextField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["upload", "insurer"], name="lifenote_upload_insurer_uniq"),
+        ]
+
+    def __str__(self):
+        return f"{self.insurer} notes"
+
+
+# ---------- LIFE ROWS IN THE MIS PAYOUT ENGINE ----------
+# The engine matches a MIS row whose Product is "life" to the live Life grid (services/life_mis.py). The MIS and the
+# workbook spell insurers and plans differently, so two small tables, kept by staff on the Life Mapping screens, say
+# which is which. Neither is ever guessed: a spelling nobody has mapped ends the row as NO MATCH with the reason.
+class LifeInsurerAlias(models.Model):
+    """One way the MIS writes a Life insurer's name, and the insurer name the Life grid uses for it.
+
+    ``name_key`` is the MIS spelling with case, punctuation and spacing folded away (so one row covers every way of
+    typing it, and it is unique); ``mis_name`` keeps the spelling as first seen, for display."""
+    mis_name = models.CharField(max_length=255)
+    name_key = models.CharField(max_length=255, unique=True)
+    insurer = models.CharField(max_length=100)          # an insurer of the Life grid (LifeRate.insurer)
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["insurer", "mis_name"]
+
+    def __str__(self):
+        return f"{self.mis_name} -> {self.insurer}"
+
+
+class LifePlanMapping(models.Model):
+    """The grid products one MIS plan name stands for, within one Life insurer.
+
+    ``grid_products`` is one entry per line: a product exactly as the Life grid writes it, or a start followed by
+    ``*`` for every product that starts with that text (Tata AIA writes the pay term into the product name, so one
+    plan is a whole family: ``SRP*``). Matching ignores case, punctuation and spacing. ``plan_key`` is the MIS plan
+    name folded the same way; ``plan_name`` keeps it as first seen, for display."""
+    insurer = models.CharField(max_length=100)          # an insurer of the Life grid (LifeRate.insurer)
+    plan_name = models.CharField(max_length=255)
+    plan_key = models.CharField(max_length=255)
+    grid_products = models.TextField()
+    note = models.CharField(max_length=255, blank=True)
+    created_by = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL, related_name="+")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["insurer", "plan_name"]
+        constraints = [
+            models.UniqueConstraint(fields=["insurer", "plan_key"], name="life_plan_mapping_insurer_plan_uniq"),
+        ]
+
+    def __str__(self):
+        return f"{self.insurer}: {self.plan_name}"
+
+
 class RTOMaster(models.Model):
     rto_name = models.CharField(max_length=100, unique=True)
     rto_cluster = models.TextField(blank=True, null=True)
@@ -479,6 +646,32 @@ class UserProfile(models.Model):
             self.user_id_code = generate_user_id_code()
         super().save(*args, **kwargs)
 
+    def clean(self):
+        """Keep Reports To a tree: nobody reports to themselves, and walking up
+        through the managers never comes back to this person. The Team Activity
+        page (services/team_scope.py) decides who may read whose activity from
+        this chain, so a loop would let two people read each other's work."""
+        super().clean()
+        if not self.reports_to_id or self.pk is None:
+            # No manager chosen, or a profile that is not saved yet (nobody can
+            # report to it, so no loop is possible).
+            return
+        if self.reports_to_id == self.pk:
+            raise ValidationError({"reports_to": "A person cannot report to themselves."})
+        manager_of = dict(
+            UserProfile.objects.filter(reports_to__isnull=False).values_list("id", "reports_to_id")
+        )
+        seen = set()
+        current = self.reports_to_id
+        while current is not None and current not in seen:
+            if current == self.pk:
+                raise ValidationError({
+                    "reports_to": "That would make a loop: the person you picked already reports to this "
+                                  "person, directly or through others."
+                })
+            seen.add(current)
+            current = manager_of.get(current)
+
     def __str__(self):
         return self.user.username
 
@@ -499,6 +692,60 @@ class AuditLog(models.Model):
 
     def __str__(self):
         return f"{self.action} - {self.timestamp}"
+
+
+class ActivityEvent(models.Model):
+    """One thing a person did in the portal (a run, an upload, a test, a status
+    change), as listed on the Team Activity page (/team-activity/).
+
+    Append-only. Written only through services/activity.py::record_activity and
+    read only through services/team_scope.py::visible_events, which is what keeps
+    a manager to their own team. Deliberately not AuditLog: that table is purged
+    after 7 days, has no index, and its details carry vehicle numbers and
+    policy-holder names, which an audience of managers must not get. So `summary`
+    and `extra` are written without personal data (counts, file names, statuses).
+    """
+
+    CATEGORY_RUN = "RUN"
+    CATEGORY_UPLOAD = "UPLOAD"
+    CATEGORY_TEST = "TEST"
+    CATEGORY_STATUS = "STATUS"
+    CATEGORY_EDIT = "EDIT"
+    CATEGORY_CHOICES = [
+        (CATEGORY_RUN, "Run"),
+        (CATEGORY_UPLOAD, "Upload"),
+        (CATEGORY_TEST, "Test"),
+        (CATEGORY_STATUS, "Status"),
+        (CATEGORY_EDIT, "Edit"),
+    ]
+
+    occurred_at = models.DateTimeField(default=timezone.now)
+    # Who did it. SET_NULL so deleting an account keeps the history; the two
+    # snapshots below keep it readable. Scoping always goes through `actor`.
+    actor = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name="activity_events"
+    )
+    actor_username = models.CharField(max_length=150)
+    actor_name = models.CharField(max_length=150, blank=True)
+    category = models.CharField(max_length=10, choices=CATEGORY_CHOICES)
+    # A stable machine code such as "mis.run.finished"; `summary` is the sentence people read.
+    action = models.CharField(max_length=60)
+    summary = models.CharField(max_length=300)
+    # A pointer to what it was about, not a ForeignKey: targets get deleted or archived.
+    target_type = models.CharField(max_length=40, blank=True)
+    target_id = models.CharField(max_length=40, blank=True)
+    extra = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-occurred_at", "-id"]
+        indexes = [
+            models.Index(fields=["actor", "-occurred_at"], name="activity_actor_time_idx"),
+            models.Index(fields=["-occurred_at"], name="activity_time_idx"),
+            models.Index(fields=["category", "-occurred_at"], name="activity_cat_time_idx"),
+        ]
+
+    def __str__(self):
+        return f"{self.actor_username}: {self.action} @ {self.occurred_at:%Y-%m-%d %H:%M}"
 
 
 class GridDocument(models.Model):

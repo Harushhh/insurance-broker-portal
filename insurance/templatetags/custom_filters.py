@@ -57,3 +57,14 @@ def split(value, delimiter=','):
     if value is None:
         return []
     return [x.strip() for x in str(value).split(delimiter) if x.strip()]
+
+@register.filter(name="life_rate")
+def life_rate(val):
+    """A Life payout percent for display: up to 4 decimals without trailing zeros ("37.5", "0.075"); "-" when blank."""
+    if val is None or val == "":
+        return "-"
+    try:
+        text = f"{float(val):.4f}".rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return str(val)
+    return text or "0"

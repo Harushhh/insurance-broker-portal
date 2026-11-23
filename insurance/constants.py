@@ -14,7 +14,10 @@ POINTS_SEARCH_ACTIONS = ["MOTOR_POINTS_SEARCH", "HEALTH_POINTS_SEARCH"]
 # purposes and are never shown there. The 7-day purge task deletes exactly these.
 SECURITY_AUDIT_LOG_ACTIONS = [
     "MANUAL EDIT", "BULK UPDATE", "HEALTH RATE EDIT", "HEALTH BULK UPDATE",
-    "OVERLAP DEACTIVATE",
+    "OVERLAP DEACTIVATE", "LIFE GRID UPLOAD", "LIFE RATE EDIT", "LIFE NOTE EDIT",
+    "LIFE RATE ADD", "LIFE RATE DELETE", "LIFE BULK UPDATE",
+    # Reports To edits in Access Control: they decide whose activity a manager reads.
+    "TEAM CHANGE",
 ]
 
 # Which HealthRateMaster rate column a policy term (in years) reads its payout

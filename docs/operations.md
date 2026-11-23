@@ -23,6 +23,8 @@ Static files use hashed names (WhiteNoise manifest storage), so `collectstatic` 
   `AWS_SECRET_ACCESS_KEY` are set; otherwise local disk. `GRID_ARCHIVE_BUCKET_NAME` puts the Grid Management archive in
   its own bucket.
 - `LIFE_PAYOUT_GRID_*` are no longer read (the service was decommissioned); they can be deleted from `.env` and Railway.
+- `TEAM_ACTIVITY_RETENTION_DAYS` (default 90) is how long the Team Activity page keeps events; the nightly
+  `cleanup_team_activity` job deletes older ones.
 
 ## Scheduled jobs (`CELERY_BEAT_SCHEDULE`)
 
@@ -30,6 +32,7 @@ Static files use hashed names (WhiteNoise manifest storage), so `collectstatic` 
 |---|---|---|
 | `cleanup_points_search_logs` | 02:00 daily | deletes Motor/Health points-search audit logs older than 7 days |
 | `cleanup_security_audit_logs` | 02:15 daily | deletes security audit log entries older than 7 days |
+| `cleanup_team_activity` | 02:30 daily | deletes Team Activity events older than `TEAM_ACTIVITY_RETENTION_DAYS` (default 90) |
 | `archive_old_grid_documents` | 03:00 on the 1st | moves Grid Management uploads older than `GRID_RETENTION_MONTHS` (3) to the archive |
 
 The archive copies each file, reads it back and compares SHA-256, writes an immutable manifest per run, and only then
@@ -48,7 +51,8 @@ unless R2 is configured. Details are in `CLAUDE.md`.
 | `run_overlap_scan` | runs the overlap scan in-process (needs no Redis or worker, unlike the dashboard button) |
 | `import_health_rate_master` | imports / refreshes Health rate rows from a commission-grid Excel file |
 | `migrate_media_to_object_storage` | one-off copy of local media files to R2; does not touch database rows |
-| `cleanup_points_search_logs`, `cleanup_security_audit_logs` | the two log cleanups, run ad hoc |
+| `cleanup_points_search_logs`, `cleanup_security_audit_logs`, `cleanup_team_activity` | the three log cleanups, run ad hoc |
+| `check_team_hierarchy` | read-only report of every Reports To link; flags loops, self-links, deactivated managers and accounts with no profile. Run it once on production before relying on the Team Activity page |
 | `archive_grid_documents`, `restore_grid_documents` | archive old grid uploads / restore them from R2 (`--dry-run` on both) |
 
 ## Logging

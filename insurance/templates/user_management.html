@@ -122,7 +122,9 @@
                                         {% elif page == 'Can_View_Health_Payout_Rates' %} 🧮 Health Quote Simulator
                                         {% elif page == 'Can_View_Special_Rates' %} ⭐ Special Rate Requests
                                         {% elif page == 'Can_Review_Special_Rates' %} 📝 Special Rates Review
-                                        {% elif page == 'Can_View_Life_Payout_Grid' %} 💹 Life Payout Grid
+                                        {% elif page == 'Can_View_Life_Payout_Grid' %} 💹 Life Payout Rates
+                                        {% elif page == 'Can_View_Life_Rate_Master' %} 🛡️ Life Rate Master
+                                        {% elif page == 'Can_View_Team_Activity' %} 👥 Team Activity
                                         {% else %} {{ page }} {% endif %}
                                     </span>
                                 {% empty %}
@@ -244,7 +246,7 @@
                     🧮 Rate Checker
                 </label>
                 {% for pg in page_groups %}
-                {% if pg != 'Can_View_Policy_Locker' and pg != 'Can_View_Health_Payout_Rates' and pg != 'Can_View_Life_Payout_Grid' %}
+                {% if pg != 'Can_View_Policy_Locker' and pg != 'Can_View_Health_Payout_Rates' %}
                 <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer; padding:4px 0;">
                     <input type="checkbox" name="pages_EDIT" value="{{ pg }}" class="perm-check">
                     {% if pg == 'Can_View_Dashboard' %} 📊 Dashboard
@@ -268,6 +270,9 @@
                     {% elif pg == 'Can_View_Pincode_Dashboard' %} 📍 Pincode Dashboard
                     {% elif pg == 'Can_View_Special_Rates' %} ⭐ Special Rate Requests
                     {% elif pg == 'Can_Review_Special_Rates' %} 📝 Special Rates Review
+                    {% elif pg == 'Can_View_Life_Payout_Grid' %} 💹 Life Payout Rates
+                    {% elif pg == 'Can_View_Life_Rate_Master' %} 🛡️ Life Rate Master
+                    {% elif pg == 'Can_View_Team_Activity' %} 👥 Team Activity
                     {% else %} {{ pg }} {% endif %}
                 </label>
                 {% endif %}

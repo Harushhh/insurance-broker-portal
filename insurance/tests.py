@@ -379,9 +379,10 @@ class SSOHandoffViewTests(TestCase):
         self.assertFalse(user.has_usable_password())
         self.assertEqual(
             set(user.groups.values_list("name", flat=True)),
-            # Life was part of the bundle until the Life Payout Grid service
-            # was decommissioned (2026-10-11).
-            {"Can_View_Policy_Locker", "Can_View_Health_Payout_Rates"},
+            # Life left the bundle when the old Life Payout Grid service was
+            # decommissioned (2026-10-11) and is back now that the Life Rate
+            # Checker (the uploaded Life workbook) is part of the portal.
+            {"Can_View_Policy_Locker", "Can_View_Health_Payout_Rates", "Can_View_Life_Payout_Grid"},
         )
 
         # Default landing page is the Rate Checker hub, not a specific tab...
@@ -469,12 +470,12 @@ class RateCheckerEntryTests(TestCase):
         # Motor isn't granted, so Health (next in priority) wins.
         self.assertEqual(response.url, reverse("health_payout_rates"))
 
-    def test_life_group_alone_no_longer_grants_rate_checker_access(self):
-        # The Life tab was disabled with the Life Payout Grid service; the
-        # group still exists (migrations reference it) but opens nothing.
+    def test_life_group_alone_opens_the_life_checker(self):
+        # Life is the last tab: with neither Motor nor Health granted, it is the one the hub lands on.
         self.user.groups.add(Group.objects.get(name="Can_View_Life_Payout_Grid"))
         response = self.client.get(reverse("rate_checker"))
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("life_payout_rates"))
 
     def test_forbidden_with_none_of_the_rate_checker_groups(self):
         response = self.client.get(reverse("rate_checker"))

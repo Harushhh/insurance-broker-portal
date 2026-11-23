@@ -16,6 +16,7 @@ SSO_ALLOWED_LANDING_PAGES = {
     "rate_checker": "rate_checker",
     "policy_lock_checker": "policy_lock_checker",
     "health_payout_rates": "health_payout_rates",
+    "life_payout_rates": "life_payout_rates",
 }
 
 

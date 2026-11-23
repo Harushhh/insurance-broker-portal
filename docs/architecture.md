@@ -30,6 +30,10 @@ browser ──> urls.py ──> views/<feature>.py ──> services/<feature>.py
 | Rate Master Health, overlap detector | `views/rate_master_health.py` | `services/rate_master_checks.py`, `services/overlap.py` |
 | Health Rate Master | `views/health_rate_master.py` | |
 | Motor / Health payout rates | `views/motor_payout_rates.py`, `views/health_payout_rates.py` | `services/motor_payout.py`, `services/health_payout.py`, `services/points_audit.py` |
+| Life payout rates (Rate Checker, BG only; Rate Master: stored rows with MG and BG, add / delete / bulk edit / export, insurer notes, workbook uploads) | `views/life_rates.py` | `services/life_workbook.py`, `services/life_rates.py`, `services/life_filters.py` |
+| Life uploads: the standard file (one flat table for every insurer, columns found by name) and the review of an upload against the live grid before it goes live | `views/life_rates.py` | `services/life_standard.py`, `services/life_review.py`, `services/life_rates.py` |
+| Life Dashboard tab: the grid as ONE flat, blank-free sheet for a dashboard (every payout a row), downloaded from the live grid each month | `views/life_rates.py` | `services/life_dashboard.py` |
+| Life rows in the MIS Payout Engine (match a `life` policy to the live Life grid, print the first-year rate; insurer aliases and plan mapping screens) | `views/life_mis_mapping.py`, `mapping_engine.py` (`_match_life_row`) | `services/life_mis.py`, `services/life_filters.py` |
 | Policy lock checker, locked policies | `views/policy_lock.py` | `services/policy_lock.py` |
 | RTO / Make-Model / Pincode masters | `views/masters.py` | `services/masters.py` |
 | Make/Model mapping, missing make/model | `views/make_model_mapping.py`, `views/missing_make_model.py` | `services/make_model_mapping.py`, `services/missing_make_model.py` |
@@ -39,6 +43,7 @@ browser ──> urls.py ──> views/<feature>.py ──> services/<feature>.py
 | Grid management | `views/grid_management.py` | `services/email.py`, `grid_archive.py` |
 | Tickets, special rate requests | `views/tickets.py`, `views/special_rates.py` | `services/tickets.py` |
 | Audit logs | `views/audit_logs.py` | `services/audit_logs.py` |
+| Team Activity (a manager's view of their team's runs, uploads, tests and status changes) | `views/team_activity.py` | `services/activity.py` (write: `record_activity`), `services/team_scope.py` (read: `visible_events`) |
 | Analysis | `views/analysis.py` | `services/analysis.py` |
 | AI rulebook (field configurator) | `views/ai_rulebook.py` | |
 | Users, SSO landing, home, Rate Checker | `views/user_management.py`, `views/sso_handoff.py`, `views/home.py`, `views/rate_checker.py` | `sso.py` |

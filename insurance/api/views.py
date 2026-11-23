@@ -28,16 +28,16 @@ logger = logging.getLogger("security")
 # =========================================================
 
 # Pages an ArhamSecure-partner-portal handoff is allowed to grant -- exactly
-# the three pages unified under "Rate Checker" (see RATE_CHECKER_TABS
+# the pages unified under "Rate Checker" (see RATE_CHECKER_TABS
 # above), never ADMIN/SUPER_ADMIN or anything outside this set. If a second
 # partner ever needs a different set, split this into a per-partner mapping
 # instead of widening this one.
 PARTNER_ARHAMSECURE_ALLOWED_GROUPS = {
     "Can_View_Policy_Locker",
     "Can_View_Health_Payout_Rates",
-    # "Can_View_Life_Payout_Grid" removed 2026-10-11 (Life tab disabled). A
-    # partner that still requests it isn't rejected -- the allow-list
-    # intersection in IssueSSOTicketAPIView just doesn't grant it.
+    # Life is back (the Life Rate Checker, uploaded workbook): it was removed on 2026-10-11 when the old
+    # Life Payout Grid service was switched off, and is granted again with the rest of the bundle.
+    "Can_View_Life_Payout_Grid",
 }
 
 

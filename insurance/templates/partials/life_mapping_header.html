@@ -1,0 +1,39 @@
+{% comment %}
+Header, live-grid badge and the two sections of the Life Mapping screens (MIS Payout Engine).
+Needs: section ("plans" or "insurers"), grid (the live Life grid the engine will read, or None).
+{% endcomment %}
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3 mb-4">
+    <div>
+        <h2 class="mb-1" style="font-weight: 800; color: #0f172a; letter-spacing: -0.02em; font-size: 26px;">
+            Life Mapping
+        </h2>
+        <p class="text-muted mb-0" style="font-size: 14px; max-width: 760px;">
+            Tell the MIS Payout Engine which Life insurer and which Life grid products a MIS spelling stands for.
+            A Life policy whose insurer or plan is not mapped is never guessed: it ends as NO MATCH and is listed here until someone maps it.
+        </p>
+    </div>
+    <div class="d-flex flex-wrap gap-2">
+        <div class="stat-badge">
+            <span class="text-overline mb-1" style="font-size: 10px;">Live Life grid</span>
+            <span style="font-size: 16px; font-weight: 800; color: #0f172a;">{{ grid.label|default:"None" }}</span>
+        </div>
+        <a href="{% url 'mis_payout_automation' %}" class="btn-soft" style="align-self: center;">
+            <i class="bi bi-cash-stack text-primary"></i> MIS Payout Engine
+        </a>
+    </div>
+</div>
+
+<div class="life-subnav" role="tablist" aria-label="Life Mapping sections">
+    <a href="{% url 'life_plan_mapping' %}" class="life-subtab {% if section == 'plans' %}active{% endif %}">
+        <i class="bi bi-diagram-3"></i> Plans
+    </a>
+    <a href="{% url 'life_insurer_aliases' %}" class="life-subtab {% if section == 'insurers' %}active{% endif %}">
+        <i class="bi bi-building"></i> Insurer names
+    </a>
+</div>
+
+{% if not grid %}
+<div class="life-banner">
+    <span><i class="bi bi-exclamation-triangle-fill"></i> No Life grid is live. Until the monthly workbook is uploaded on Life Rate Master, every Life policy in a MIS file ends as NO MATCH and nothing can be mapped here.</span>
+</div>
+{% endif %}

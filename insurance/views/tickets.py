@@ -4,6 +4,7 @@ from django.http import JsonResponse
 from django.db.models import Count
 import json
 from ..models import ProductMaster, SubProductMaster, FuelTypeMaster, MakeModelClassMaster, SupportTicket
+from ..services.activity import STATUS, record_activity
 from ..services.tickets import _build_motor_payout_rates_url
 import logging
 
@@ -109,6 +110,11 @@ def create_ticket_api(request):
                 category=category,
                 ticket_type=ticket_type,
             )
+            # Never the remarks or the form values: free text can carry personal data.
+            record_activity(
+                request.user, STATUS, "ticket.opened", f"Opened {category.title()} support ticket #{ticket.id}",
+                target=ticket, extra={"category": category},
+            )
             return JsonResponse({"success": True, "ticket_id": ticket.id})
         except Exception as e:
             logger.exception("Could not create support ticket")
@@ -133,9 +139,16 @@ def update_ticket_status(request):
             if new_status.upper() not in valid_statuses:
                 return JsonResponse({"success": False, "message": "Invalid status."})
 
+            old_status = ticket.status
             ticket.status = new_status.upper()
             ticket.save()
-            
+            if ticket.status != old_status:
+                record_activity(
+                    request.user, STATUS, "ticket.status.changed",
+                    f"Changed support ticket #{ticket.id} from {old_status} to {ticket.status}",
+                    target=ticket, extra={"from": old_status, "to": ticket.status},
+                )
+
             return JsonResponse({"success": True})
             
         except SupportTicket.DoesNotExist:

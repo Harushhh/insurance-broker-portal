@@ -11,6 +11,8 @@ from .models import (
     MISFile, RateMaster, RTOMaster, MakeModelMaster, MISFailedRow,
     HealthRateMaster, PincodeMaster,
 )
+from .services import life_mis
+from .services.activity import RUN, record_activity
 from .services.make_model import strict_match_in_cluster
 import logging
 
@@ -1176,6 +1178,14 @@ def _extract_failed_rows_from_df(df):
 
     insurer_col = _find_column(df.columns, 'Policy: insurance company')
     payload_columns = [c for c in (_find_column(df.columns, target) for target in MATCHING_RULE_COLUMNS) if c]
+    # The Life columns (plan, PPT, PT, premium mode ...) go after the others, so
+    # the order every column above reaches a failed row's details in is unchanged.
+    life_columns = life_mis.find_life_columns(df.columns)
+    payload_columns += [c for names in life_columns.values() for c in names if c not in payload_columns]
+    # A Life row can carry its insurer under 'ins company' / 'insurer name' only.
+    insurer_columns = ([insurer_col] if insurer_col else []) + [
+        c for c in life_columns['insurer'] if c != insurer_col
+    ]
 
     rows = []
     for _, row in failed.iterrows():
@@ -1207,11 +1217,12 @@ def _extract_failed_rows_from_df(df):
                 val = _json_safe(val)
             payload[col] = val
 
-        insurer = row.get(insurer_col) if insurer_col else None
-        if pd.isna(insurer):
-            insurer = None
-        else:
-            insurer = _json_safe(insurer)
+        insurer = None
+        for column in insurer_columns:
+            candidate = row.get(column)
+            if pd.notna(candidate) and str(candidate).strip():
+                insurer = _json_safe(candidate)
+                break
 
         mapping_status = str(row.get('Mapping Status') or '').strip()
         row_id = row.get('Original_Row_ID')
@@ -1537,12 +1548,81 @@ def _match_health_row(mis_row, grid_by_insurer, empty_grid, resolve_pincode):
     return _no_match("No rates found for criteria")
 
 
+def _match_life_row(mis_row, life_grid):
+    """
+    Life equivalent of _match_health_row: matches one MIS row whose Product is
+    'life' against the live Life grid (LifeRate) instead of RateMaster. The
+    rules live in services/life_mis.py; this only turns their answer into a
+    result dict shaped exactly like Motor's and Health's, so the same merge /
+    payout_cols / coverage-gap machinery handles it, and names the stage the
+    row ended at for the run summary. Returns (result, stage).
+
+    Only the first-year payout is printed, in Porate; MG (Pirate) is not, and
+    the rupee amounts are blanked later (the premium base is still undefined).
+    """
+    row_id = mis_row.get('Original_Row_ID')
+
+    def _result(status, reason):
+        return {
+            'Original_Row_ID': row_id,
+            'Mapping Status': status,
+            'Failure Reason': reason,
+            'Displaygroupid': None,
+            'Potype': None, 'Porate': None, 'Poflatamount': None,
+            'Pitype': None, 'Pirate': None, 'Piflatamount': None,
+            'Addtnc': None,
+        }
+
+    if life_grid is None:
+        return _result('❌ NO MATCH', format_failed_on([(
+            life_mis.GRID_LABEL,
+            "No Life grid is live, so no Life rate can be matched. Upload one on Life Rate Master "
+            "and re-run mapping for this row."
+        )])), 'no_grid'
+
+    # 'Policy: inception date' is parsed once for every row (_mis_date, day first), as Motor and Health read it.
+    inception = mis_row['_mis_date']
+    match = life_mis.match_life_policy(
+        life_mis.LifePolicy(
+            insurer=mis_row['_mis_l_insurer'], plan=mis_row['_mis_l_plan'], ppt=mis_row['_mis_l_ppt'],
+            pt=mis_row['_mis_l_pt'], mode=mis_row['_mis_l_mode'], policy_type=mis_row['_mis_l_policy_type'],
+            inception=None if pd.isna(inception) else pd.Timestamp(inception).date(),
+        ),
+        life_grid,
+    )
+
+    if match.kind == 'matched':
+        result = _result('✅ MATCH', life_mis.matched_reason(match, life_grid))
+        result.update({
+            'Displaygroupid': match.row.id,
+            'Potype': life_mis.PAYOUT_TYPE,
+            'Porate': match.row.yr1,
+            'Addtnc': life_mis.addtnc_text(match.row),
+        })
+        return result, 'matched'
+
+    if match.kind == 'multiple':
+        return _result('⚠️ MULTIPLE MATCHES', life_mis.multiple_reason(match)), 'multiple'
+
+    if match.kind == 'bad_data':
+        # The PPT / PT problems first, then every rate-matching failure the
+        # chain still found (same layout as Motor's BAD DATA reason).
+        return _result('FAILED - BAD DATA', FAILURE_SEGMENT_SEPARATOR.join(
+            [f"Validation error — {message}" for message in match.data_errors]
+            + [f"{ALSO_FAILED_ON_PREFIX}{label} — {detail}" for label, detail in match.failed_on]
+        )), 'bad_data'
+
+    return _result('❌ NO MATCH', format_failed_on(match.failed_on)), match.stage
+
+
 def process_mis_mapping(mis_file_id):
     # Always forcefully wipe the thread's DB connection state to prevent inheritance locks
     connection.close()
 
     try:
-        mis_obj = MISFile.objects.get(id=mis_file_id)
+        # select_related: the uploader goes on the Team Activity feed at the end, and
+        # loading it lazily there could (in theory) fail a run that already succeeded.
+        mis_obj = MISFile.objects.select_related('uploaded_by').get(id=mis_file_id)
         mis_obj.status = 'PROCESSING'
         mis_obj.save(update_fields=['status'])
     except Exception:
@@ -1649,8 +1729,9 @@ def process_mis_mapping(mis_file_id):
         # --- PRODUCT ROUTING KEYS ---
         # The Product column decides which Rate Master a row may be compared
         # against: 'motor' -> RateMaster only, 'health' -> HealthRateMaster only,
-        # anything else -> neither (see the PRODUCT ROUTING block in the row
-        # loop). Defined ahead of every insurer/rate lookup below so nothing is
+        # 'life' -> the live Life grid only, anything else -> none (see the
+        # PRODUCT ROUTING block in the row loop). Defined ahead of every
+        # insurer/rate lookup below so nothing is
         # fuzzy-matched or fetched for a row before its table is known.
         df_mis['_mis_product'] = safe_get_col(df_mis, 'Product').astype(str).str.strip().str.lower()
         df_mis['_mis_is_motor'] = df_mis['_mis_product'] == 'motor'
@@ -1696,6 +1777,17 @@ def process_mis_mapping(mis_file_id):
 
         h_age_raw = safe_get_col(df_mis, 'Customer: age').astype(str).str.replace(r'[^0-9.]', '', regex=True)
         df_mis['_mis_h_age'] = pd.to_numeric(h_age_raw, errors='coerce')
+
+        # --- LIFE PRE-COMPUTE ---
+        # The Life route (services/life_mis.py) reads its own MIS columns, found
+        # by header with case, punctuation and spacing ignored (the real
+        # exports write 'Policy: product name  plan name' with two spaces), and
+        # takes the first non-blank of the insurer columns. Nothing here
+        # touches the Motor or Health columns above.
+        df_mis['_mis_l_is_life'] = df_mis['_mis_product'] == life_mis.LIFE_PRODUCT
+        _life_inputs = life_mis.life_fields(df_mis)
+        for _life_role in _life_inputs.columns:
+            df_mis[f'_mis_l_{_life_role}'] = _life_inputs[_life_role]
 
         # --- CP PREMIUM# (reconciliation) ---
         # Computed straight from raw MIS fields, independent of Rate Master
@@ -1910,6 +2002,12 @@ def process_mis_mapping(mis_file_id):
             _empty_health_grid = pd.DataFrame(columns=health_grid_columns)
             resolve_pincode = lambda _v: set()
 
+        # 2c. LIFE GRID (only if this file has Life rows): the live Life upload
+        # plus the insurer-alias and plan-mapping tables, read once per run.
+        # None means no Life grid is live; every Life row then says so.
+        life_grid = life_mis.load_life_grid() if bool(df_mis['_mis_l_is_life'].any()) else None
+        life_tally = Counter()
+
         results = []
         total_identical_payout_resolved = 0
 
@@ -1931,14 +2029,21 @@ def process_mis_mapping(mis_file_id):
             # compared against, before any other check, range test, fuzzy
             # match or rate logic runs:
             #   'health' -> HealthRateMaster only (_match_health_row)
+            #   'life'   -> the live Life grid only (_match_life_row)
             #   'motor'  -> RateMaster only (the BAD DATA guards and RULE 1-6
             #               chain below)
-            #   anything else (blank, 'non_motor', 'life', a typo) -> neither
+            #   anything else (blank, 'non_motor', a typo) -> none of them
             if mis_row['_mis_h_is_health']:
                 health_result = _match_health_row(mis_row, health_grid_by_insurer, _empty_health_grid, resolve_pincode)
                 if health_result.pop('_tied_rows', 0):
                     total_identical_payout_resolved += 1
                 results.append(health_result)
+                continue
+
+            if mis_row['_mis_l_is_life']:
+                life_result, life_stage = _match_life_row(mis_row, life_grid)
+                life_tally[life_stage] += 1
+                results.append(life_result)
                 continue
 
             if not mis_row['_mis_is_motor']:
@@ -1948,8 +2053,8 @@ def process_mis_mapping(mis_file_id):
                     'Original_Row_ID': mis_row.get('Original_Row_ID', idx),
                     'Mapping Status': '❌ NO MATCH',
                     'Failure Reason': (
-                        f"Failed on: Product — Product '{shown_product}' is neither 'motor' nor 'health', "
-                        f"so no Rate Master applies and the row was not matched. Correct the Product "
+                        f"Failed on: Product — Product '{shown_product}' is not 'motor', 'health' or 'life', "
+                        f"so no rate table applies and the row was not matched. Correct the Product "
                         f"column and re-run mapping for this row."
                     ),
                     'Displaygroupid': None,
@@ -2440,6 +2545,11 @@ def process_mis_mapping(mis_file_id):
         for s_col in split_rate_cols:
             if s_col not in df_final.columns:
                 df_final[s_col] = None
+            # Numeric whatever matched: a file whose matches are all Health or
+            # Life rows never sets these (only Motor results carry them), and an
+            # all-None object column made the split override below assign an
+            # empty object Series into a float column, which pandas 3 refuses.
+            df_final[s_col] = pd.to_numeric(df_final[s_col], errors='coerce')
 
         df_final.loc[df_final['Mapping Status'] != "✅ MATCH", payout_cols + split_rate_cols] = None
 
@@ -2518,6 +2628,16 @@ def process_mis_mapping(mis_file_id):
         df_final['Margin Rate'] = df_final['Pirate'] - df_final['Porate']
         df_final['Margin Amt'] = df_final['Pay-in Amt'] - df_final['Pay-out Amt']
 
+        # --- LIFE ROWS: the rate only, no rupee amounts ---
+        # A matched Life row prints its rate in Porate. The premium base for a
+        # Life amount (which premium, GST, the deferred second-year part) is
+        # not defined yet, and cp premium# above is Motor's reconciliation
+        # base (gwp net premium, blank on Life rows), so the amounts it would
+        # give a Life row (0 against a blank premium, or a figure against an
+        # unrelated one) are blanked instead of shown.
+        _life_rows = safe_get_col(df_final, 'Product').astype(str).str.strip().str.lower() == life_mis.LIFE_PRODUCT
+        df_final.loc[_life_rows, ['Pay-in Amt', 'Pay-out Amt', 'Margin Amt']] = None
+
         # --- DISPLAY FORMAT — Porate/Pirate as 'OD+TP' for On OD and TP rows ---
         # Runs last, after Margin Rate/Margin Amt above have already used the
         # real numeric OD+TP sum — this only reformats the exported Porate/
@@ -2558,10 +2678,22 @@ def process_mis_mapping(mis_file_id):
             f"identical payout and payin rates and used the lowest Group ID. "
             if total_identical_payout_resolved else ""
         )
+        life_note = ""
+        if life_tally:
+            life_labels = {**life_mis.STAGE_LABELS, 'no_grid': 'no Life grid live'}
+            life_others = [
+                f"{count} {life_labels.get(stage, stage)}"
+                for stage, count in life_tally.most_common() if stage != 'matched'
+            ]
+            life_note = (
+                f"Life: {sum(life_tally.values())} policies, {life_tally['matched']} matched"
+                + (f" ({', '.join(life_others)})" if life_others else "") + ". "
+            )
         mis_obj.error_message = (
             f"Processed {total_processed} rows successfully. "
             f"Mapped {total_matched} rates. "
             f"{identical_payout_note}"
+            f"{life_note}"
             f"{total_multiple} rows skipped — multiple Rate Master groups matched "
             f"(refine Rate Master to get a single match). "
             f"{total_bad_data} rows flagged FAILED - BAD DATA (invalid source values — see Failure Reason)."
@@ -2591,6 +2723,16 @@ def process_mis_mapping(mis_file_id):
 
         mis_obj.save()
 
+        # Counts and a file name only, no policy data: this goes on the Team Activity feed.
+        record_activity(
+            mis_obj.uploaded_by, RUN, "mis.run.finished",
+            f"MIS run finished for '{mis_obj.uploaded_file.name.split('/')[-1]}': {total_processed} rows, "
+            f"{total_matched} matched, {total_multiple} multiple matches, {total_bad_data} bad data",
+            target=mis_obj,
+            extra={"rows": total_processed, "matched": total_matched,
+                   "multiple": total_multiple, "bad_data": total_bad_data},
+        )
+
     except Exception as e:
         # FIX: was `except BaseException`, which also catches KeyboardInterrupt /
         # SystemExit and can block graceful container shutdown. Narrowed to Exception.
@@ -2598,11 +2740,18 @@ def process_mis_mapping(mis_file_id):
 
         try:
             connection.close()
-            mis_obj = MISFile.objects.get(id=mis_file_id)
+            mis_obj = MISFile.objects.select_related('uploaded_by').get(id=mis_file_id)
             mis_obj.status = 'FAILED'
             mis_obj.error_message = str(e)[:1000]
             mis_obj.processed_at = timezone.now()
             mis_obj.save()
+            # No error text here: the reason stays on the MIS page, and an error
+            # message can quote a cell of the file.
+            record_activity(
+                mis_obj.uploaded_by, RUN, "mis.run.failed",
+                f"MIS run failed for '{mis_obj.uploaded_file.name.split('/')[-1]}'",
+                target=mis_obj,
+            )
         except Exception as recovery_err:
             logger.critical("Could not write the FAILED state for MISFile %s to the DB: %s", mis_file_id, recovery_err, exc_info=True)
 

@@ -1,7 +1,7 @@
 {% comment %}
 Shared MOTOR / HEALTH / LIFE switcher for Rate Master pages.
 Include with: {% include "_rate_master_tabs.html" with active="MOTOR" %}
-(active is one of "MOTOR" or "HEALTH")
+(active is one of "MOTOR", "HEALTH" or "LIFE")
 {% endcomment %}
 <div class="rm-tabs" role="tablist" aria-label="Rate Master line of business">
     <a href="{% url 'dashboard' %}" class="rm-tab {% if active == 'MOTOR' %}active{% endif %}">
@@ -16,7 +16,13 @@ Include with: {% include "_rate_master_tabs.html" with active="MOTOR" %}
             <i class="bi bi-heart-pulse-fill"></i> HEALTH
         </span>
     {% endif %}
-    <span class="rm-tab rm-tab-disabled" title="Life insurance Rate Master is coming soon">
-        <i class="bi bi-shield-fill-plus"></i> LIFE <span class="rm-soon">Soon</span>
-    </span>
+    {% if 'Can_View_Life_Rate_Master' in nav_pages %}
+        <a href="{% url 'life_rate_master' %}" class="rm-tab {% if active == 'LIFE' %}active{% endif %}">
+            <i class="bi bi-shield-fill-plus"></i> LIFE
+        </a>
+    {% else %}
+        <span class="rm-tab rm-tab-disabled" title="You don't have access to Life Rate Master">
+            <i class="bi bi-shield-fill-plus"></i> LIFE
+        </span>
+    {% endif %}
 </div>

@@ -11,6 +11,7 @@ from urllib.parse import urlencode
 from datetime import datetime
 from openpyxl import Workbook
 from ..models import MakeModelMaster, AuditLog, MissingMakeModelManualResolution
+from ..services.activity import STATUS, record_activity
 from ..services.masters import RTO_MAKE_CHOICES_CACHE_KEY
 from ..services.missing_make_model import _annotate_make_model_resolution, _append_make_model_cluster_item, _filter_missing_make_model, _missing_make_model_groups, _missing_make_model_manual_key_from_post
 from ..services.rate_master_checks import _sync_unsynced_mis_files
@@ -299,6 +300,11 @@ def add_missing_make_model_to_master(request):
     # Mirrors api_upload_chunk: every write to these master tables busts the key
     # get_rto_and_make_choices caches the rate forms' dropdowns under.
     cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
+    record_activity(
+        request.user, STATUS, "missing_make_model.resolved",
+        f"Resolved missing make/model '{stored_value}' by adding it to {names}",
+        extra={"policy_rows": policy_count},
+    )
 
     messages.success(
         request,
@@ -429,6 +435,11 @@ def bulk_add_missing_make_model_to_master(request):
     cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
 
     if added:
+        record_activity(
+            request.user, STATUS, "missing_make_model.resolved",
+            f"Resolved {len(added)} missing make/model value(s) by adding them to {master_names}",
+            extra={"values": len(added), "skipped": len(skipped)},
+        )
         messages.success(
             request,
             f"{len(added)} value(s) added to {master_names}. They now resolve, and new "
@@ -485,6 +496,10 @@ def mark_missing_make_model_resolved(request):
                 + (f" {policy_count} affected MIS policy row(s) reported by the page." if policy_count else "")
             ),
         )
+        record_activity(
+            request.user, STATUS, "missing_make_model.marked_resolved",
+            f"Marked missing make/model '{value}' as resolved",
+        )
         messages.success(request, f"'{value}' marked Resolved.")
     else:
         messages.info(request, f"'{value}' was already marked Resolved.")
@@ -507,6 +522,10 @@ def unmark_missing_make_model_resolved(request):
             user=request.user,
             action="MAKE MODEL MANUAL RESOLUTION UNDONE",
             details=f"Un-marked '{value}' as Resolved on the Missing Make/Model page.",
+        )
+        record_activity(
+            request.user, STATUS, "missing_make_model.reopened",
+            f"Reopened missing make/model '{value}' (took off its Resolved mark)",
         )
         messages.success(request, f"'{value}' is no longer marked Resolved.")
     else:
@@ -555,6 +574,11 @@ def bulk_mark_missing_make_model_resolved(request):
                 f"write: {', '.join(k[0] for k in keys[:10])}"
                 + (f" (+{len(keys) - 10} more)" if len(keys) > 10 else "") + "."
             ),
+        )
+        record_activity(
+            request.user, STATUS, "missing_make_model.marked_resolved",
+            f"Marked {created_count} missing make/model row(s) as resolved",
+            extra={"rows": created_count},
         )
         messages.success(
             request,

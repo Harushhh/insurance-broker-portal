@@ -1106,8 +1106,11 @@ def run_overlap_scan(scan_id, type_caps=None):
     """
     from django.utils import timezone
     from .models import MakeModelMaster, RateOverlapPair, RateOverlapScan, RTOMaster
+    from .services.activity import RUN, record_activity
 
-    scan = RateOverlapScan.objects.get(id=scan_id)
+    # select_related: the person who started the scan goes on the Team Activity feed at
+    # the end, and loading it lazily there could fail a scan that already succeeded.
+    scan = RateOverlapScan.objects.select_related("triggered_by").get(id=scan_id)
     try:
         started = time.monotonic()
         groups = load_active_groups(
@@ -1178,10 +1181,30 @@ def run_overlap_scan(scan_id, type_caps=None):
         RateOverlapScan.objects.filter(
             status=RateOverlapScan.STATUS_COMPLETED
         ).exclude(id=scan.id).delete()
+
+        # No person on a scan run from the management command: nothing is recorded then.
+        record_activity(
+            scan.triggered_by, RUN, "overlap.scan.finished",
+            f"Overlap scan finished{_scope_note(scan)}: {scan.groups_scanned} groups, {scan.pairs_found} conflicts",
+            target=scan, extra={"groups": scan.groups_scanned, "conflicts": scan.pairs_found},
+        )
     except Exception as exc:
         scan.status = RateOverlapScan.STATUS_FAILED
         scan.error_message = str(exc)
         scan.finished_at = timezone.now()
         scan.save(update_fields=["status", "error_message", "finished_at"])
+        record_activity(
+            scan.triggered_by, RUN, "overlap.scan.failed", f"Overlap scan failed{_scope_note(scan)}", target=scan,
+        )
         raise
     return scan
+
+
+def _scope_note(scan):
+    """' (Insurer X, Product Y)' for a scan limited to an insurer and/or a product, else ''."""
+    parts = []
+    if scan.filter_insurer:
+        parts.append(scan.filter_insurer)
+    if scan.filter_product:
+        parts.append(scan.filter_product)
+    return f" ({', '.join(parts)})" if parts else ""

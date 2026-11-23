@@ -1,5 +1,24 @@
 """Audit-log writers for the Motor and Health "Check Eligibility" searches."""
 from ..models import AuditLog
+from .activity import TEST, record_activity
+
+
+# What each checker page is called on the Team Activity feed, by URL name. The
+# Motor Payout Rates page, the Policy Lock Checker and the Health Payout Rates
+# page all write through the two functions below, so this is how the feed tells
+# them apart. Never a vehicle number, policy-holder name or any search value.
+_CHECKER_EVENTS = {
+    "motor_payout_rates": ("motor.eligibility.checked", "Ran a Motor eligibility check on Motor Payout Rates"),
+    "policy_lock_checker": ("policy_lock.checked", "Ran a Policy Lock Checker search"),
+    "health_payout_rates": ("health.eligibility.checked", "Ran a Health eligibility check on Health Payout Rates"),
+}
+
+
+def _record_checker_activity(request, default_action, default_summary):
+    url_name = getattr(getattr(request, "resolver_match", None), "url_name", None)
+    action, summary = _CHECKER_EVENTS.get(url_name, (default_action, default_summary))
+    # An API-key request has no signed-in user; record_activity then records nothing.
+    record_activity(request.user, TEST, action, summary)
 
 
 def _log_motor_points_search(request):
@@ -19,6 +38,7 @@ def _log_motor_points_search(request):
             action="MOTOR_POINTS_SEARCH",
             details=str(flat_params)
         )
+        _record_checker_activity(request, "motor.eligibility.checked", "Ran a Motor eligibility check")
 
 
 def _log_health_points_search(request):
@@ -42,3 +62,4 @@ def _log_health_points_search(request):
             action="HEALTH_POINTS_SEARCH",
             details=str(flat_params)
         )
+        _record_checker_activity(request, "health.eligibility.checked", "Ran a Health eligibility check")

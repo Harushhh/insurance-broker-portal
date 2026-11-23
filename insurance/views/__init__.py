@@ -219,6 +219,38 @@ from .health_rate_master import (
 from .home import (
     home_dashboard,
 )
+from .life_mis_mapping import (
+    WAITING_LIMIT,
+    life_insurer_alias_delete,
+    life_insurer_alias_save,
+    life_insurer_aliases,
+    life_plan_mapping,
+    life_plan_mapping_delete,
+    life_plan_mapping_save,
+)
+from .life_rates import (
+    MAX_UPLOAD_BYTES,
+    life_payout_rates,
+    life_rate_master,
+    life_rate_master_activate,
+    life_rate_master_add,
+    life_rate_master_bulk_update,
+    life_rate_master_dashboard,
+    life_rate_master_dashboard_download,
+    life_rate_master_delete,
+    life_rate_master_delete_upload,
+    life_rate_master_discard,
+    life_rate_master_edit,
+    life_rate_master_export,
+    life_rate_master_note_add,
+    life_rate_master_note_edit,
+    life_rate_master_notes,
+    life_rate_master_review,
+    life_rate_master_template,
+    life_rate_master_upload,
+    life_rate_master_upload_standard,
+    life_rate_master_uploads,
+)
 from .make_model_mapping import (
     MAKE_MODEL_MAPPING_MAX_VALUE_LEN,
     MAKE_MODEL_MAPPING_VALUES_LIMIT,
@@ -324,6 +356,10 @@ from .special_rates import (
 from .sso_handoff import (
     SSO_ALLOWED_LANDING_PAGES,
     sso_consume_view,
+)
+from .team_activity import (
+    export_team_activity_xlsx,
+    team_activity,
 )
 from .tickets import (
     create_ticket_api,

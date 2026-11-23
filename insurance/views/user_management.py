@@ -5,7 +5,7 @@ from django import forms
 import logging
 import secrets
 from ..access import PAGE_GROUPS, RATE_CHECKER_GROUPS
-from ..models import UserProfile
+from ..models import AuditLog, UserProfile
 
 
 logger = logging.getLogger("security")
@@ -107,11 +107,33 @@ def user_management(request):
             for flag in HIERARCHY_FLAGS:
                 setattr(profile, flag, request.POST.get(flag) == "on")
 
-            reports_to_id = request.POST.get("reports_to") or None
-            profile.reports_to_id = reports_to_id if reports_to_id else None
+            # "Reports To" posts the manager's USER id (that is what the dropdown
+            # lists), but UserProfile.reports_to points at a UserProfile, whose id
+            # is not always the same number (an account made through Django's own
+            # admin has no profile until someone saves it here). Translate it.
+            # No "reports_to" key at all means the select had no option to show
+            # (e.g. the current manager was deactivated since): keep what is stored.
+            previous_manager_id = profile.reports_to_id
+            previous_manager_name = profile.reports_to.user.username if previous_manager_id else ""
+            manager_error = ""
+            if "reports_to" in request.POST:
+                manager_user_id = request.POST.get("reports_to", "").strip()
+                if not manager_user_id:
+                    profile.reports_to = None
+                else:
+                    manager_user = (
+                        User.objects.filter(id=manager_user_id, is_active=True).first()
+                        if manager_user_id.isdigit() else None
+                    )
+                    if manager_user is None:
+                        manager_error = "⚠️ The person chosen in Reports To does not exist or is not active."
+                    else:
+                        profile.reports_to, _ = UserProfile.objects.get_or_create(user=manager_user)
 
             new_email = request.POST.get("email", "").strip()
-            if new_email and User.objects.filter(email__iexact=new_email).exclude(id=u.id).exists():
+            if manager_error:
+                error = manager_error
+            elif new_email and User.objects.filter(email__iexact=new_email).exclude(id=u.id).exists():
                 error = f"⚠️ An account with email '{new_email}' already exists."
             else:
                 try:
@@ -120,6 +142,16 @@ def user_management(request):
                     u.email = new_email
                     u.save()
                     msg = f"✅ Profile and access for '{u.username}' updated."
+                    if profile.reports_to_id != previous_manager_id:
+                        # Reports To decides whose activity a manager can read on
+                        # the Team Activity page, so every change is on the record.
+                        new_manager_name = profile.reports_to.user.username if profile.reports_to_id else ""
+                        AuditLog.objects.create(
+                            user=request.user,
+                            action="TEAM CHANGE",
+                            details=f"'{u.username}' now reports to {new_manager_name or 'nobody'} "
+                                    f"(was {previous_manager_name or 'nobody'}).",
+                        )
                 except forms.ValidationError as e:
                     error = "⚠️ " + " ".join(m for msgs in e.message_dict.values() for m in msgs)
 
@@ -158,7 +190,7 @@ def user_management(request):
                 u.delete()
                 msg = f"🗑️ User '{uname}' has been completely removed from the system."
 
-    all_users = User.objects.select_related("profile").all().order_by("-is_superuser", "username")
+    all_users = User.objects.select_related("profile__reports_to").all().order_by("-is_superuser", "username")
     users = [u for u in all_users if u.is_active]
     pending_users = [u for u in all_users if not u.is_active]
 
@@ -184,7 +216,9 @@ def user_management(request):
             d[field] = getattr(profile, field, "") or ""
         for flag in HIERARCHY_FLAGS:
             d[flag] = bool(getattr(profile, flag, False))
-        d["reports_to"] = profile.reports_to_id if profile else None
+        # The manager's USER id, to match the dropdown's option values (see the
+        # save side in update_user_access).
+        d["reports_to"] = profile.reports_to.user_id if profile and profile.reports_to_id else None
         return d
 
     user_rows = [profile_dict(u) for u in users]

@@ -9,6 +9,7 @@ from datetime import datetime
 from collections import defaultdict
 from ..models import RTOMaster, MakeModelMaster, PincodeMaster, RateMaster, YesNoNAMaster, ProductMaster, SubProductMaster, PolicyTypeMaster, FuelTypeMaster, MakeModelClassMaster, RateGroup, HealthRateMaster, CsvUploadAttempt
 from ..health_grid_utils import parse_number as parse_health_number, parse_percent as parse_health_percent, parse_grid_date as parse_health_date, upsert_health_rate_row
+from ..services.activity import UPLOAD, record_activity
 from ..services.common import parse_date
 from ..services.masters import RTO_MAKE_CHOICES_CACHE_KEY
 from ..services.rate_master import build_key_hash
@@ -16,6 +17,15 @@ import logging
 
 
 logger = logging.getLogger(__name__)
+
+# How the Team Activity feed names the table an upload went into.
+UPLOAD_TARGET_LABELS = {
+    "rate_master": "Rate Master",
+    "health_rate_master": "Health Rate Master",
+    "rto_master": "RTO Master",
+    "make_model_master": "Make/Model Master",
+    "pincode_master": "Pincode Master",
+}
 
 
 # ---------------------------------------------------------
@@ -88,10 +98,27 @@ def api_complete_upload(request):
         attempt_id = data.get('attempt_id')
         if not attempt_id:
             return JsonResponse({'status': 'error', 'message': 'attempt_id is required'}, status=400)
+        attempt = CsvUploadAttempt.objects.filter(id=attempt_id).first()
         CsvUploadAttempt.objects.filter(id=attempt_id).update(
             status='COMPLETED' if data.get('success') else 'FAILED',
             row_count=data.get('row_count'),
         )
+        # Only the person who started this upload gets it on their activity feed.
+        if attempt is not None and attempt.uploaded_by_id == request.user.id:
+            where = UPLOAD_TARGET_LABELS.get(attempt.target_table, attempt.target_table)
+            name = attempt.file_name or "a file"
+            if data.get('success'):
+                rows = data.get('row_count')
+                record_activity(
+                    request.user, UPLOAD, "csv.upload.completed",
+                    f"Uploaded '{name}' into {where}" + (f": {rows} rows" if rows is not None else ""),
+                    target=attempt, extra={"table": attempt.target_table, "rows": rows},
+                )
+            else:
+                record_activity(
+                    request.user, UPLOAD, "csv.upload.failed", f"Upload of '{name}' into {where} failed",
+                    target=attempt, extra={"table": attempt.target_table},
+                )
         return JsonResponse({'status': 'ok'})
     except Exception as e:
         logger.exception("Could not record upload completion")

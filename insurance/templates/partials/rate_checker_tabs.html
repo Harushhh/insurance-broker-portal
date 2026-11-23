@@ -1,12 +1,9 @@
 {% load static %}
 {% comment %}
 Shared pill tab bar for the "Rate Checker" sidebar entry point.
-Included at the top of policy_lock_checker.html and health_payout_rates.html
-so switching between Motor/Health/Life is a normal page nav, not a
-separate view -- each of those two pages keeps its own URL/permission/
-logic exactly as before. Life Payout Grid is a separate cross-origin app
-(see insurance/views.py:_life_payout_grid_handoff), so its tab is a plain
-link, not a same-page render -- it navigates away like any other link.
+Included at the top of policy_lock_checker.html, health_payout_rates.html and
+life_payout_rates.html so switching between Motor/Health/Life is a normal page nav,
+not a separate view -- each of those pages keeps its own URL/permission/logic.
 {% endcomment %}
 <div class="rc-tabs">
     {% if 'Can_View_Policy_Locker' in nav_pages %}
@@ -21,13 +18,11 @@ link, not a same-page render -- it navigates away like any other link.
         <i class="bi bi-heart-pulse-fill"></i> Health
     </a>
     {% endif %}
-    {% comment %}
-    Life tab disabled 2026-10-11 -- the Life Payout Grid service was decommissioned.
     {% if 'Can_View_Life_Payout_Grid' in nav_pages %}
-    <a href="{% url 'life_payout_grid_redirect' %}" class="rc-tab">
-        <i class="bi bi-percent"></i> Life
+    <a href="{% url 'life_payout_rates' %}"
+       class="rc-tab {% if request.resolver_match.url_name == 'life_payout_rates' %}active{% endif %}">
+        <i class="bi bi-shield-fill-plus"></i> Life
     </a>
     {% endif %}
-    {% endcomment %}
 </div>
 <link rel="stylesheet" href="{% static 'insurance/css/pages/partials_rate_checker_tabs.css' %}">

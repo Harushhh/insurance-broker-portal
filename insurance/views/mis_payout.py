@@ -8,6 +8,7 @@ import mimetypes
 from ..models import MISFile, MappingConfiguration
 from ..forms import MISUploadForm, MappingConfigurationForm
 from ..tasks import process_mis_mapping_task
+from ..services.activity import RUN, UPLOAD, record_activity
 from ..services.mis_payout import get_rule_schema_context
 
 
@@ -33,8 +34,15 @@ def mis_payout_automation(request):
             async_result = process_mis_mapping_task.delay(mis_obj.id)
             mis_obj.celery_task_id = async_result.id
             mis_obj.save(update_fields=['celery_task_id'])
+            # Uploading starts the mapping run, so this one event stands for both;
+            # how the run ended is recorded when it finishes (mapping_engine.py).
+            record_activity(
+                request.user, UPLOAD, "mis.file.uploaded",
+                f"Uploaded MIS file '{mis_obj.uploaded_file.name.split('/')[-1]}' and started the mapping run",
+                target=mis_obj,
+            )
 
-            msg = "File uploaded successfully. The mapping engine has started processing in the background."
+            msg ="File uploaded successfully. The mapping engine has started processing in the background."
             return redirect('mis_payout_automation')
         else:
             error = "Please upload a valid CSV or Excel file."
@@ -108,6 +116,11 @@ def cancel_mis_processing(request, file_id):
             "message": f"File #{file_id} finished as {mis_obj.status.title()} before it could be cancelled."
         })
 
+    record_activity(
+        request.user, RUN, "mis.run.cancelled",
+        f"Cancelled the MIS mapping run for '{mis_obj.uploaded_file.name.split('/')[-1]}'",
+        target=mis_obj,
+    )
     return JsonResponse({"success": True, "message": f"File #{file_id} cancelled."})
 
 

@@ -442,7 +442,7 @@ class PremiumValidationMappingTests(TestCase):
         self.assertEqual(list(out["Mapping Status"]), [BAD_DATA, MATCH])
 
     def test_health_rows_and_unrecognised_products_are_never_validated(self):
-        # Product routing comes first: a Health row (or an unrecognised product) carrying
+        # Product routing comes first: a Health row, a Life row (or an unrecognised product) carrying
         # premium columns that would fail the Motor rules must not be touched by them.
         out = self._run([
             _motor("1+1", od=2400, tp=5883),
@@ -451,11 +451,16 @@ class PremiumValidationMappingTests(TestCase):
                 "Policy: inception date": "01/08/2026", "Policy: expiry date": "31/07/2027",
                 "Policy: sub product": "STP", "Policy: total od": 2829, "Policy: tp premium": 2829,
             },
+            _motor("STP", od=2829, tp=2829, Product="non_motor"),
             _motor("STP", od=2829, tp=2829, Product="life"),
         ])
-        self.assertEqual(list(out["Mapping Status"]), [MATCH, MATCH, NO_MATCH])
+        self.assertEqual(list(out["Mapping Status"]), [MATCH, MATCH, NO_MATCH, NO_MATCH])
         self.assertEqual(out.loc[1, "Displaygroupid"], self.health_rate.id)
         self.assertTrue(out.loc[2, "Failure Reason"].startswith("Failed on: Product —"))
+        # The Life route has its own rules (test_mapping_engine_life); with no Life grid live it says so, and
+        # never reports the Motor premium split.
+        self.assertTrue(out.loc[3, "Failure Reason"].startswith("Failed on: Life grid —"))
+        self.assertNotIn("Validation error", out.loc[3, "Failure Reason"])
 
     def test_a_row_failing_the_cc_gvw_guard_and_the_premium_rules_reports_both(self):
         # Neither stops the other (see test_mapping_engine_batch_errors); the CC/GVW text keeps its wording and comes first.

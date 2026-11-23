@@ -48,11 +48,38 @@ urlpatterns = [
     path("audit-log/", page_access_required("Can_View_Audit_Log")(views.audit_logs), name="audit_logs"),
     path("audit-log/export/", page_access_required("Can_View_Audit_Log")(views.export_audit_log_xlsx), name="export_audit_log_xlsx"),
     path("user-management/", staff_required(views.user_management), name="user_management"),
+    # Team Activity: the page gate only; which people's events a user sees comes from the Reports To
+    # hierarchy (services/team_scope.py).
+    path("team-activity/", page_access_required("Can_View_Team_Activity")(views.team_activity), name="team_activity"),
+    path("team-activity/export/", page_access_required("Can_View_Team_Activity")(views.export_team_activity_xlsx), name="export_team_activity_xlsx"),
     path("grid-management/", page_access_required("Can_View_Grid_Management")(views.grid_management), name="grid_management"),
     # Life Payout Grid routes disabled 2026-10-11 (service decommissioned) --
     # see the matching note above _life_payout_grid_handoff in views.py.
     # path("life-payout-grid/", page_access_required("Can_View_Life_Payout_Grid")(views.life_payout_grid_redirect), name="life_payout_grid_redirect"),
     # path("life-payout-grid/admin/", super_admin_required(views.life_payout_grid_admin_redirect), name="life_payout_grid_admin_redirect"),
+
+    # Life: the Life Rate Checker (search only), and the Life Rate Master where the stored rows, the insurer notes and
+    # the uploads of the Life workbook are viewed and edited
+    path("life-payout-rates/", page_access_required("Can_View_Life_Payout_Grid")(views.life_payout_rates), name="life_payout_rates"),
+    path("life-rate-master/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master), name="life_rate_master"),
+    path("life-rate-master/notes/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_notes), name="life_rate_master_notes"),
+    path("life-rate-master/notes/add/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_note_add), name="life_rate_master_note_add"),
+    path("life-rate-master/notes/<int:pk>/edit/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_note_edit), name="life_rate_master_note_edit"),
+    path("life-rate-master/uploads/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_uploads), name="life_rate_master_uploads"),
+    path("life-rate-master/upload/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_upload), name="life_rate_master_upload"),
+    path("life-rate-master/uploads/standard/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_upload_standard), name="life_rate_master_upload_standard"),
+    path("life-rate-master/uploads/template/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_template), name="life_rate_master_template"),
+    path("life-rate-master/uploads/<int:pk>/review/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_review), name="life_rate_master_review"),
+    path("life-rate-master/uploads/<int:pk>/discard/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_discard), name="life_rate_master_discard"),
+    path("life-rate-master/uploads/<int:pk>/delete/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_delete_upload), name="life_rate_master_delete_upload"),
+    path("life-rate-master/dashboard/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_dashboard), name="life_rate_master_dashboard"),
+    path("life-rate-master/dashboard/download/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_dashboard_download), name="life_rate_master_dashboard_download"),
+    path("life-rate-master/activate/<int:pk>/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_activate), name="life_rate_master_activate"),
+    path("life-rate-master/edit/<int:pk>/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_edit), name="life_rate_master_edit"),
+    path("life-rate-master/add/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_add), name="life_rate_master_add"),
+    path("life-rate-master/delete/<int:pk>/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_delete), name="life_rate_master_delete"),
+    path("life-rate-master/bulk-update/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_bulk_update), name="life_rate_master_bulk_update"),
+    path("life-rate-master/export/", page_access_required("Can_View_Life_Rate_Master")(views.life_rate_master_export), name="life_rate_master_export"),
 
     # Special Rate Requests
     path("special-rates/", page_access_required("Can_View_Special_Rates")(views.special_rate_requests), name="special_rate_requests"),
@@ -166,6 +193,13 @@ urlpatterns = [
     path("mis-mapping/add/", page_access_required("Can_View_MIS_Payout_Engine")(views.add_mis_mapping), name="add_mis_mapping"),
     path("mis-mapping/edit/<int:pk>/", page_access_required("Can_View_MIS_Payout_Engine")(views.edit_mis_mapping), name="edit_mis_mapping"),
     path("mis-mapping/delete/<int:pk>/", page_access_required("Can_View_MIS_Payout_Engine")(views.delete_mis_mapping), name="delete_mis_mapping"),
+    # Life Mapping: which Life insurer and which Life grid products a MIS spelling stands for (the engine's Life route)
+    path("life-mis-mapping/", page_access_required("Can_View_MIS_Payout_Engine")(views.life_plan_mapping), name="life_plan_mapping"),
+    path("life-mis-mapping/save/", page_access_required("Can_View_MIS_Payout_Engine")(views.life_plan_mapping_save), name="life_plan_mapping_save"),
+    path("life-mis-mapping/delete/<int:pk>/", page_access_required("Can_View_MIS_Payout_Engine")(views.life_plan_mapping_delete), name="life_plan_mapping_delete"),
+    path("life-mis-mapping/insurers/", page_access_required("Can_View_MIS_Payout_Engine")(views.life_insurer_aliases), name="life_insurer_aliases"),
+    path("life-mis-mapping/insurers/save/", page_access_required("Can_View_MIS_Payout_Engine")(views.life_insurer_alias_save), name="life_insurer_alias_save"),
+    path("life-mis-mapping/insurers/delete/<int:pk>/", page_access_required("Can_View_MIS_Payout_Engine")(views.life_insurer_alias_delete), name="life_insurer_alias_delete"),
 
     # =========================================================
     # REST API ENDPOINTS (see insurance/api/urls.py: versioned /api/v1/ paths plus the legacy unversioned ones)

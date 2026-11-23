@@ -20,6 +20,19 @@ def cleanup_points_search_logs():
 
 
 @shared_task
+def cleanup_team_activity():
+    """Delete Team Activity events older than TEAM_ACTIVITY_RETENTION_DAYS (90 by default)."""
+    from datetime import timedelta
+    from django.conf import settings
+    from django.utils import timezone
+    from .models import ActivityEvent
+
+    cutoff = timezone.now() - timedelta(days=settings.TEAM_ACTIVITY_RETENTION_DAYS)
+    deleted_count, _ = ActivityEvent.objects.filter(occurred_at__lt=cutoff).delete()
+    return deleted_count
+
+
+@shared_task
 def cleanup_security_audit_logs():
     """Delete Security Audit Log entries older than the 7-day retention window."""
     from datetime import timedelta
@@ -95,7 +108,8 @@ def process_policy_document_task(self, document_id):
     # not pull in the Gemini/OCR stack.
     from .models import PolicyDocumentUpload
     from .services.policy_documents import process_policy_document
-    document_obj = PolicyDocumentUpload.objects.get(id=document_id)
+    # select_related: the uploader goes on the Team Activity feed (services/policy_documents.py).
+    document_obj = PolicyDocumentUpload.objects.select_related("uploaded_by").get(id=document_id)
     process_policy_document(document_obj)
 
 

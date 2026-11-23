@@ -1,0 +1,30 @@
+
+    /* The Life edit pages (a payout row, an insurer's notes): only what edit_health_rate.css, loaded first, lacks. */
+    .edit-meta {
+        display: flex; flex-wrap: wrap; gap: 12px 28px; background: #f8fafc; border: 1px solid #e2e8f0;
+        border-radius: 12px; padding: 14px 18px; margin-bottom: 16px;
+    }
+    .edit-meta div { display: flex; flex-direction: column; gap: 2px; min-width: 120px; }
+    .edit-meta span { font-size: 10.5px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+    .edit-meta strong { font-size: 13.5px; color: #0f172a; font-weight: 600; overflow-wrap: anywhere; }
+    .form-group textarea { font-size: 13.5px; line-height: 1.6; }
+
+    /* The MG and BG parts of a row, each a heading over its own grid of fields */
+    .form-section {
+        margin: 28px 0 14px; padding-top: 18px; border-top: 1px solid #f1f5f9; font-size: 14px; font-weight: 800; color: #0f172a;
+    }
+    .form-section small { margin-left: 6px; font-size: 12.5px; font-weight: 500; color: #64748b; }
+    .form-grid + .form-grid { margin-top: 24px; }
+
+    /* Delete this row */
+    .danger-zone {
+        display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;
+        margin-top: 32px; padding: 18px 20px; border: 1px solid #fecaca; background: #fef2f2; border-radius: 12px;
+    }
+    .danger-zone strong { display: block; color: #991b1b; font-size: 14px; }
+    .danger-zone span { color: #7f1d1d; font-size: 12.5px; }
+    .btn-delete {
+        display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; background: #ffffff; color: #b91c1c;
+        border: 1px solid #fca5a5; border-radius: 10px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+    }
+    .btn-delete:hover { background: #b91c1c; color: #ffffff; border-color: #b91c1c; }

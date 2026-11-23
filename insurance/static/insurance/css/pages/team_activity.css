@@ -1,0 +1,54 @@
+
+    .daterangepicker { border-radius: 12px; font-family: 'Inter', sans-serif; border: 1px solid #e2e8f0; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+    .daterangepicker .drp-buttons .btn-primary { background: #2563eb; border: none; border-radius: 6px; }
+
+    .ta-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 22px 24px; margin-bottom: 20px; }
+    .ta-head { border-top: 4px solid #2563eb; }
+    .ta-head h2 { margin: 0; color: #0f172a; }
+    .ta-sub { color: #64748b; margin: 8px 0 0; font-size: 14px; line-height: 1.5; }
+
+    .ta-filters { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-top: 18px; }
+    .ta-field { display: flex; flex-direction: column; gap: 6px; }
+    .ta-field label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
+    .ta-field select, .ta-field input { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 14px; font-size: 13px; color: #0f172a; background: #fff; height: 40px; min-width: 190px; }
+    .ta-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .ta-btn { height: 40px; padding: 0 18px; border-radius: 8px; font-size: 13px; font-weight: 700; border: none; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
+    .ta-btn-primary { background: #2563eb; color: #fff; }
+    .ta-btn-light { background: #f1f5f9; color: #334155; border: 1px solid #cbd5e1; }
+
+    .ta-empty { display: flex; flex-direction: column; gap: 6px; color: #475569; font-size: 14px; }
+    .ta-empty strong { color: #0f172a; font-size: 16px; }
+
+    .ta-strip h3, .ta-feed h3 { margin: 0 0 14px; font-size: 16px; color: #0f172a; }
+    .ta-strip h3 small, .ta-feed h3 small { font-weight: 500; color: #64748b; font-size: 12px; margin-left: 8px; }
+    .ta-strip-scroll, .ta-feed-scroll { overflow-x: auto; }
+
+    .ta-table { width: 100%; border-collapse: collapse; }
+    .ta-table th { text-align: left; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #fff; background: #0f172a; padding: 11px 12px; white-space: nowrap; }
+    .ta-table td { padding: 11px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #334155; vertical-align: top; }
+    .ta-table .ta-num { text-align: right; white-space: nowrap; }
+    .ta-table a { color: #0284c7; text-decoration: none; font-weight: 700; }
+    .ta-table a:hover { text-decoration: underline; }
+    .ta-person-link { color: #0f172a !important; }
+    .ta-row-active td { background: #eff6ff; }
+    .ta-zero { color: #cbd5e1; }
+    .ta-muted { display: block; color: #64748b; font-size: 12px; }
+    .ta-people .ta-muted { display: inline; margin-left: 6px; }
+    .ta-last { color: #64748b; font-size: 12px; white-space: nowrap; }
+    .ta-time { white-space: nowrap; font-size: 12px; color: #475569; }
+    .ta-what { white-space: normal; max-width: 560px; }
+    .ta-code { color: #94a3b8; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .ta-none { text-align: center; padding: 30px 12px !important; color: #64748b; font-weight: 600; }
+
+    .ta-badge { display: inline-block; padding: 3px 9px; border-radius: 6px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid transparent; }
+    .ta-cat-run { background: #dbeafe; color: #1d4ed8; border-color: #bfdbfe; }
+    .ta-cat-upload { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
+    .ta-cat-test { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
+    .ta-cat-status { background: #fef3c7; color: #92400e; border-color: #fde68a; }
+    .ta-cat-edit { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+
+    .ta-feed-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+    .ta-size-form { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #64748b; margin-bottom: 14px; }
+    .ta-size-form select { border: 1px solid #cbd5e1; border-radius: 8px; padding: 4px 8px; }
+    .ta-pager { display: flex; justify-content: space-between; align-items: center; margin-top: 14px; font-size: 13px; color: #64748b; }
+    .ta-pager a { color: #2563eb; font-weight: 700; text-decoration: none; }

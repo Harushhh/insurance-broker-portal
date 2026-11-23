@@ -2,12 +2,13 @@
 
 A Django portal for an insurance broker. It ingests MIS (Management Information System) files from insurers, maps
 every policy row against the rate-card database to calculate payout, tracks rate-card health and overlaps, and
-serves dashboards for the RTO, Make/Model, Pincode and Health rate masters.
+serves dashboards for the RTO, Make/Model, Pincode and Health rate masters. The Life payout checker is fed by the
+monthly Life workbook, uploaded and read at fixed positions (see `CLAUDE.md`, "Life payout rates").
 
 - **Stack:** Django 6 + Django REST Framework, Celery (Redis) for background work, PostgreSQL (SQLite fallback),
   Cloudflare R2 for media in production, WhiteNoise for static files. Hosted on Railway.
 - **One real app:** everything lives in `insurance/`. `config/` is a leftover scaffold app (see
-  [docs/architecture.md](docs/architecture.md#leftovers)); `life-payout-grid/` is a retired Next.js app kept for reference.
+  [docs/architecture.md](docs/architecture.md#leftovers)); `life-payout-grid/` is a retired Next.js app kept for reference (the Life Rate Checker is now built into the portal).
 
 ## Quick start
 
@@ -71,3 +72,4 @@ time because static files use hashed names. See [docs/operations.md](docs/operat
 - [REST API](docs/api.md)
 - [Operations: processes, environment, jobs, commands](docs/operations.md)
 - [Conventions: naming, errors and logging, tests](docs/conventions.md)
+- [Life grid: the standard file, the review, and what to do when a grid changes](docs/life-grid.md)

@@ -1,6 +1,6 @@
 
     const USERS_DATA = JSON.parse(document.getElementById('users-data').textContent);
-    // Mirrors RATE_CHECKER_GROUPS in insurance/views.py.
+    // Mirrors RATE_CHECKER_GROUPS in insurance/access.py (Motor + Health; Life has its own checkbox).
     const RATE_CHECKER_GROUPS = ['Can_View_Policy_Locker', 'Can_View_Health_Payout_Rates'];
 
     function openModal(id) { document.getElementById(id).style.display = 'flex'; }
@@ -16,7 +16,11 @@
         document.getElementById('edit_email').value = u.email;
         document.getElementById('edit_contact').value = u.contact_number;
         document.getElementById('edit_designation').value = u.designation;
-        document.getElementById('edit_reports_to').value = u.reports_to || '';
+        // Option values are USER ids, and so is u.reports_to. A person cannot be
+        // their own manager, so that option is switched off (the server refuses it too).
+        const reportsTo = document.getElementById('edit_reports_to');
+        Array.from(reportsTo.options).forEach(o => { o.disabled = String(o.value) === String(u.id); });
+        reportsTo.value = u.reports_to || '';
         document.getElementById('edit_is_qc').checked = !!u.is_qc;
         document.getElementById('edit_is_plvc').checked = !!u.is_plvc;
         document.getElementById('edit_personal_qc').checked = !!u.personal_qc;
@@ -76,7 +80,7 @@
     function grantRateCheckerOnlyAndSubmit() {
         if (confirm("Grant this user access to ONLY the Rate Checker (Motor/Health/Life rate lookup), removing every other page permission they currently have? They won't be able to view any other dashboard.")) {
             let checks = document.querySelectorAll('.perm-check');
-            checks.forEach(c => c.checked = (c.value === 'Rate_Checker'));
+            checks.forEach(c => c.checked = (c.value === 'Rate_Checker' || c.value === 'Can_View_Life_Payout_Grid'));
 
             document.getElementById('edit_action_input').value = 'update_user_access';
             document.getElementById('editUserForm').submit();

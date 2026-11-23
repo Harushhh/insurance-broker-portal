@@ -1,0 +1,64 @@
+{% comment %}
+Header, Motor/Health/Life switcher, stat badges and the section links of the Life Rate Master pages.
+Needs: section ("rows", "notes", "uploads" or "dashboard"), upload (the upload being shown), live_upload, stats, upload_query.
+{% endcomment %}
+<div class="d-flex flex-column flex-lg-row justify-content-between align-items-lg-end gap-3 mb-4">
+    <div>
+        <h2 class="mb-1" style="font-weight: 800; color: #0f172a; letter-spacing: -0.02em; font-size: 26px;">
+            Rate Master
+        </h2>
+        <p class="text-muted mb-0" style="font-size: 14px;">View and edit the stored Life payout rows and insurer notes, and upload the monthly workbook.</p>
+    </div>
+
+    {% include "_rate_master_tabs.html" with active="LIFE" %}
+
+    <div class="d-flex flex-wrap gap-2">
+        <div class="stat-badge">
+            <span class="text-overline mb-1" style="font-size: 10px;">Live grid</span>
+            <span style="font-size: 16px; font-weight: 800; color: #0f172a;">{{ live_upload.label|default:"None" }}</span>
+        </div>
+        <div class="stat-badge">
+            <span class="text-overline mb-1" style="font-size: 10px;">Rows</span>
+            <span style="font-size: 16px; font-weight: 800; color: #166534;">{{ stats.rows }}</span>
+        </div>
+        <div class="stat-badge">
+            <span class="text-overline mb-1" style="font-size: 10px;">Insurers</span>
+            <span style="font-size: 16px; font-weight: 800; color: #0f172a;">{{ stats.insurers }}</span>
+        </div>
+        <div class="stat-badge">
+            <span class="text-overline mb-1" style="font-size: 10px;">Edited</span>
+            <span style="font-size: 16px; font-weight: 800; color: #92400e;">{{ stats.edited }}</span>
+        </div>
+    </div>
+</div>
+
+<div class="life-subnav" role="tablist" aria-label="Life Rate Master sections">
+    <a href="{% url 'life_rate_master' %}{{ upload_query }}" class="life-subtab {% if section == 'rows' %}active{% endif %}">
+        <i class="bi bi-table"></i> Payout rows
+    </a>
+    <a href="{% url 'life_rate_master_notes' %}{{ upload_query }}" class="life-subtab {% if section == 'notes' %}active{% endif %}">
+        <i class="bi bi-journal-text"></i> Insurer notes
+    </a>
+    <a href="{% url 'life_rate_master_uploads' %}" class="life-subtab {% if section == 'uploads' %}active{% endif %}">
+        <i class="bi bi-cloud-arrow-up"></i> Uploads
+    </a>
+    <a href="{% url 'life_rate_master_dashboard' %}{{ upload_query }}" class="life-subtab {% if section == 'dashboard' %}active{% endif %}">
+        <i class="bi bi-bar-chart-line"></i> Dashboard
+    </a>
+</div>
+
+{% if upload and not upload.is_active and section != 'uploads' %}
+<div class="life-banner">
+    {% if upload.is_pending %}
+    <span><i class="bi bi-hourglass-split"></i> You are looking at <strong>{{ upload.label }}</strong>, which is waiting for review and is not live. The Rate Checker does not use it{% if live_upload %}; it uses <strong>{{ live_upload.label }}</strong>{% endif %}.</span>
+    <a href="{% url 'life_rate_master_review' upload.id %}" class="btn-soft" style="padding: 4px 12px; font-size: 12px; height: auto;">Review what it changes</a>
+    {% else %}
+    <span><i class="bi bi-exclamation-triangle-fill"></i> You are looking at <strong>{{ upload.label }}</strong>, an earlier upload. The Rate Checker does not use it{% if live_upload %}; it uses <strong>{{ live_upload.label }}</strong>{% endif %}.</span>
+    <form method="POST" action="{% url 'life_rate_master_activate' upload.id %}" onsubmit="return confirm('Make {{ upload.label|escapejs }} the live Life grid?');">
+        {% csrf_token %}
+        <button type="submit" class="btn-soft" style="padding: 4px 12px; font-size: 12px; height: auto;">Make it live</button>
+    </form>
+    {% endif %}
+    <a href="{% url 'life_rate_master' %}" class="btn-text" style="font-size: 12px;">Back to the live grid</a>
+</div>
+{% endif %}

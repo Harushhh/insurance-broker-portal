@@ -1,0 +1,68 @@
+{% load custom_filters %}{% comment %}
+The Life payout table, shared by the Rate Checker and the Life Rate Master (styles: life_table.css).
+Needs: rows, and columns = [(attribute, header), ...] for the payout columns to show.
+The Life Rate Master includes it with master=True, inside its bulk-edit form: the first column is a tick box and the row's
+ID instead of a running number, each row also shows where in the workbook it was read from and who last changed it, and
+ends with an Edit button.
+With master each year shows the MG (what the insurer pays the broker, small and grey) above the BG (the partner
+payout, the number the Rate Checker shows). The Rate Checker includes it without master: nothing on that page changes
+a rate, and it never sees the MG.
+{% endcomment %}<div class="life-results-host">
+    <div class="table-responsive-custom life-results">
+        <table class="table-modern life-table">
+            <thead>
+                <tr>
+                    <th class="life-c-rank">{% if master %}<label class="life-pick" title="Select every row on this page"><input type="checkbox" id="lifeSelectPage" aria-label="Select every row on this page"> ID</label>{% else %}#{% endif %}</th>
+                    <th class="life-c-insurer">Insurer</th>
+                    <th class="life-c-category">Category</th>
+                    <th class="cell-wrap life-c-product">Product</th>
+                    <th class="life-c-ppt">PPT</th>
+                    <th class="life-c-pt">PT</th>
+                    {% for attr, header in columns %}<th class="life-num">{{ header }}</th>{% endfor %}
+                    <th class="cell-wrap life-c-notes">Notes</th>
+                    {% if master %}<th class="life-c-edit">Edit</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in rows %}
+                <tr{% if master %} id="row-{{ row.id }}"{% endif %}>
+                    <td class="life-rank life-d-rank">{% if master %}<label class="life-pick"><input type="checkbox" class="life-row-check" name="selected_rows" value="{{ row.id }}" aria-label="Select row {{ row.id }}"><span class="life-id">{{ row.id }}</span></label>{% else %}<span class="life-id">{{ forloop.counter }}</span>{% endif %}</td>
+                    <td class="life-d-insurer">{{ row.insurer }}</td>
+                    <td class="life-d-category">{{ row.category|default:"-" }}</td>
+                    <td class="cell-wrap life-d-product">
+                        <strong>{{ row.product|default:"-" }}</strong>
+                        {% if row.variant %}<div class="life-sub">{{ row.variant }}</div>{% endif %}
+                        {% if row.section %}<div class="life-sub">{{ row.section }}</div>{% endif %}
+                        {% if row.from_date or row.to_date %}<div class="life-sub life-valid" title="The row applies on these dates, both included">{% if row.from_date and row.to_date %}Valid {{ row.from_date|date:"d M Y" }} &ndash; {{ row.to_date|date:"d M Y" }}{% elif row.to_date %}Valid till {{ row.to_date|date:"d M Y" }}{% else %}Valid from {{ row.from_date|date:"d M Y" }}{% endif %}</div>{% endif %}
+                        {% if master and row.source_ref %}<div class="life-sub life-src">{{ row.source_ref }}</div>{% endif %}
+                    </td>
+                    <td class="life-d-ppt" data-label="PPT">{{ row.ppt|default:"-" }}</td>
+                    <td class="life-d-pt" data-label="PT">{{ row.pt|default:"-" }}</td>
+                    {% for attr, header in columns %}
+                        {% with value=row|get_attr:attr %}
+                        <td class="life-num" data-label="{{ header }}">
+                            {% if master %}{% with suffix=attr|cut:"payout_" %}{% with mg_attr="mg_"|add:suffix %}{% with mg=row|get_attr:mg_attr %}<span class="life-mg" title="MG: what the insurer pays the broker">{% if mg is None %}-{% else %}{{ mg|life_rate }}%{% endif %}</span>{% endwith %}{% endwith %}{% endwith %}{% endif %}
+                            {% if value is None %}<span class="text-muted">-</span>
+                            {% elif forloop.first %}<span class="rate-highlight">{{ value|life_rate }}%</span>
+                            {% else %}{{ value|life_rate }}%{% endif %}
+                        </td>
+                        {% endwith %}
+                    {% endfor %}
+                    <td class="cell-wrap life-d-notes{% if not row.condition %}{% if not row.remarks %}{% if not master or not row.is_edited %} life-empty{% endif %}{% endif %}{% endif %}">
+                        {% if row.condition %}<span class="life-pill">{{ row.condition }}</span>{% endif %}
+                        {% if row.remarks %}<div class="life-sub">{{ row.remarks }}</div>{% endif %}
+                        {% if master and row.is_edited %}<span class="life-edited" title="{% if row.added_on_screen %}Added{% else %}Changed{% endif %} on screen {{ row.edited_at|date:'d M Y' }}{% if row.edited_by %} by {{ row.edited_by.username }}{% endif %}">{% if row.added_on_screen %}added{% else %}edited{% endif %}</span>{% endif %}
+                    </td>
+                    {% if master %}
+                    <td class="life-d-edit">
+                        <a href="{% url 'life_rate_master_edit' row.id %}?next={{ request.get_full_path|urlencode }}" class="btn-soft life-edit-link" title="Edit this row" aria-label="Edit row {{ row.id }}">
+                            <i class="bi bi-pencil-square text-primary"></i><span class="life-edit-text"> Edit</span>
+                        </a>
+                    </td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>

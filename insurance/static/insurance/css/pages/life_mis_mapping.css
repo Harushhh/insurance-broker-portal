@@ -1,0 +1,20 @@
+
+    /* Life Mapping (MIS Payout Engine): only what the Health Rate Master and Life Rate Master stylesheets, loaded first, lack. */
+    .life-form { padding: 20px 24px 24px; }
+    .life-form .form-label { font-size: 12px; font-weight: 800; color: #475569; text-transform: uppercase; letter-spacing: 0.04em; }
+
+    /* The grid products a mapping stands for, one chip per line */
+    .life-chip-plain {
+        display: inline-block; margin: 0 4px 4px 0; padding: 2px 8px; border-radius: 6px; font-size: 12px;
+        background: #f1f5f9; color: #334155; border: 1px solid #e2e8f0; overflow-wrap: anywhere;
+    }
+    .life-stale { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11.5px; font-weight: 700; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+    .life-actions { white-space: nowrap; }
+    .life-actions form { display: inline-block; margin-left: 4px; }
+
+    /* Product picker under the grid-products box: filter a insurer's products, click to add them as lines */
+    .life-picker { border: 1px solid #e2e8f0; border-radius: 12px; padding: 12px; background: #f8fafc; }
+    .life-picker-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 8px; }
+    .life-picker-head .form-control { max-width: 380px; }
+    .life-picker select { font-size: 13px; }
+    .life-picker-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }

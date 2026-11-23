@@ -47,7 +47,7 @@
                 </li>
                 {% endif %}
 
-                {% if 'Can_View_Motor_Payout_Rates' in nav_pages or 'Can_View_Health_Payout_Rates' in nav_pages or 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Locked_Policies' in nav_pages or 'Can_View_Motor_Points_Logs' in nav_pages or 'Can_View_Rate_Master_Health' in nav_pages or 'Can_View_Special_Rates' in nav_pages or 'Can_Review_Special_Rates' in nav_pages %}
+                {% if 'Can_View_Motor_Payout_Rates' in nav_pages or 'Can_View_Health_Payout_Rates' in nav_pages or 'Can_View_Life_Payout_Grid' in nav_pages or 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Locked_Policies' in nav_pages or 'Can_View_Motor_Points_Logs' in nav_pages or 'Can_View_Rate_Master_Health' in nav_pages or 'Can_View_Special_Rates' in nav_pages or 'Can_Review_Special_Rates' in nav_pages %}
                 <li class="nav-title">Rates & Policies</li>
                 {% endif %}
                 {% if 'Can_View_Special_Rates' in nav_pages %}
@@ -71,9 +71,9 @@
                     </a>
                 </li>
                 {% endif %}
-                {% if 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Health_Payout_Rates' in nav_pages %}
+                {% if 'Can_View_Policy_Locker' in nav_pages or 'Can_View_Health_Payout_Rates' in nav_pages or 'Can_View_Life_Payout_Grid' in nav_pages %}
                 <li class="nav-item">
-                    <a href="{% url 'rate_checker' %}" class="nav-link {% if request.resolver_match.url_name == 'policy_lock_checker' or request.resolver_match.url_name == 'health_payout_rates' or request.resolver_match.url_name == 'rate_checker' %}active{% endif %}">
+                    <a href="{% url 'rate_checker' %}" class="nav-link {% if request.resolver_match.url_name == 'policy_lock_checker' or request.resolver_match.url_name == 'health_payout_rates' or request.resolver_match.url_name == 'life_payout_rates' or request.resolver_match.url_name == 'rate_checker' %}active{% endif %}">
                         <i class="bi bi-calculator-fill"></i> Rate Checker
                     </a>
                 </li>
@@ -130,9 +130,14 @@
                         <i class="bi bi-cash-stack"></i> MIS Payout Engine
                     </a>
                 </li>
+                <li class="nav-item">
+                    <a href="{% url 'life_plan_mapping' %}" class="nav-link {% if '/life-mis-mapping/' in request.path %}active{% endif %}">
+                        <i class="bi bi-diagram-3"></i> Life Mapping
+                    </a>
+                </li>
                 {% endif %}
 
-                {% if 'Can_View_Dashboard' in nav_pages or 'Can_View_RTO_Dashboard' in nav_pages or 'Can_View_Make_Model_Dashboard' in nav_pages or 'Can_View_Missing_Make_Model' in nav_pages or 'Can_View_Pincode_Dashboard' in nav_pages or 'Can_Upload_CSV' in nav_pages %}
+                {% if 'Can_View_Dashboard' in nav_pages or 'Can_View_Life_Rate_Master' in nav_pages or 'Can_View_RTO_Dashboard' in nav_pages or 'Can_View_Make_Model_Dashboard' in nav_pages or 'Can_View_Missing_Make_Model' in nav_pages or 'Can_View_Pincode_Dashboard' in nav_pages or 'Can_Upload_CSV' in nav_pages %}
                 <li class="nav-title">Master Data</li>
                 {% endif %}
                 {% if 'Can_View_Dashboard' in nav_pages %}
@@ -146,6 +151,13 @@
                 <li class="nav-item">
                     <a href="{% url 'health_rate_master' %}" class="nav-link {% if request.path == '/health-rate-master/' %}active{% endif %}">
                         <i class="bi bi-heart-pulse"></i> Health Rate Master
+                    </a>
+                </li>
+                {% endif %}
+                {% if 'Can_View_Life_Rate_Master' in nav_pages %}
+                <li class="nav-item">
+                    <a href="{% url 'life_rate_master' %}" class="nav-link {% if request.path == '/life-rate-master/' %}active{% endif %}">
+                        <i class="bi bi-shield-fill-plus"></i> Life Rate Master
                     </a>
                 </li>
                 {% endif %}
@@ -189,7 +201,7 @@
                     </a>
                 </li>
                 {% endif %}
-                {% if 'Can_View_Analysis' in nav_pages or 'Can_View_Grid_Management' in nav_pages or nav_can_access_control or 'Can_View_Audit_Log' in nav_pages %}
+                {% if 'Can_View_Analysis' in nav_pages or 'Can_View_Grid_Management' in nav_pages or nav_can_access_control or 'Can_View_Audit_Log' in nav_pages or 'Can_View_Team_Activity' in nav_pages %}
                 <li class="nav-title">Administration</li>
                 {% endif %}
                 {% if 'Can_View_Analysis' in nav_pages %}
@@ -229,6 +241,13 @@
                 <li class="nav-item">
                     <a href="{% url 'audit_logs' %}" class="nav-link {% if request.path == '/audit-log/' %}active{% endif %}">
                         <i class="bi bi-journal-code"></i> Audit Logs
+                    </a>
+                </li>
+                {% endif %}
+                {% if 'Can_View_Team_Activity' in nav_pages %}
+                <li class="nav-item">
+                    <a href="{% url 'team_activity' %}" class="nav-link {% if request.path == '/team-activity/' %}active{% endif %}">
+                        <i class="bi bi-people"></i> Team Activity
                     </a>
                 </li>
                 {% endif %}

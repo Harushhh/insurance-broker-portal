@@ -46,6 +46,11 @@ PAGE_GROUPS = [
     "Can_View_Special_Rates",
     "Can_Review_Special_Rates",
     "Can_View_Life_Payout_Grid",
+    "Can_View_Life_Rate_Master",
+    # Team Activity: the page gate only. Which people's activity a user sees on
+    # it comes from UserProfile.reports_to (services/team_scope.py), and ADMIN
+    # sees every team.
+    "Can_View_Team_Activity",
 ]
 
 # Rate Checker: the sidebar entry that sends a user to the first of these pages they
@@ -53,16 +58,20 @@ PAGE_GROUPS = [
 RATE_CHECKER_TABS = [
     ("Can_View_Policy_Locker", "policy_lock_checker"),
     ("Can_View_Health_Payout_Rates", "health_payout_rates"),
-    # Life tab disabled 2026-10-11 along with the Life Payout Grid service.
-    # ("Can_View_Life_Payout_Grid", "life_payout_grid_redirect"),
+    # Life: the Life Rate Checker (uploaded Life workbook, see views/life_rates.py). The group keeps the name
+    # it had when it opened the old Life Payout Grid service (switched off 2026-10-11).
+    ("Can_View_Life_Payout_Grid", "life_payout_rates"),
 ]
 
 # The single "Rate Checker" checkbox in the /user-management/ Page
-# Permissions grid stands in for these three real page-access groups (see
+# Permissions grid stands in for these two real page-access groups (see
 # user_management() below). It shows checked only when a user already holds
-# all three -- so saving without deliberately re-checking it revokes a
-# partial subset rather than silently granting the rest.
-RATE_CHECKER_GROUPS = {group_name for group_name, _ in RATE_CHECKER_TABS}
+# both -- so saving without deliberately re-checking it revokes a partial
+# subset rather than silently granting the rest. Life has its own checkbox
+# ("Life Payout Rates"), deliberately NOT part of this bundle: adding it would
+# make every user who holds Motor + Health show unticked here, and the next
+# save would revoke both.
+RATE_CHECKER_GROUPS = {"Can_View_Policy_Locker", "Can_View_Health_Payout_Rates"}
 
 
 def staff_required(view_func):

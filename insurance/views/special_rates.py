@@ -7,6 +7,7 @@ from django.db.models import Count
 import json
 from ..models import SpecialRateRequest
 from ..forms import MgBgRateRequestForm, BgRateRequestForm
+from ..services.activity import STATUS, record_activity
 import logging
 
 
@@ -29,6 +30,11 @@ def special_rate_requests(request):
             req_obj.rate_type = "MG-BG"
             req_obj.requested_by = request.user
             req_obj.save()
+            # No entry number: it is typed in by the requester and can be any reference.
+            record_activity(
+                request.user, STATUS, "special_rate.requested", "Submitted a Special MG-BG rate request",
+                target=req_obj, extra={"rate_type": "MG-BG"},
+            )
             messages.success(request, f"✅ Your Special MG-BG request (Entry No {req_obj.entry_no}) has been submitted.")
             return redirect("special_rate_requests")
         messages.error(request, "⚠️ Please correct the errors below and resubmit.")
@@ -41,6 +47,10 @@ def special_rate_requests(request):
             req_obj.rate_type = "BG"
             req_obj.requested_by = request.user
             req_obj.save()
+            record_activity(
+                request.user, STATUS, "special_rate.requested", "Submitted a Special BG rate request",
+                target=req_obj, extra={"rate_type": "BG"},
+            )
             messages.success(request, f"✅ Your Special BG request (Entry No {req_obj.entry_no}) has been submitted.")
             return redirect("special_rate_requests")
         messages.error(request, "⚠️ Please correct the errors below and resubmit.")
@@ -115,10 +125,16 @@ def update_special_rate_request_status(request):
             if not req_obj.can_be_reviewed_by(request.user):
                 return JsonResponse({"success": False, "message": "You are not an assigned approver for this request."}, status=403)
 
+            old_status = req_obj.status
             req_obj.status = new_status
             req_obj.reviewed_by = request.user
             req_obj.reviewed_at = timezone.now()
             req_obj.save()
+            record_activity(
+                request.user, STATUS, "special_rate.reviewed",
+                f"Set a Special {req_obj.rate_type} rate request to {new_status.title()}",
+                target=req_obj, extra={"from": old_status, "to": new_status, "rate_type": req_obj.rate_type},
+            )
 
             return JsonResponse({"success": True})
 

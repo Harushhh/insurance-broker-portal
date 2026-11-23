@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Life Payout Rates - Insurance Portal{% endblock %}
+
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+<link rel="stylesheet" href="{% static 'insurance/css/pages/health_payout_rates.css' %}">
+<link rel="stylesheet" href="{% static 'insurance/css/pages/life_table.css' %}">
+<link rel="stylesheet" href="{% static 'insurance/css/pages/life_payout_rates.css' %}">
+
+{% include "partials/rate_checker_tabs.html" %}
+
+<div class="master-card">
+
+    <h1 class="page-title">Life Payout Checker</h1>
+    <p class="page-subtitle">Find the partner payout for a Life plan. Results are ranked by the first-year payout.</p>
+
+    {% if upload %}
+    <div class="life-grid-badge">
+        <i class="bi bi-file-earmark-spreadsheet"></i>
+        Live grid: <strong>{{ upload.label }}</strong>
+        <span class="life-grid-meta">updated {{ upload.uploaded_at|date:"d M Y" }} &middot; {{ upload.row_count }} rows &middot; {{ upload.insurer_count }} insurers</span>
+    </div>
+
+    <div class="inner-form-box">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+            <div class="inner-form-header mb-0">
+                <i class="bi bi-search"></i> Choose the plan to check:
+            </div>
+            <button type="button" class="btn btn-warning btn-sm shadow-sm" onclick="openTicketModal()">
+                <i class="bi bi-exclamation-triangle"></i> Raise Issue / Ticket
+            </button>
+        </div>
+
+        {% include "partials/ticket_modal.html" %}
+
+        <form method="GET" id="lifeCheckForm">
+            <div class="row g-4">
+                <div class="col-12 col-md-6 col-lg-4">
+                    <label class="text-overline">Insurer</label>
+                    <select name="insurer" id="insurerSelect" multiple="multiple" class="form-select-saas w-100">
+                        {% for name in insurer_list %}<option value="{{ name }}" {% if name in selected.insurers %}selected{% endif %}>{{ name }}</option>{% endfor %}
+                        {% for name in selected.insurers %}{% if name not in insurer_list %}<option value="{{ name }}" selected>{{ name }}</option>{% endif %}{% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-6 col-lg-4">
+                    <label class="text-overline">Category</label>
+                    <select name="category" class="form-select-saas life-select">
+                        <option value=""></option>
+                        {% for value in category_options %}<option value="{{ value }}" {% if selected.category == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-6 col-lg-4">
+                    <label class="text-overline">Product</label>
+                    <select name="product" class="form-select-saas life-select">
+                        <option value=""></option>
+                        {% if selected.product %}<option value="{{ selected.product }}" selected>{{ selected.product }}</option>{% endif %}
+                    </select>
+                </div>
+                <div class="col-6 col-md-3 col-lg-2">
+                    <label class="text-overline">Payment Mode</label>
+                    <select name="payment_mode" id="paymentMode" class="form-select-saas life-select">
+                        <option value=""></option>
+                        {% for value in payment_mode_options %}<option value="{{ value }}" {% if selected.payment_mode == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+                    </select>
+                    <div class="life-sub">SP = Single Pay &middot; LP = Limited Pay &middot; RP = Regular Pay</div>
+                </div>
+                <div class="col-6 col-md-3 col-lg-2" id="pptGroup" {% if selected.payment_mode == 'SP' %}style="display: none;"{% endif %}>
+                    <label class="text-overline">PPT</label>
+                    <select name="ppt" id="pptSelect" class="form-select-saas life-select" {% if selected.payment_mode == 'SP' %}disabled{% endif %}>
+                        <option value=""></option>
+                        {% for value in ppt_options %}<option value="{{ value }}" {% if selected.ppt == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="col-6 col-md-3 col-lg-2">
+                    <label class="text-overline">PT</label>
+                    <select name="pt" class="form-select-saas life-select">
+                        <option value=""></option>
+                        {% for value in pt_options %}<option value="{{ value }}" {% if selected.pt == value %}selected{% endif %}>{{ value }}</option>{% endfor %}
+                    </select>
+                </div>
+                <div class="col-6 col-md-3 col-lg-2">
+                    <label class="text-overline" for="lifeTargetDate">Date</label>
+                    <input type="date" name="target_date" id="lifeTargetDate" value="{{ selected.target_date|date:'Y-m-d' }}" class="form-control-saas">
+                    <div class="life-sub">Only rows that apply on this date; empty = every row</div>
+                </div>
+                <div class="col-12 col-md-6 col-lg-4">
+                    <label class="text-overline">Search</label>
+                    <input type="text" name="q" placeholder="Plan name, variant, remark ... (all words must match)" value="{{ selected.q }}" class="form-control-saas">
+                </div>
+            </div>
+
+            <div class="action-bar">
+                <div class="d-flex align-items-center">
+                    <button class="btn-gradient me-3" type="submit">Check Payout</button>
+                    <a class="btn-clear" href="{% url 'life_payout_rates' %}">Clear All</a>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <div class="mt-4 pt-2">
+        {% if has_searched %}
+            <h6 class="fw-bold" style="color: #0f172a; font-size: 15px;">
+                Matches Found: <span style="color: #2563eb;">{{ total_found }}</span>
+                {% if has_more %}<span class="text-muted fw-normal" style="font-size: 13px;">(showing the first {{ max_results }}, best first-year payout first)</span>{% endif %}
+            </h6>
+
+            {% if data %}
+                {% include "partials/life_rate_table.html" with rows=data %}
+
+                {% if notes %}
+                <div class="life-notes">
+                    <h6 class="fw-bold mb-2" style="color: #0f172a; font-size: 14px;"><i class="bi bi-journal-text"></i> Notes &amp; conditions</h6>
+                    {% for insurer, text in notes.items %}
+                    <details>
+                        <summary>{{ insurer }}</summary>
+                        <div class="life-notes-text">{{ text|linebreaksbr }}</div>
+                    </details>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="p-5 text-center mt-3" style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: var(--radius-inner);">
+                    <i class="bi bi-clipboard-x text-muted opacity-50 d-block mb-3" style="font-size: 48px;"></i>
+                    <h5 class="fw-bold text-slate-800">No payout rows found.</h5>
+                    <p class="text-muted mb-0">Try fewer filters or different words.</p>
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="p-5 text-center mt-3" style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: var(--radius-inner);">
+                <i class="bi bi-search text-muted opacity-50 d-block mb-3" style="font-size: 48px;"></i>
+                <h5 class="fw-bold text-slate-800">Choose a plan to check its payout.</h5>
+                <p class="text-muted mb-0">Pick an insurer, category or product above, or just click "Check Payout" to see the best payouts first.</p>
+            </div>
+        {% endif %}
+    </div>
+
+    {% else %}
+    <div class="p-5 text-center mt-3" style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: var(--radius-inner);">
+        <i class="bi bi-file-earmark-spreadsheet text-muted opacity-50 d-block mb-3" style="font-size: 48px;"></i>
+        <h5 class="fw-bold text-slate-800">No Life payout grid has been uploaded yet.</h5>
+        <p class="text-muted mb-0">
+            {% if 'Can_View_Life_Rate_Master' in nav_pages %}
+                <a href="{% url 'life_rate_master_uploads' %}">Upload the Life workbook</a> to start.
+            {% else %}
+                Ask an administrator to upload this month's Life workbook.
+            {% endif %}
+        </p>
+    </div>
+    {% endif %}
+
+</div>
+
+{{ filter_rows|json_script:"life-filter-rows" }}
+<input type="hidden" id="lifeCsrfToken" value="{{ csrf_token }}">
+<script src="{% static 'insurance/js/pages/life_payout_rates.js' %}"></script>
+{% endblock %}

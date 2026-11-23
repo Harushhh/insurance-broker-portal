@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Edit Life Insurer Notes{% endblock %}
+
+{% block content %}
+<div class="edit-wrapper">
+    <div class="edit-card">
+
+        <div class="edit-header">
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <div class="header-icon">
+                    <i class="bi bi-journal-text" style="font-size: 22px;"></i>
+                </div>
+                <div>
+                    <h2 style="margin: 0; color: #0f172a; font-size: 22px;">Edit notes: {{ note.insurer }}</h2>
+                    <p style="margin: 4px 0 0; color: #64748b; font-size: 13.5px;">{{ note.upload.label }} upload{% if note.upload.is_active %} (live){% endif %}</p>
+                </div>
+            </div>
+            <a href="{{ next_url }}" class="btn-back">&larr; Back</a>
+        </div>
+
+        <p style="color: #64748b; font-size: 13px; margin-bottom: 24px;">
+            The terms and conditions written under this insurer's tables in the workbook; the Rate Checker shows them under its results.
+            A change made here applies to this upload only; uploading the next workbook replaces it. Emptying the box removes the notes from the Rate Checker.
+        </p>
+
+        <form method="POST">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ next_url }}">
+            {% if form.non_field_errors %}
+                <div class="error-text" style="margin-bottom: 16px;">{{ form.non_field_errors|striptags }}</div>
+            {% endif %}
+            <div class="form-group">
+                <label for="{{ form.text.id_for_label }}">{{ form.text.label }}</label>
+                {{ form.text }}
+                {% if form.text.errors %}
+                    <div class="error-text">{{ form.text.errors|striptags }}</div>
+                {% endif %}
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn-submit">
+                    <i class="bi bi-check-circle-fill"></i>
+                    Save Changes
+                </button>
+                <a href="{{ next_url }}" class="btn-cancel">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<link rel="stylesheet" href="{% static 'insurance/css/pages/edit_health_rate.css' %}">
+<link rel="stylesheet" href="{% static 'insurance/css/pages/edit_life.css' %}">
+{% endblock %}

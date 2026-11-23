@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from ..models import PolicyDocumentUpload, PolicyMISRecord
 from ..utils import extract_data_with_gemini
+from .activity import RUN, record_activity
 import logging
 
 
@@ -98,9 +99,19 @@ def process_policy_document(document_obj):
             }
         )
 
+        # No file name or extracted value: a policy document's name and content are personal data.
+        record_activity(
+            document_obj.uploaded_by, RUN, "ocr.document.extracted",
+            "AI extraction finished for a policy document", target=document_obj,
+        )
+
     except Exception as e:
         logger.exception("AI extraction failed for policy document %s", document_obj.pk)
         document_obj.status = PolicyDocumentUpload.STATUS_FAILED
         document_obj.error_message = str(e)
         document_obj.processed_at = timezone.now()
         document_obj.save(update_fields=["status", "error_message", "processed_at"])
+        record_activity(
+            document_obj.uploaded_by, RUN, "ocr.document.failed",
+            "AI extraction failed for a policy document", target=document_obj,
+        )

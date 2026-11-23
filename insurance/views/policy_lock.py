@@ -5,6 +5,7 @@ from django.http import JsonResponse
 import json
 from datetime import datetime
 from ..models import RateMaster, ProductMaster, SubProductMaster, FuelTypeMaster, MakeModelClassMaster, LockedPolicy
+from ..services.activity import STATUS, record_activity
 from ..services.make_model import NA_MAKE_MODEL_MAP, get_dynamic_make_model_class_list, get_make_mapping_context, get_translated_make_model
 from ..services.policy_lock import _run_policy_lock_checker_search
 
@@ -132,6 +133,12 @@ def lock_unlock_policy(request, rate_id):
     obj.locked_by = request.user
     obj.locked_at = timezone.now()
     obj.save()
+    # Product and insurer only: the vehicle number and policy holder are personal data.
+    kind = f"a {obj.product_name} policy" if obj.product_name else "a policy"
+    record_activity(
+        request.user, STATUS, "policy.locked",
+        f"Locked {kind} with {obj.insurance_company or 'an insurer'}", target=obj,
+    )
 
     return JsonResponse({"success": True, "message": f"Successfully locked policy for {vehicle_no}."})
 

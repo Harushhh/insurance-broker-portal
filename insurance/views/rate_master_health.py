@@ -12,6 +12,7 @@ from datetime import datetime
 from openpyxl import Workbook
 from ..models import AuditLog, MISFailedRow, RateOverlapScan, RateOverlapPair
 from ..tasks import run_rate_overlap_scan_task
+from ..services.activity import RUN, record_activity
 from ..services.overlap import OVERLAP_RULES_MAP, _active_overlap_scan, _active_rate_master_insurers, _active_rate_master_products, _fmt_axis_side, _fmt_bound, _latest_overlap_scan, _overlap_counts, _rate_group_rows, _scan_scope_label
 from ..services.rate_master_checks import EQUALITY_ERROR_RULES_MAP, PI_PO_ERROR_RULES_MAP, PI_TYPE_RULES_MAP, RANGE_ERROR_RULES_MAP, RATE_MASTER_PI_PO_MARGIN, _rate_master_equality_error_counts, _rate_master_grid_summary_qs, _rate_master_pi_po_error_counts, _rate_master_pi_type_error_counts, _rate_master_pi_type_violations_qs, _rate_master_range_error_counts, _split_payload_summary, _sync_unsynced_mis_files
 
@@ -97,6 +98,10 @@ def start_overlap_scan(request):
         scan.error_message = f"Could not queue the scan: {exc}"
         scan.finished_at = timezone.now()
         scan.save(update_fields=["status", "error_message", "finished_at"])
+        record_activity(
+            request.user, RUN, "overlap.scan.failed",
+            "Tried to start an overlap scan but the background worker was unreachable", target=scan,
+        )
         messages.error(
             request,
             "Could not start the overlap scan - the background worker is unreachable. "
@@ -107,6 +112,7 @@ def start_overlap_scan(request):
 
     scope_label = _scan_scope_label(scan)
     scope_note = f" ({scope_label})" if scope_label else ""
+    record_activity(request.user, RUN, "overlap.scan.started", f"Started an overlap scan{scope_note}", target=scan)
     messages.success(
         request, f"Overlap scan{scope_note} started. Reload this page in a moment to see the results."
     )

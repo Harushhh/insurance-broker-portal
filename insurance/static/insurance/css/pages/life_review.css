@@ -1,0 +1,55 @@
+
+    /* The Uploads tab (standard file card, refused-file problems) and the review of an upload against the live grid.
+       Loaded after health_rate_master.css and life_rate_master.css, so it only adds what they do not style. */
+    .pill-pending { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+    .life-recommended {
+        margin-left: 8px; padding: 2px 9px; border-radius: 20px; font-size: 10.5px; font-weight: 800;
+        letter-spacing: 0.03em; text-transform: uppercase; color: #166534; background: #dcfce7; border: 1px solid #bbf7d0;
+    }
+
+    /* A refused file: every problem with its row number */
+    .life-problems-card { border-color: #fecaca; }
+    .life-problem-list { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.7; color: #7f1d1d; }
+
+    /* The numbers at the top of a review */
+    .life-review-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .life-tile { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 10px 14px; }
+    .life-tile .num { font-size: 22px; font-weight: 800; line-height: 1.2; color: #0f172a; }
+    .life-tile .lbl { font-size: 10.5px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
+    .life-tile .sub { font-size: 11.5px; color: #64748b; }
+    .life-tile.changed .num { color: #92400e; }
+    .life-tile.added .num { color: #166534; }
+    .life-tile.removed .num { color: #991b1b; }
+
+    .life-ok {
+        display: flex; align-items: center; gap: 8px; margin-bottom: 4px; padding: 12px 16px; background: #f0fdf4;
+        border: 1px solid #bbf7d0; border-radius: 12px; color: #166534; font-size: 13px;
+    }
+
+    /* The checks: warn = look before going live, info = good to know */
+    .life-check { margin-bottom: 10px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; }
+    .life-check summary {
+        display: flex; align-items: center; gap: 10px; padding: 12px 16px; font-size: 13.5px; cursor: pointer;
+        list-style: none;
+    }
+    .life-check summary::-webkit-details-marker { display: none; }
+    .life-check .life-check-count { margin-left: auto; font-weight: 800; color: #475569; }
+    .life-check .life-check-body { padding: 0 16px 14px 42px; font-size: 13px; color: #475569; }
+    .life-check .life-check-body ul { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; line-height: 1.6; }
+    .life-check-warn { background: #fffbeb; border-color: #fde68a; }
+    .life-check-warn summary i { color: #d97706; }
+    .life-check-info summary i { color: #2563eb; }
+
+    /* The table of changes */
+    .life-kind {
+        display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 10.5px; font-weight: 800;
+        letter-spacing: 0.03em; text-transform: uppercase;
+    }
+    .life-kind-changed { background: #fef3c7; color: #92400e; }
+    .life-kind-added { background: #dcfce7; color: #166534; }
+    .life-kind-removed { background: #fee2e2; color: #991b1b; }
+    .life-big { display: block; margin-top: 4px; font-size: 10.5px; font-weight: 800; color: #b91c1c; }
+    .life-was { color: #991b1b; text-decoration: line-through; }
+    .life-now { color: #166534; font-weight: 700; }
+    .life-flag-warn { display: block; color: #b45309; font-weight: 600; }
+    .life-flag-info { display: block; color: #1d4ed8; font-weight: 600; }
