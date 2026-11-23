@@ -20,9 +20,11 @@ from ..services.rate_master import apply_range_filter
 # -------------------------
 # Choices for the "rows per page" selector on dashboard.html -- default is
 # first, and any page_size not in this list (missing, malformed, or a
-# tampered query param past the 200 cap) falls back to it rather than
-# serving an unbounded page.
-DASHBOARD_PAGE_SIZE_OPTIONS = (50, 100, 200)
+# tampered query param past the 500 cap) falls back to it rather than
+# serving an unbounded page. The bulk-update form posts one field per ticked
+# row, so keep the largest size well under Django's
+# DATA_UPLOAD_MAX_NUMBER_FIELDS (1000) or "select all" stops working.
+DASHBOARD_PAGE_SIZE_OPTIONS = (50, 100, 200, 500)
 
 
 DASHBOARD_BATCH_SIZE = DASHBOARD_PAGE_SIZE_OPTIONS[0]
