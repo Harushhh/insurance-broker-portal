@@ -320,6 +320,7 @@ from .ocr_pipeline import (
     upload_extract_pdf,
 )
 from .policy_lock import (
+    export_locked_policies_xlsx,
     lock_unlock_policy,
     locked_policy_dashboard,
     policy_lock_checker,

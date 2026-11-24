@@ -1,4 +1,4 @@
-"""Small shared helpers: tolerant date and yes/no/NA parsing, string joins, JSON-for-`<script>` escaping."""
+"""Small shared helpers: tolerant date and yes/no/NA parsing, string joins, JSON-for-`<script>` escaping, spreadsheet-safe text."""
 import json
 from datetime import datetime
 from ..models import YesNoNAMaster
@@ -74,3 +74,12 @@ _JSON_SCRIPT_ESCAPES = {ord(">"): "\\u003E", ord("<"): "\\u003C", ord("&"): "\\u
 
 def safe_json_for_script(value):
     return json.dumps(value).translate(_JSON_SCRIPT_ESCAPES)
+
+
+def safe_cell(value):
+    """Text for an Excel cell. A value starting with = + - @ (or a tab or carriage return) would be read as a formula
+    by Excel, and the texts written to spreadsheets come from people (a vehicle number, a name, a file name), so it is
+    defused with a leading apostrophe. Use it on every text cell of an export; numbers and dates are written as they
+    are. None, zero and "" all come out as an empty string."""
+    text = str(value or "")
+    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text

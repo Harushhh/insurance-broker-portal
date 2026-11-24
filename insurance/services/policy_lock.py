@@ -264,3 +264,37 @@ def _run_policy_lock_checker_search(request):
     }
 
     return results, has_searched, selected
+
+
+# -------------------------
+# LOCKED POLICY DASHBOARD
+# -------------------------
+LOCKED_POLICY_FILTERS = ("vehicle_no", "policy_holder_name", "insurance_company", "locked_by_user")
+
+
+def locked_policies_for(request):
+    """The locked policies the dashboard (and its Excel export) show this user, filtered as the request asks.
+
+    Returns (queryset, selected, is_admin). The page and the file both start here, so the file can never hold a row the
+    page would not show. Everyone except ADMIN only ever sees their own locked policies (the same "ADMIN sees
+    everything, per-page groups see only their own scope" convention as page_access_required); the four filters are
+    exact, case-insensitive matches. The queryset is newest first and not capped: the page takes its first 300, the
+    export takes them all.
+    """
+    is_admin = request.user.groups.filter(name="ADMIN").exists()
+
+    qs = LockedPolicy.objects.select_related("source_rate", "locked_by").all()
+    if not is_admin:
+        qs = qs.filter(locked_by=request.user)
+
+    selected = {name: (request.GET.get(name) or "").strip() for name in LOCKED_POLICY_FILTERS}
+    if selected["vehicle_no"]:
+        qs = qs.filter(vehicle_no__iexact=selected["vehicle_no"])
+    if selected["policy_holder_name"]:
+        qs = qs.filter(policy_holder_name__iexact=selected["policy_holder_name"])
+    if selected["insurance_company"]:
+        qs = qs.filter(insurance_company__iexact=selected["insurance_company"])
+    if selected["locked_by_user"]:
+        qs = qs.filter(locked_by__username__iexact=selected["locked_by_user"])
+
+    return qs.order_by("-created_at", "-id"), selected, is_admin

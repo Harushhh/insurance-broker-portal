@@ -137,6 +137,7 @@ after adding or re-gating a route.
 | `/life-rate-master/uploads/template/` | `life_rate_master_template` | group `Can_View_Life_Rate_Master` or ADMIN |
 | `/lock-unlock-policy/<int:rate_id>/` | `lock_unlock_policy` | group `Can_View_Policy_Locker` or ADMIN |
 | `/locked-policy-dashboard/` | `locked_policy_dashboard` | group `Can_View_Locked_Policies` or ADMIN |
+| `/locked-policy-dashboard/export/` | `export_locked_policies_xlsx` | group `Can_View_Locked_Policies` or ADMIN |
 | `/login/` | `login` | public |
 | `/logout/` | `logout` | public |
 | `/make-model-dashboard/` | `make_model_dashboard` | group `Can_View_Make_Model_Dashboard` or ADMIN |

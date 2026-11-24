@@ -110,6 +110,7 @@ urlpatterns = [
     path("policy-lock-checker/", page_access_required("Can_View_Policy_Locker")(views.policy_lock_checker), name="policy_lock_checker"),
     path("lock-unlock-policy/<int:rate_id>/", page_access_required("Can_View_Policy_Locker")(views.lock_unlock_policy), name="lock_unlock_policy"),
     path("locked-policy-dashboard/", page_access_required("Can_View_Locked_Policies")(views.locked_policy_dashboard), name="locked_policy_dashboard"),
+    path("locked-policy-dashboard/export/", page_access_required("Can_View_Locked_Policies")(views.export_locked_policies_xlsx), name="export_locked_policies_xlsx"),
 
     # Export routes
     path("export/", page_access_required("Can_View_Dashboard")(views.export_rates_xlsx), name="export_rates_xlsx"),

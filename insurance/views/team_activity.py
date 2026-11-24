@@ -21,6 +21,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 
 from ..models import ActivityEvent
 from ..services.activity import detail_rows, retention_cutoff
+from ..services.common import safe_cell as _safe_cell     # Excel formula defusing, shared with the other exports
 from ..services.team_scope import is_admin, managers_with_teams, team_user_ids, visible_events, visible_people
 
 CATEGORIES = ActivityEvent.CATEGORY_CHOICES                    # [(code, label)], in display order
@@ -312,13 +313,6 @@ def team_activity(request):
         # Events are kept from the 1st of last month (see services.activity.retention_cutoff).
         "retention_from": timezone.localtime(retention_cutoff()).date(),
     })
-
-
-def _safe_cell(value):
-    """Text for a spreadsheet cell. A value starting with = + - @ would be read as a formula by Excel, and these
-    summaries can contain a file name someone chose, so it is defused with a leading apostrophe."""
-    text = str(value or "")
-    return "'" + text if text[:1] in ("=", "+", "-", "@", "\t", "\r") else text
 
 
 def _pivot_counts(request, events, selected):

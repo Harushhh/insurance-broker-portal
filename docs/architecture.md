@@ -34,7 +34,7 @@ browser ──> urls.py ──> views/<feature>.py ──> services/<feature>.py
 | Life uploads: the standard file (one flat table for every insurer, columns found by name) and the review of an upload against the live grid before it goes live | `views/life_rates.py` | `services/life_standard.py`, `services/life_review.py`, `services/life_rates.py` |
 | Life Dashboard tab: the grid as ONE flat, blank-free sheet for a dashboard (every payout a row), downloaded from the live grid each month | `views/life_rates.py` | `services/life_dashboard.py` |
 | Life rows in the MIS Payout Engine (match a `life` policy to the live Life grid, print the first-year rate; insurer aliases and plan mapping screens) | `views/life_mis_mapping.py`, `mapping_engine.py` (`_match_life_row`) | `services/life_mis.py`, `services/life_filters.py` |
-| Policy lock checker, locked policies | `views/policy_lock.py` | `services/policy_lock.py` |
+| Policy lock checker, locked policies (the dashboard and its Excel export read through one scoped query, `locked_policies_for`) | `views/policy_lock.py` | `services/policy_lock.py` |
 | RTO / Make-Model / Pincode masters | `views/masters.py` | `services/masters.py` |
 | Make/Model mapping, missing make/model | `views/make_model_mapping.py`, `views/missing_make_model.py` | `services/make_model_mapping.py`, `services/missing_make_model.py` |
 | CSV upload | `views/upload.py` | `services/rate_master.py` |
@@ -47,7 +47,7 @@ browser ──> urls.py ──> views/<feature>.py ──> services/<feature>.py
 | Analysis | `views/analysis.py` | `services/analysis.py` |
 | AI rulebook (field configurator) | `views/ai_rulebook.py` | |
 | Users, SSO landing, home, Rate Checker | `views/user_management.py`, `views/sso_handoff.py`, `views/home.py`, `views/rate_checker.py` | `sso.py` |
-| Small shared helpers (date / yes-no parsing, JSON-in-script escaping) | | `services/common.py` |
+| Small shared helpers (date / yes-no parsing, JSON-in-script escaping, Excel-formula-safe cell text: `safe_cell`) | | `services/common.py` |
 
 Modules deliberately left at the top level of `insurance/`: `mapping_engine.py`, `overlap_utils.py`,
 `grid_archive.py`, `health_grid_utils.py`, `sso.py`, `tasks.py`, `models.py`. Celery task names, the beat schedule and

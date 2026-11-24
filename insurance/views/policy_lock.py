@@ -1,13 +1,19 @@
-"""Policy lock checker, locking / unlocking a policy, and the locked policy dashboard."""
+"""Policy lock checker, locking / unlocking a policy, the locked policy dashboard and its Excel export."""
 from django.utils import timezone
 from django.shortcuts import render, get_object_or_404
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 import json
+import re
 from datetime import datetime
+from urllib.parse import urlencode
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 from ..models import RateMaster, ProductMaster, SubProductMaster, FuelTypeMaster, MakeModelClassMaster, LockedPolicy
 from ..services.activity import STATUS, record_activity
+from ..services.common import safe_cell
 from ..services.make_model import NA_MAKE_MODEL_MAP, get_dynamic_make_model_class_list, get_make_mapping_context, get_translated_make_model
-from ..services.policy_lock import _run_policy_lock_checker_search
+from ..services.policy_lock import _run_policy_lock_checker_search, locked_policies_for
 
 
 def policy_lock_checker(request):
@@ -155,33 +161,10 @@ def lock_unlock_policy(request, rate_id):
 # LOCKED POLICY DASHBOARD
 # -------------------------
 def locked_policy_dashboard(request):
-    # Data-privacy scoping: everyone except ADMIN only ever sees their own
-    # locked policies — matches page_access_required's existing "ADMIN sees
-    # everything, per-page groups see only their own scope" convention.
-    is_admin = request.user.groups.filter(name="ADMIN").exists()
-
-    qs = LockedPolicy.objects.select_related(
-        "source_rate",
-        "source_rate__product",
-        "source_rate__make_model_class",
-        "locked_by"
-    ).all()
-    if not is_admin:
-        qs = qs.filter(locked_by=request.user)
-
-    vehicle_no = (request.GET.get("vehicle_no") or "").strip()
-    policy_holder_name = (request.GET.get("policy_holder_name") or "").strip()
-    insurance_company = (request.GET.get("insurance_company") or "").strip()
-    locked_by_user = (request.GET.get("locked_by_user") or "").strip()
-
-    if vehicle_no:
-        qs = qs.filter(vehicle_no__iexact=vehicle_no)
-    if policy_holder_name:
-        qs = qs.filter(policy_holder_name__iexact=policy_holder_name)
-    if insurance_company:
-        qs = qs.filter(insurance_company__iexact=insurance_company)
-    if locked_by_user:
-        qs = qs.filter(locked_by__username__iexact=locked_by_user)
+    # Who sees which rows (everyone except ADMIN only their own locked policies) and the four filters live in
+    # locked_policies_for(), shared with the Excel export below so the file can never hold a row the page would not show.
+    qs, selected, is_admin = locked_policies_for(request)
+    qs = qs.select_related("source_rate__product", "source_rate__make_model_class")
 
     # Filter dropdown option lists must carry the same scoping as qs — for a
     # non-admin, listing e.g. "root" as a possible Locked By value would leak
@@ -195,7 +178,7 @@ def locked_policy_dashboard(request):
     unique_companies = sorted(list(set(all_locked.exclude(insurance_company__isnull=True).exclude(insurance_company="").values_list("insurance_company", flat=True))))
     unique_users = sorted(list(set(all_locked.exclude(locked_by__isnull=True).values_list("locked_by__username", flat=True))))
 
-    records = list(qs.order_by("-created_at")[:300])
+    records = list(qs[:300])          # the page shows the newest 300; the Excel export has every matching record
 
     fuel_name_by_id = {str(f.id): f.name for f in FuelTypeMaster.objects.all()}
 
@@ -222,10 +205,95 @@ def locked_policy_dashboard(request):
         "unique_holders": unique_holders,
         "unique_companies": unique_companies,
         "unique_users": unique_users,
-        "selected": {
-            "vehicle_no": vehicle_no,
-            "policy_holder_name": policy_holder_name,
-            "insurance_company": insurance_company,
-            "locked_by_user": locked_by_user,
-        }
+        "selected": selected,
+        # The Export Excel link carries the filters in force, so the file is what the table above is filtered to.
+        "export_query": urlencode({name: value for name, value in selected.items() if value}),
     })
+
+
+# -------------------------
+# LOCKED POLICY EXCEL EXPORT
+# -------------------------
+# The table's columns, in the table's order. PO Rate is a percent number and PO Flat Amount a rupee amount: the unit is
+# in the header, the cell is a plain number so Excel can sort and add it up.
+LOCKED_EXPORT_HEADERS = [
+    "Group ID", "Vehicle No.", "Policy Holder Name", "Insurance Company", "Product", "Sub Product", "PO Type",
+    "PO Rate (%)", "PO Flat Amount (₹)", "RTO Code", "Make Name", "Fuel", "CC", "SC", "MFG Year", "Status",
+    "Locked By", "Locked At", "Created At",
+]
+LOCKED_EXPORT_WIDTHS = [10, 16, 26, 38, 14, 12, 10, 12, 18, 10, 28, 10, 8, 6, 10, 11, 16, 22, 22]
+LOCKED_EXPORT_DATE_FORMAT = "DD MMM YYYY, hh:mm AM/PM"
+_PLAIN_NUMBER = re.compile(r"^(0|[1-9]\d*)(\.\d+)?$")
+
+
+def _number_if_plain(value):
+    """CC, SC and MFG Year are kept as the text the lock form sent. A plain number is written as a number (so Excel can
+    sort and filter it); anything else (a range, a dash, leading zeros) stays text, and an empty value stays empty."""
+    text = (value or "").strip()
+    if not text:
+        return None
+    if _PLAIN_NUMBER.match(text):
+        return float(text) if "." in text else int(text)
+    return safe_cell(text)
+
+
+def _local_naive(moment):
+    """An aware datetime as the IST wall-clock time the page shows (Excel has no time zones)."""
+    return timezone.localtime(moment).replace(tzinfo=None) if moment else None
+
+
+def export_locked_policies_xlsx(request):
+    """Every locked policy the Locked Policy Dashboard's current filters match, as an Excel file with the table's columns.
+
+    Same rows as the page (locked_policies_for: ADMIN sees all, everyone else only their own), but not cut at 300.
+    """
+    qs, _selected, _is_admin = locked_policies_for(request)
+    fuel_name_by_id = {str(fuel.id): fuel.name for fuel in FuelTypeMaster.objects.all()}
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Locked Policies"
+    ws.append(LOCKED_EXPORT_HEADERS)
+    for cell in ws[1]:
+        cell.fill = PatternFill("solid", fgColor="0F172A")
+        cell.font = Font(bold=True, color="FFFFFF")
+
+    date_columns = (LOCKED_EXPORT_HEADERS.index("Locked At") + 1, LOCKED_EXPORT_HEADERS.index("Created At") + 1)
+    for number, row in enumerate(qs.iterator(chunk_size=2000), start=2):
+        rate = row.source_rate
+        fuel = (row.fuel or "").strip()
+        ws.append([
+            (rate.group_id or rate.id) if rate else None,
+            safe_cell(row.vehicle_no),
+            safe_cell(row.policy_holder_name),
+            safe_cell(row.insurance_company),
+            safe_cell(row.product_name),
+            safe_cell(row.sub_product_name),
+            safe_cell(row.po_type),
+            row.po_rate,
+            row.po_flat_amount,
+            safe_cell(row.rto_code),
+            safe_cell(row.make_name),
+            safe_cell(fuel_name_by_id.get(fuel, fuel)),
+            _number_if_plain(row.cc),
+            _number_if_plain(row.sc),
+            _number_if_plain(row.mfg_year),
+            row.status,
+            safe_cell(row.locked_by.username if row.locked_by else ""),
+            _local_naive(row.locked_at),
+            _local_naive(row.created_at),
+        ])
+        for column in date_columns:
+            ws.cell(row=number, column=column).number_format = LOCKED_EXPORT_DATE_FORMAT
+
+    for column, width in enumerate(LOCKED_EXPORT_WIDTHS, start=1):
+        ws.column_dimensions[get_column_letter(column)].width = width
+    ws.freeze_panes = "A2"
+    ws.auto_filter.ref = f"A1:{get_column_letter(len(LOCKED_EXPORT_HEADERS))}{ws.max_row}"
+
+    response = HttpResponse(
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    response["Content-Disposition"] = f'attachment; filename="locked_policies_{timezone.localdate():%Y-%m-%d}.xlsx"'
+    wb.save(response)
+    return response

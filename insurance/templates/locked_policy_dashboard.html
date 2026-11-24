@@ -65,6 +65,7 @@
       <div class="button-row">
         <button type="submit" class="modern-btn btn-primary">Apply Filters</button>
         <a href="{% url 'locked_policy_dashboard' %}" class="modern-btn btn-light">Clear</a>
+        <a href="{% url 'export_locked_policies_xlsx' %}{% if export_query %}?{{ export_query }}{% endif %}" class="modern-btn btn-light" title="Download every record the applied filters match (all {{ total_records }}, not only the newest 300 shown) as an Excel file">⬇️ Export Excel</a>
         <a href="{% url 'policy_lock_checker' %}" class="modern-btn btn-light">← Back to Motor Points</a>
       </div>
     </form>
