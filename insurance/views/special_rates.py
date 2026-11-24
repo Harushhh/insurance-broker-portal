@@ -30,10 +30,13 @@ def special_rate_requests(request):
             req_obj.rate_type = "MG-BG"
             req_obj.requested_by = request.user
             req_obj.save()
-            # No entry number: it is typed in by the requester and can be any reference.
+            # The sentence has no entry number (the requester types any reference); the details have every field.
             record_activity(
                 request.user, STATUS, "special_rate.requested", "Submitted a Special MG-BG rate request",
                 target=req_obj, extra={"rate_type": "MG-BG"},
+                details={"request_id": req_obj.id, "rate_type": "MG-BG", "product": req_obj.product,
+                         "entry_no": req_obj.entry_no, "remarks": req_obj.remarks,
+                         "approval_file": req_obj.insurer_approval_file.name or None},
             )
             messages.success(request, f"✅ Your Special MG-BG request (Entry No {req_obj.entry_no}) has been submitted.")
             return redirect("special_rate_requests")
@@ -50,6 +53,9 @@ def special_rate_requests(request):
             record_activity(
                 request.user, STATUS, "special_rate.requested", "Submitted a Special BG rate request",
                 target=req_obj, extra={"rate_type": "BG"},
+                details={"request_id": req_obj.id, "rate_type": "BG", "product": req_obj.product,
+                         "entry_no": req_obj.entry_no, "remarks": req_obj.remarks,
+                         "approval_file": req_obj.insurer_approval_file.name or None},
             )
             messages.success(request, f"✅ Your Special BG request (Entry No {req_obj.entry_no}) has been submitted.")
             return redirect("special_rate_requests")
@@ -134,6 +140,9 @@ def update_special_rate_request_status(request):
                 request.user, STATUS, "special_rate.reviewed",
                 f"Set a Special {req_obj.rate_type} rate request to {new_status.title()}",
                 target=req_obj, extra={"from": old_status, "to": new_status, "rate_type": req_obj.rate_type},
+                details={"request_id": req_obj.id, "rate_type": req_obj.rate_type, "product": req_obj.product,
+                         "entry_no": req_obj.entry_no, "status": {"from": old_status, "to": new_status},
+                         "requested_by": req_obj.requested_by.username if req_obj.requested_by else None},
             )
 
             return JsonResponse({"success": True})

@@ -10,9 +10,9 @@ from urllib.parse import urlencode
 import logging
 from datetime import datetime
 from openpyxl import Workbook
-from ..models import AuditLog, MISFailedRow, RateOverlapScan, RateOverlapPair
+from ..models import MISFailedRow, RateOverlapScan, RateOverlapPair
 from ..tasks import run_rate_overlap_scan_task
-from ..services.activity import RUN, record_activity
+from ..services.activity import MAX_LISTED_IDS, RUN, audit_change, record_activity
 from ..services.overlap import OVERLAP_RULES_MAP, _active_overlap_scan, _active_rate_master_insurers, _active_rate_master_products, _fmt_axis_side, _fmt_bound, _latest_overlap_scan, _overlap_counts, _rate_group_rows, _scan_scope_label
 from ..services.rate_master_checks import EQUALITY_ERROR_RULES_MAP, PI_PO_ERROR_RULES_MAP, PI_TYPE_RULES_MAP, RANGE_ERROR_RULES_MAP, RATE_MASTER_PI_PO_MARGIN, _rate_master_equality_error_counts, _rate_master_grid_summary_qs, _rate_master_pi_po_error_counts, _rate_master_pi_type_error_counts, _rate_master_pi_type_violations_qs, _rate_master_range_error_counts, _split_payload_summary, _sync_unsynced_mis_files
 
@@ -101,6 +101,8 @@ def start_overlap_scan(request):
         record_activity(
             request.user, RUN, "overlap.scan.failed",
             "Tried to start an overlap scan but the background worker was unreachable", target=scan,
+            details={"scan_id": scan.id, "insurer": insurer or None, "product": product or None,
+                     "as_of_date": as_of_date, "error": scan.error_message},
         )
         messages.error(
             request,
@@ -112,7 +114,10 @@ def start_overlap_scan(request):
 
     scope_label = _scan_scope_label(scan)
     scope_note = f" ({scope_label})" if scope_label else ""
-    record_activity(request.user, RUN, "overlap.scan.started", f"Started an overlap scan{scope_note}", target=scan)
+    record_activity(
+        request.user, RUN, "overlap.scan.started", f"Started an overlap scan{scope_note}", target=scan,
+        details={"scan_id": scan.id, "insurer": insurer or None, "product": product or None, "as_of_date": as_of_date},
+    )
     messages.success(
         request, f"Overlap scan{scope_note} started. Reload this page in a moment to see the results."
     )
@@ -174,14 +179,19 @@ def deactivate_rate_group(request, group_key):
         messages.warning(request, f"Group {group_key} has no active rows to deactivate.")
         return _overlap_redirect(overlap_type)
 
+    affected_ids = list(active_rows.values_list("id", flat=True)[:MAX_LISTED_IDS])
     active_rows.update(status="INACTIVE", updated_at=timezone.now())
-    AuditLog.objects.create(
-        user=request.user,
-        action="OVERLAP DEACTIVATE",
-        details=(
+    audit_change(
+        request.user, "OVERLAP DEACTIVATE",
+        (
             f"Deactivated Group/Record ID {group_key} ({record_count} rows) from the "
             f"Rate Master Health overlap detector."
         ),
+        summary=f"Deactivated Rate Master group {group_key} ({record_count} rows) from the overlap detector",
+        details={"group_key": group_key, "rows_deactivated": record_count, "record_ids": affected_ids,
+                 "status": {"from": "ACTIVE", "to": "INACTIVE"}, "conflict_pair_id": pair.id,
+                 "conflict_type": pair.conflict_type, "other_group_key":
+                     pair.group_key_b if group_key == pair.group_key_a else pair.group_key_a},
     )
     messages.success(
         request,

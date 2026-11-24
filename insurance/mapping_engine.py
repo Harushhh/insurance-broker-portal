@@ -2731,6 +2731,14 @@ def process_mis_mapping(mis_file_id):
             target=mis_obj,
             extra={"rows": total_processed, "matched": total_matched,
                    "multiple": total_multiple, "bad_data": total_bad_data},
+            details={
+                "file": mis_obj.uploaded_file.name.split('/')[-1], "mis_file_id": mis_obj.id,
+                "rows": total_processed, "matched": total_matched, "multiple_matches": total_multiple,
+                "bad_data": total_bad_data, "same_payout_resolved": total_identical_payout_resolved,
+                "result": mis_obj.error_message,
+                "seconds": round((mis_obj.processed_at - mis_obj.created_at).total_seconds())
+                if mis_obj.processed_at and mis_obj.created_at else None,
+            },
         )
 
     except Exception as e:
@@ -2745,12 +2753,13 @@ def process_mis_mapping(mis_file_id):
             mis_obj.error_message = str(e)[:1000]
             mis_obj.processed_at = timezone.now()
             mis_obj.save()
-            # No error text here: the reason stays on the MIS page, and an error
-            # message can quote a cell of the file.
+            # The sentence has no error text (it can quote a cell of the file); the details carry it, as the MIS page does.
             record_activity(
                 mis_obj.uploaded_by, RUN, "mis.run.failed",
                 f"MIS run failed for '{mis_obj.uploaded_file.name.split('/')[-1]}'",
                 target=mis_obj,
+                details={"file": mis_obj.uploaded_file.name.split('/')[-1], "mis_file_id": mis_obj.id,
+                         "error": mis_obj.error_message},
             )
         except Exception as recovery_err:
             logger.critical("Could not write the FAILED state for MISFile %s to the DB: %s", mis_file_id, recovery_err, exc_info=True)

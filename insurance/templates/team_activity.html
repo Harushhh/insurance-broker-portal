@@ -13,13 +13,14 @@
     <h2>👥 Team Activity</h2>
     <p class="ta-sub">
         {% if is_admin_view %}
-            Runs, uploads, tests and status changes across every team. Pick a team to narrow it.
+            Runs, uploads, tests, status changes and every record edit across every team. Pick a team to narrow it.
         {% elif has_team %}
-            Runs, uploads, tests and status changes by everyone who reports to you, directly or through others ({{ people|length }} in all).
+            Runs, uploads, tests, status changes and every record edit by everyone who reports to you, directly or through others ({{ people|length }} in all).
         {% else %}
-            Runs, uploads, tests and status changes by the people who report to you.
+            Runs, uploads, tests, status changes and every record edit by the people who report to you.
         {% endif %}
-        Events are kept for {{ retention_days }} days.
+        Open “Details” on a row to see the exact parameters.
+        Events are kept for last month and this month: everything since {{ retention_from|date:"j M Y" }}. Older months are removed when a new month starts.
     </p>
 
     {% if has_team %}
@@ -54,12 +55,21 @@
             </select>
         </div>
         <div class="ta-field">
+            <label for="taAction">Action</label>
+            <select id="taAction" name="action" data-autosubmit>
+                <option value="">All actions</option>
+                {% for action in action_choices %}
+                <option value="{{ action }}" {% if selected.action == action %}selected{% endif %}>{{ action }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="ta-field">
             <label for="taDateRange">Dates</label>
-            <input type="text" id="taDateRange" name="date_range" placeholder="Any date" value="{{ selected.date_range }}" autocomplete="off">
+            <input type="text" id="taDateRange" name="date_range" placeholder="Any date" value="{{ selected.date_range }}" autocomplete="off" data-min="{{ retention_from|date:'Y-m-d' }}">
         </div>
         <div class="ta-field">
             <label for="taSearch">Search</label>
-            <input type="search" id="taSearch" name="q" placeholder="What happened…" value="{{ selected.q }}" maxlength="100">
+            <input type="search" id="taSearch" name="q" placeholder="Events and details…" value="{{ selected.q }}" maxlength="100">
         </div>
         <div class="ta-actions">
             <button type="submit" class="ta-btn ta-btn-primary">Apply</button>
@@ -77,38 +87,61 @@
 </div>
 {% else %}
 
-{% if strip %}
-<div class="ta-card ta-strip">
-    <h3>Team at a glance <small>for the dates above; click a name or a number to filter</small></h3>
-    <div class="ta-strip-scroll">
-        <table class="ta-table ta-people">
-            <thead>
-                <tr>
-                    <th>Person</th>
-                    {% for code, label in strip_columns %}<th class="ta-num">{{ label }}</th>{% endfor %}
-                    <th class="ta-num">Total</th>
-                    <th>Last active</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for row in strip %}
-                <tr class="{% if row.active %}ta-row-active{% endif %}">
-                    <td>
-                        <a href="{{ row.url }}" class="ta-person-link"><strong>{{ row.name }}</strong></a>
-                        <span class="ta-muted">@{{ row.username }}{% if row.designation %} · {{ row.designation }}{% endif %}</span>
-                    </td>
-                    {% for cell in row.cells %}
-                    <td class="ta-num">{% if cell.n %}<a href="{{ cell.url }}">{{ cell.n }}</a>{% else %}<span class="ta-zero">0</span>{% endif %}</td>
+<div class="ta-card ta-glance">
+    <h3>At a glance <small>follows the filters above; click a slice or a bar to filter the activity below, click it again to undo</small></h3>
+    <div class="ta-charts">
+
+        <section class="ta-chart" aria-label="Events by category">
+            <h4>By category <small>{{ category_chart.scope }}</small></h4>
+            <div class="ta-donut-wrap">
+                <svg class="ta-donut{% if selected.category %} has-selection{% endif %}" viewBox="0 0 120 120" role="img" aria-label="{{ category_chart.aria }}">
+                    {% if not category_chart.slices %}<circle class="ta-donut-track" cx="60" cy="60" r="{{ category_chart.radius }}"></circle>{% endif %}
+                    {% for slice in category_chart.slices %}
+                    <a href="{{ slice.url }}" class="ta-seg ta-cat-{{ slice.code|lower }}{% if slice.active %} is-active{% endif %}">
+                        <title>{{ slice.label }}: {{ slice.n }} event{{ slice.n|pluralize }} ({{ slice.pct }})</title>
+                        <circle cx="60" cy="60" r="{{ category_chart.radius }}" stroke-dasharray="{{ slice.dash }}" stroke-dashoffset="{{ slice.offset }}" transform="rotate(-90 60 60)"></circle>
+                    </a>
                     {% endfor %}
-                    <td class="ta-num"><strong>{{ row.total }}</strong></td>
-                    <td class="ta-last">{% if row.last %}{{ row.last|date:"d M, h:i A" }}{% else %}no activity{% endif %}</td>
-                </tr>
+                    <text class="ta-donut-total{% if category_chart.long_total %} is-long{% endif %}" x="60" y="62" text-anchor="middle">{{ category_chart.total }}</text>
+                    <text class="ta-donut-caption" x="60" y="77" text-anchor="middle">event{{ category_chart.total|pluralize }}</text>
+                </svg>
+                <ul class="ta-legend">
+                    {% for item in category_chart.legend %}
+                    <li>
+                        {% if item.url %}<a href="{{ item.url }}" class="ta-legend-row ta-cat-{{ item.code|lower }}{% if item.active %} is-active{% endif %}">{% else %}<span class="ta-legend-row ta-cat-{{ item.code|lower }} is-zero">{% endif %}
+                            <span class="ta-swatch"></span>
+                            <span class="ta-legend-name">{{ item.label }}</span>
+                            <span class="ta-legend-n">{{ item.n }}</span>
+                            <span class="ta-legend-pct">{{ item.pct }}</span>
+                        {% if item.url %}</a>{% else %}</span>{% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </section>
+
+        <section class="ta-chart" aria-label="Events by person">
+            <h4>By person <small>{{ people_chart.scope }}</small></h4>
+            {% if people_chart.rows %}
+            <ol class="ta-bars{% if selected.person %} has-selection{% endif %}">
+                {% for row in people_chart.rows %}
+                <li>
+                    <a href="{{ row.url }}" class="ta-bar-row{% if row.active %} is-active{% endif %}" title="{{ row.name }}: {{ row.n }} event{{ row.n|pluralize }} ({{ row.share }} of {{ people_chart.total }})">
+                        <span class="ta-bar-name"><strong>{{ row.name }}</strong>{% if row.designation %}<span class="ta-muted">{{ row.designation }}</span>{% endif %}</span>
+                        <span class="ta-bar-track"><span class="ta-bar-fill" style="width: calc((100% - 56px) * {{ row.ratio }})"></span><span class="ta-bar-value">{{ row.n }}</span></span>
+                    </a>
+                </li>
                 {% endfor %}
-            </tbody>
-        </table>
+            </ol>
+            {% else %}
+            <p class="ta-note">No events for these filters.</p>
+            {% endif %}
+            {% if people_chart.more_people %}<p class="ta-note">+ {{ people_chart.more_people }} more {{ people_chart.more_people|pluralize:"person,people" }} with {{ people_chart.more_events }} event{{ people_chart.more_events|pluralize }}. Narrow the filters to see {{ people_chart.more_people|pluralize:"them,them" }}.</p>{% endif %}
+            {% if people_chart.quiet %}<p class="ta-note">No activity: {{ people_chart.quiet|join:", " }}{% if people_chart.quiet_more %} and {{ people_chart.quiet_more }} more{% endif %}</p>{% endif %}
+        </section>
+
     </div>
 </div>
-{% endif %}
 
 <div class="ta-card ta-feed">
     <div class="ta-feed-head">
@@ -135,7 +168,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for event in page_obj %}
+                {% for event in events %}
                 <tr>
                     <td class="ta-time">{{ event.occurred_at|date:"d M Y" }}<br><span class="ta-muted">{{ event.occurred_at|date:"h:i A" }}</span></td>
                     <td>
@@ -143,7 +176,19 @@
                         <span class="ta-muted">@{{ event.actor_username }}{% if event.actor %}{% if event.actor.profile.designation %} · {{ event.actor.profile.designation }}{% endif %}{% else %} · account removed{% endif %}</span>
                     </td>
                     <td><span class="ta-badge ta-cat-{{ event.category|lower }}">{{ event.get_category_display }}</span></td>
-                    <td class="ta-what">{{ event.summary }}<br><span class="ta-code">{{ event.action }}</span></td>
+                    <td class="ta-what">
+                        {{ event.summary }}<br><span class="ta-code">{{ event.action }}</span>
+                        {% if event.detail_rows %}
+                        <details class="ta-details">
+                            <summary>Details <span class="ta-muted">({{ event.detail_rows|length }} item{{ event.detail_rows|length|pluralize }})</span></summary>
+                            <dl class="ta-detail-list">
+                                {% for label, text in event.detail_rows %}
+                                <div class="ta-detail-row"><dt>{{ label }}</dt><dd>{{ text }}</dd></div>
+                                {% endfor %}
+                            </dl>
+                        </details>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% empty %}
                 <tr><td colspan="4" class="ta-none">No activity matches these filters.</td></tr>

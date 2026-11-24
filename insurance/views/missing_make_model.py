@@ -10,8 +10,8 @@ import json
 from urllib.parse import urlencode
 from datetime import datetime
 from openpyxl import Workbook
-from ..models import MakeModelMaster, AuditLog, MissingMakeModelManualResolution
-from ..services.activity import STATUS, record_activity
+from ..models import MakeModelMaster, MissingMakeModelManualResolution
+from ..services.activity import MAX_LISTED_IDS, STATUS, audit_change
 from ..services.masters import RTO_MAKE_CHOICES_CACHE_KEY
 from ..services.missing_make_model import _annotate_make_model_resolution, _append_make_model_cluster_item, _filter_missing_make_model, _missing_make_model_groups, _missing_make_model_manual_key_from_post
 from ..services.rate_master_checks import _sync_unsynced_mis_files
@@ -284,10 +284,9 @@ def add_missing_make_model_to_master(request):
         policy_count = 0
 
     names = ", ".join(f"'{m.make_model_name}'" for m in changed_masters)
-    AuditLog.objects.create(
-        user=request.user,
-        action="MAKE MODEL CLUSTER ADD",
-        details=(
+    audit_change(
+        request.user, "MAKE MODEL CLUSTER ADD",
+        (
             f"Added '{stored_value}' to MakeModelMaster {names} "
             f"(id(s) {', '.join(str(m.id) for m in changed_masters)}) from the Missing Make/Model page."
             + (" Created this master row." if created else "")
@@ -296,15 +295,21 @@ def add_missing_make_model_to_master(request):
             + (" Added despite already matching another cluster (forced)." if already else "")
             + (f" Already present in {len(unchanged_masters)} other selected row(s)." if unchanged_masters else "")
         ),
+        category=STATUS, code="missing_make_model.resolved",
+        summary=f"Resolved missing make/model '{stored_value}' by adding it to {names}",
+        extra={"policy_rows": policy_count},
+        details={
+            "value_added": stored_value,
+            "master_rows_changed": [{"id": m.id, "name": m.make_model_name} for m in changed_masters],
+            "master_rows_already_had_it": [{"id": m.id, "name": m.make_model_name} for m in unchanged_masters],
+            "created_master_row": created, "affected_mis_policy_rows": policy_count,
+            "commas_replaced_with_spaces": had_comma,
+            "forced_although_it_matched": sorted(already) if already else [],
+        },
     )
     # Mirrors api_upload_chunk: every write to these master tables busts the key
     # get_rto_and_make_choices caches the rate forms' dropdowns under.
     cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
-    record_activity(
-        request.user, STATUS, "missing_make_model.resolved",
-        f"Resolved missing make/model '{stored_value}' by adding it to {names}",
-        extra={"policy_rows": policy_count},
-    )
 
     messages.success(
         request,
@@ -418,10 +423,9 @@ def bulk_add_missing_make_model_to_master(request):
             master.save(update_fields=None if created else ["make_model_cluster", "updated_at"])
 
     master_names = ", ".join(f"'{m.make_model_name}'" for m in masters)
-    AuditLog.objects.create(
-        user=request.user,
-        action="MAKE MODEL CLUSTER BULK ADD",
-        details=(
+    audit_change(
+        request.user, "MAKE MODEL CLUSTER BULK ADD",
+        (
             f"Added {len(added)} value(s) to MakeModelMaster {master_names} "
             f"from the Missing Make/Model page: "
             f"{', '.join(added[:10])}" + (f" (+{len(added) - 10} more)" if len(added) > 10 else "") + "."
@@ -431,15 +435,20 @@ def bulk_add_missing_make_model_to_master(request):
                f"{', '.join(skipped[:10])}." if skipped else "")
             + (" Comma(s) in submitted value(s) were replaced with spaces." if had_comma else "")
         ),
+        category=STATUS, code="missing_make_model.resolved",
+        summary=(f"Resolved {len(added)} missing make/model value(s) by adding them to {master_names}" if added else
+                 f"Tried to add missing make/model values to {master_names}; none were added"),
+        extra={"values": len(added), "skipped": len(skipped)},
+        details={
+            "values_added": added, "values_skipped_they_match_another_cluster": skipped,
+            "values_already_present_everywhere": no_op_count,
+            "master_rows": [{"id": m.id, "name": m.make_model_name} for m in masters],
+            "created_master_row": created, "commas_replaced_with_spaces": had_comma, "forced": force,
+        },
     )
     cache.delete(RTO_MAKE_CHOICES_CACHE_KEY)
 
     if added:
-        record_activity(
-            request.user, STATUS, "missing_make_model.resolved",
-            f"Resolved {len(added)} missing make/model value(s) by adding them to {master_names}",
-            extra={"values": len(added), "skipped": len(skipped)},
-        )
         messages.success(
             request,
             f"{len(added)} value(s) added to {master_names}. They now resolve, and new "
@@ -486,19 +495,18 @@ def mark_missing_make_model_resolved(request):
             policy_count = int(request.POST.get("policy_count") or 0)
         except ValueError:
             policy_count = 0
-        AuditLog.objects.create(
-            user=request.user,
-            action="MAKE MODEL MANUALLY RESOLVED",
-            details=(
+        audit_change(
+            request.user, "MAKE MODEL MANUALLY RESOLVED",
+            (
                 f"Marked '{value}' (product={product or '-'}, sub_product={sub_product or '-'}, "
                 f"insurer={insurer or '-'}, vehicle_class={vehicle_class or '-'}) Resolved on the "
                 f"Missing Make/Model page without a cluster write."
                 + (f" {policy_count} affected MIS policy row(s) reported by the page." if policy_count else "")
             ),
-        )
-        record_activity(
-            request.user, STATUS, "missing_make_model.marked_resolved",
-            f"Marked missing make/model '{value}' as resolved",
+            category=STATUS, code="missing_make_model.marked_resolved",
+            summary=f"Marked missing make/model '{value}' as resolved",
+            details={"value": value, "product": product, "sub_product": sub_product, "insurer": insurer,
+                     "vehicle_class": vehicle_class, "affected_mis_policy_rows": policy_count},
         )
         messages.success(request, f"'{value}' marked Resolved.")
     else:
@@ -518,14 +526,13 @@ def unmark_missing_make_model_resolved(request):
     ).delete()
 
     if deleted:
-        AuditLog.objects.create(
-            user=request.user,
-            action="MAKE MODEL MANUAL RESOLUTION UNDONE",
-            details=f"Un-marked '{value}' as Resolved on the Missing Make/Model page.",
-        )
-        record_activity(
-            request.user, STATUS, "missing_make_model.reopened",
-            f"Reopened missing make/model '{value}' (took off its Resolved mark)",
+        audit_change(
+            request.user, "MAKE MODEL MANUAL RESOLUTION UNDONE",
+            f"Un-marked '{value}' as Resolved on the Missing Make/Model page.",
+            category=STATUS, code="missing_make_model.reopened",
+            summary=f"Reopened missing make/model '{value}' (took off its Resolved mark)",
+            details={"value": value, "product": product, "sub_product": sub_product, "insurer": insurer,
+                     "vehicle_class": vehicle_class},
         )
         messages.success(request, f"'{value}' is no longer marked Resolved.")
     else:
@@ -566,19 +573,19 @@ def bulk_mark_missing_make_model_resolved(request):
             created_count += 1
 
     if created_count:
-        AuditLog.objects.create(
-            user=request.user,
-            action="MAKE MODEL MANUALLY RESOLVED",
-            details=(
+        audit_change(
+            request.user, "MAKE MODEL MANUALLY RESOLVED",
+            (
                 f"Marked {created_count} Missing Make/Model row(s) Resolved in bulk without a cluster "
                 f"write: {', '.join(k[0] for k in keys[:10])}"
                 + (f" (+{len(keys) - 10} more)" if len(keys) > 10 else "") + "."
             ),
-        )
-        record_activity(
-            request.user, STATUS, "missing_make_model.marked_resolved",
-            f"Marked {created_count} missing make/model row(s) as resolved",
+            category=STATUS, code="missing_make_model.marked_resolved",
+            summary=f"Marked {created_count} missing make/model row(s) as resolved",
             extra={"rows": created_count},
+            details={"rows_marked": created_count, "rows_selected": len(keys), "rows": [
+                {"value": k[0], "product": k[1], "sub_product": k[2], "insurer": k[3], "vehicle_class": k[4]}
+                for k in keys[:MAX_LISTED_IDS]]},
         )
         messages.success(
             request,

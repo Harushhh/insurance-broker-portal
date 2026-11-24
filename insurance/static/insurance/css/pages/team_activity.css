@@ -11,6 +11,7 @@
     .ta-field { display: flex; flex-direction: column; gap: 6px; }
     .ta-field label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #64748b; }
     .ta-field select, .ta-field input { border: 1px solid #cbd5e1; border-radius: 8px; padding: 8px 14px; font-size: 13px; color: #0f172a; background: #fff; height: 40px; min-width: 190px; }
+    .ta-field select[name="action"] { max-width: 260px; }
     .ta-actions { display: flex; gap: 10px; flex-wrap: wrap; }
     .ta-btn { height: 40px; padding: 0 18px; border-radius: 8px; font-size: 13px; font-weight: 700; border: none; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
     .ta-btn-primary { background: #2563eb; color: #fff; }
@@ -19,33 +20,92 @@
     .ta-empty { display: flex; flex-direction: column; gap: 6px; color: #475569; font-size: 14px; }
     .ta-empty strong { color: #0f172a; font-size: 16px; }
 
-    .ta-strip h3, .ta-feed h3 { margin: 0 0 14px; font-size: 16px; color: #0f172a; }
-    .ta-strip h3 small, .ta-feed h3 small { font-weight: 500; color: #64748b; font-size: 12px; margin-left: 8px; }
-    .ta-strip-scroll, .ta-feed-scroll { overflow-x: auto; }
+    .ta-glance h3, .ta-feed h3 { margin: 0 0 14px; font-size: 16px; color: #0f172a; }
+    .ta-glance h3 small, .ta-feed h3 small { font-weight: 500; color: #64748b; font-size: 12px; margin-left: 8px; }
+    .ta-feed-scroll { overflow-x: auto; }
+
+    /* ---- charts ----
+       One hue per category (the validated categorical order, fixed): the same dot on the feed's badges, the legend
+       swatch and the donut slice, so a colour always means the same category. Text stays in ink; the numbers are all
+       printed in the legend and beside the bars, so no colour has to be told apart on its own. */
+    .ta-cat-run { --c: #2a78d6; }
+    .ta-cat-upload { --c: #eb6834; }
+    .ta-cat-test { --c: #1baf7a; }
+    .ta-cat-status { --c: #eda100; }
+    .ta-cat-edit { --c: #e87ba4; }
+
+    /* Side by side only when the card is wide enough for both (the sidebar takes a lot of the screen), else stacked. */
+    .ta-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 30px 40px; align-items: start; }
+    .ta-chart h4 { margin: 0 0 12px; font-size: 13px; font-weight: 700; color: #0f172a; }
+    .ta-chart h4 small { font-weight: 500; color: #64748b; font-size: 12px; margin-left: 6px; }
+
+    .ta-donut-wrap { display: flex; align-items: center; gap: 22px; flex-wrap: wrap; }
+    .ta-donut { width: 168px; height: 168px; flex: none; }
+    .ta-donut circle { fill: none; }
+    .ta-donut-track { stroke: #e5e7eb; stroke-width: 12; }
+    .ta-seg circle { stroke: var(--c); stroke-width: 12; stroke-linecap: butt; transition: stroke-width .12s, opacity .12s; }
+    .ta-seg:hover circle, .ta-seg:focus-visible circle, .ta-seg.is-active circle { stroke-width: 15; }
+    .ta-seg:focus { outline: none; }
+    .ta-donut.has-selection .ta-seg:not(.is-active) circle { opacity: .35; }
+    .ta-donut-total { font-size: 26px; font-weight: 700; fill: #0f172a; }
+    .ta-donut-total.is-long { font-size: 19px; }
+    .ta-donut-caption { font-size: 9px; fill: #64748b; }
+
+    .ta-legend { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; min-width: 160px; flex: 1; }
+    .ta-legend-row { display: grid; grid-template-columns: 12px 1fr auto 44px; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; color: #334155; text-decoration: none; font-size: 13px; }
+    a.ta-legend-row:hover { background: #f8fafc; }
+    a.ta-legend-row:focus-visible, .ta-bar-row:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+    .ta-legend-row.is-active { background: #f1f5f9; font-weight: 700; }
+    .ta-legend-row.is-zero { color: #94a3b8; }
+    .ta-swatch { width: 10px; height: 10px; border-radius: 3px; background: var(--c); }
+    .ta-legend-row.is-zero .ta-swatch { opacity: .35; }
+    .ta-legend-n { font-variant-numeric: tabular-nums; font-weight: 700; color: #0f172a; text-align: right; }
+    .ta-legend-row.is-zero .ta-legend-n { color: #94a3b8; font-weight: 500; }
+    .ta-legend-pct { font-variant-numeric: tabular-nums; color: #64748b; text-align: right; font-size: 12px; }
+
+    .ta-bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+    .ta-bar-row { display: grid; grid-template-columns: minmax(110px, 190px) minmax(0, 1fr); gap: 14px; align-items: center; padding: 6px 8px; border-radius: 8px; text-decoration: none; color: #334155; }
+    .ta-bar-row:hover { background: #f8fafc; }
+    .ta-bar-row.is-active { background: #f1f5f9; }
+    .ta-bar-name { display: flex; flex-direction: column; line-height: 1.25; font-size: 13px; min-width: 0; }
+    .ta-bar-name strong { color: #0f172a; overflow-wrap: anywhere; }
+    .ta-bar-track { display: flex; align-items: center; gap: 8px; border-left: 1px solid #c3c2b7; min-height: 18px; }
+    .ta-bar-fill { display: block; height: 14px; min-width: 2px; background: #2a78d6; border-radius: 0 4px 4px 0; }
+    .ta-bar-value { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 13px; color: #0f172a; }
+    .ta-bars.has-selection .ta-bar-row:not(.is-active) .ta-bar-fill { background: #c3c2b7; }
+    .ta-note { margin: 10px 8px 0; font-size: 12px; color: #64748b; line-height: 1.5; }
 
     .ta-table { width: 100%; border-collapse: collapse; }
     .ta-table th { text-align: left; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.05em; color: #fff; background: #0f172a; padding: 11px 12px; white-space: nowrap; }
     .ta-table td { padding: 11px 12px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #334155; vertical-align: top; }
-    .ta-table .ta-num { text-align: right; white-space: nowrap; }
-    .ta-table a { color: #0284c7; text-decoration: none; font-weight: 700; }
-    .ta-table a:hover { text-decoration: underline; }
-    .ta-person-link { color: #0f172a !important; }
-    .ta-row-active td { background: #eff6ff; }
-    .ta-zero { color: #cbd5e1; }
     .ta-muted { display: block; color: #64748b; font-size: 12px; }
-    .ta-people .ta-muted { display: inline; margin-left: 6px; }
-    .ta-last { color: #64748b; font-size: 12px; white-space: nowrap; }
     .ta-time { white-space: nowrap; font-size: 12px; color: #475569; }
-    .ta-what { white-space: normal; max-width: 560px; }
+    /* The floor matters: the details break anywhere, which would let the table squeeze this column to a few letters wide. */
+    .ta-what { white-space: normal; min-width: 280px; max-width: 620px; }
     .ta-code { color: #94a3b8; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+    /* The exact parameters of an event (what a test was run with, what an edit changed from and to). Collapsed until
+       asked for, so a busy day still reads as one line per event. */
+    .ta-details { margin-top: 8px; }
+    .ta-details > summary { cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: #2563eb; list-style: none; border-radius: 6px; padding: 2px 4px; margin-left: -4px; }
+    .ta-details > summary::-webkit-details-marker { display: none; }
+    .ta-details > summary::before { content: "▸"; font-size: 11px; transition: transform .12s; }
+    .ta-details[open] > summary::before { transform: rotate(90deg); }
+    .ta-details > summary:hover { background: #eff6ff; }
+    .ta-details > summary:focus-visible { outline: 2px solid #2563eb; outline-offset: 1px; }
+    .ta-details > summary .ta-muted { display: inline; font-weight: 500; }
+    .ta-detail-list { margin: 8px 0 0; padding: 4px 12px; max-height: 360px; overflow: auto; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 10px; }
+    /* Label and value sit side by side when the cell is wide enough for both (404px), else the value drops under its label. */
+    .ta-detail-row { display: flex; flex-wrap: wrap; gap: 2px 14px; padding: 7px 0; border-bottom: 1px solid #e2e8f0; font-size: 12px; line-height: 1.45; }
+    .ta-detail-row:last-child { border-bottom: none; }
+    .ta-detail-row dt { flex: 0 1 190px; color: #64748b; font-weight: 700; overflow-wrap: anywhere; }
+    .ta-detail-row dd { flex: 1 1 200px; min-width: 0; margin: 0; color: #0f172a; overflow-wrap: anywhere; white-space: pre-wrap; }
+
     .ta-none { text-align: center; padding: 30px 12px !important; color: #64748b; font-weight: 600; }
 
-    .ta-badge { display: inline-block; padding: 3px 9px; border-radius: 6px; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; border: 1px solid transparent; }
-    .ta-cat-run { background: #dbeafe; color: #1d4ed8; border-color: #bfdbfe; }
-    .ta-cat-upload { background: #dcfce7; color: #166534; border-color: #bbf7d0; }
-    .ta-cat-test { background: #ede9fe; color: #5b21b6; border-color: #ddd6fe; }
-    .ta-cat-status { background: #fef3c7; color: #92400e; border-color: #fde68a; }
-    .ta-cat-edit { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+    /* The feed's category badge: a neutral pill with the category's dot, matching the donut and the legend. */
+    .ta-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #334155; background: #f1f5f9; border: 1px solid #e2e8f0; }
+    .ta-badge::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--c, #94a3b8); }
 
     .ta-feed-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
     .ta-size-form { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #64748b; margin-bottom: 14px; }

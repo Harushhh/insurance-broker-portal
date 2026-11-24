@@ -113,11 +113,15 @@ def api_complete_upload(request):
                     request.user, UPLOAD, "csv.upload.completed",
                     f"Uploaded '{name}' into {where}" + (f": {rows} rows" if rows is not None else ""),
                     target=attempt, extra={"table": attempt.target_table, "rows": rows},
+                    details={"table": where, "file": attempt.file_name, "rows": rows, "attempt_id": attempt.id,
+                             "file_hash": attempt.file_hash},
                 )
             else:
                 record_activity(
                     request.user, UPLOAD, "csv.upload.failed", f"Upload of '{name}' into {where} failed",
                     target=attempt, extra={"table": attempt.target_table},
+                    details={"table": where, "file": attempt.file_name, "attempt_id": attempt.id,
+                             "file_hash": attempt.file_hash},
                 )
         return JsonResponse({'status': 'ok'})
     except Exception as e:

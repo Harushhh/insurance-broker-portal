@@ -23,8 +23,9 @@ Static files use hashed names (WhiteNoise manifest storage), so `collectstatic` 
   `AWS_SECRET_ACCESS_KEY` are set; otherwise local disk. `GRID_ARCHIVE_BUCKET_NAME` puts the Grid Management archive in
   its own bucket.
 - `LIFE_PAYOUT_GRID_*` are no longer read (the service was decommissioned); they can be deleted from `.env` and Railway.
-- `TEAM_ACTIVITY_RETENTION_DAYS` (default 90) is how long the Team Activity page keeps events; the nightly
-  `cleanup_team_activity` job deletes older ones.
+- Team Activity keeps whole calendar months, not a number of days (there is no setting for it): everything from midnight
+  (IST) on the 1st of **last month** onwards. The nightly `cleanup_team_activity` job deletes older events, so October's
+  go on the night of 1 December and the page can always report on last month in full plus the month so far.
 
 ## Scheduled jobs (`CELERY_BEAT_SCHEDULE`)
 
@@ -32,7 +33,7 @@ Static files use hashed names (WhiteNoise manifest storage), so `collectstatic` 
 |---|---|---|
 | `cleanup_points_search_logs` | 02:00 daily | deletes Motor/Health points-search audit logs older than 7 days |
 | `cleanup_security_audit_logs` | 02:15 daily | deletes security audit log entries older than 7 days |
-| `cleanup_team_activity` | 02:30 daily | deletes Team Activity events older than `TEAM_ACTIVITY_RETENTION_DAYS` (default 90) |
+| `cleanup_team_activity` | 02:30 daily | deletes Team Activity events from before the 1st of last month (it only removes anything on the first night of a month) |
 | `archive_old_grid_documents` | 03:00 on the 1st | moves Grid Management uploads older than `GRID_RETENTION_MONTHS` (3) to the archive |
 
 The archive copies each file, reads it back and compares SHA-256, writes an immutable manifest per run, and only then

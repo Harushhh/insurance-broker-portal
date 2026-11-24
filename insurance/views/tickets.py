@@ -110,10 +110,12 @@ def create_ticket_api(request):
                 category=category,
                 ticket_type=ticket_type,
             )
-            # Never the remarks or the form values: free text can carry personal data.
+            # The sentence carries no remarks or form values (free text can hold personal data); the details do.
             record_activity(
                 request.user, STATUS, "ticket.opened", f"Opened {category.title()} support ticket #{ticket.id}",
                 target=ticket, extra={"category": category},
+                details={"ticket_id": ticket.id, "category": category, "ticket_type": ticket_type or None,
+                         "remarks": remarks, "search_values": form_payload},
             )
             return JsonResponse({"success": True, "ticket_id": ticket.id})
         except Exception as e:
@@ -147,6 +149,10 @@ def update_ticket_status(request):
                     request.user, STATUS, "ticket.status.changed",
                     f"Changed support ticket #{ticket.id} from {old_status} to {ticket.status}",
                     target=ticket, extra={"from": old_status, "to": ticket.status},
+                    details={"ticket_id": ticket.id, "category": ticket.category,
+                             "ticket_type": ticket.ticket_type or None,
+                             "status": {"from": old_status, "to": ticket.status},
+                             "raised_by": ticket.user.username if ticket.user else None},
                 )
 
             return JsonResponse({"success": True})

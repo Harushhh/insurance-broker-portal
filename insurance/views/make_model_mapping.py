@@ -5,7 +5,8 @@ from django.http import JsonResponse
 from django.db.models import Q
 from django.db import IntegrityError, transaction
 import json
-from ..models import AuditLog, MakeModelMapping, MakeModelMappingValue
+from ..models import MakeModelMapping, MakeModelMappingValue
+from ..services.activity import audit_change
 from ..services.make_model_mapping import _make_model_cluster_items, _make_model_mapping_suggestions, _mapping_lookup, _normalize_mapping_value
 
 
@@ -208,10 +209,17 @@ def save_make_model_mapping(request):
             + (f" Removed: {', '.join(removed)}." if removed else "")
         )
         action = "MAKE MODEL MAPPING UPDATE"
+        parameters = {"mapping_id": mapping.id, "name": name, "spellings": values,
+                      "spellings_added": added, "spellings_removed": removed}
     else:
         details = f"Created Make/Model Mapping '{name}' (id {mapping.id}). Spellings: {', '.join(values)}."
         action = "MAKE MODEL MAPPING CREATE"
-    AuditLog.objects.create(user=request.user, action=action, details=details)
+        parameters = {"mapping_id": mapping.id, "name": name, "spellings": values}
+    audit_change(
+        request.user, action, details,
+        summary=f"{'Updated' if is_update else 'Created'} the Make/Model mapping '{name}'", target=mapping,
+        details=parameters,
+    )
 
     return JsonResponse({"success": True, "id": mapping.id, "name": mapping.name, "values": values})
 
@@ -235,9 +243,10 @@ def delete_make_model_mapping(request):
     mapping_pk = mapping.id
     mapping.delete()
 
-    AuditLog.objects.create(
-        user=request.user,
-        action="MAKE MODEL MAPPING DELETE",
-        details=f"Deleted Make/Model Mapping '{name}' (id {mapping_pk}). Spellings: {', '.join(values)}.",
+    audit_change(
+        request.user, "MAKE MODEL MAPPING DELETE",
+        f"Deleted Make/Model Mapping '{name}' (id {mapping_pk}). Spellings: {', '.join(values)}.",
+        summary=f"Deleted the Make/Model mapping '{name}'",
+        details={"mapping_id": mapping_pk, "name": name, "spellings": values},
     )
     return JsonResponse({"success": True})

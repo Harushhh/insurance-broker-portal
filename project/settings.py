@@ -311,11 +311,6 @@ CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 # service has its own start command, which overrides the Procfile.
 CELERY_WORKER_MAX_MEMORY_PER_CHILD = 500000
 
-# How many days the Team Activity page keeps events (insurance.tasks.cleanup_team_activity
-# deletes older ones nightly). Longer than the 7 days of the audit logs because a manager
-# reviews a team over weeks, not days.
-TEAM_ACTIVITY_RETENTION_DAYS = int(os.getenv("TEAM_ACTIVITY_RETENTION_DAYS") or 90)   # blank counts as unset
-
 # Periodic jobs, run by a `celery -A project beat` process (see Procfile's
 # `beat` entry). Requires that process to actually be deployed/running.
 CELERY_BEAT_SCHEDULE = {

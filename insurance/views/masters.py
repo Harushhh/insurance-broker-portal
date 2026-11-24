@@ -4,8 +4,9 @@ from django.http import HttpResponse, JsonResponse
 from django.core.cache import cache
 import json
 from openpyxl import Workbook
-from ..models import RTOMaster, MakeModelMaster, PincodeMaster, AuditLog
+from ..models import RTOMaster, MakeModelMaster, PincodeMaster
 from ..forms import MakeModelForm, PincodeForm, RTOForm
+from ..services.activity import EDIT, audit_change, form_changes, record_activity
 from ..services.masters import RTO_MAKE_CHOICES_CACHE_KEY, _sync_pincode_zones_from_health_data
 
 
@@ -98,13 +99,14 @@ def create_rto(request):
 
     obj = RTOMaster.objects.create(rto_name=name, rto_cluster=cluster or None)
 
-    AuditLog.objects.create(
-        user=request.user,
-        action="RTO MASTER CREATE",
-        details=(
+    audit_change(
+        request.user, "RTO MASTER CREATE",
+        (
             f"Created new RTO Master group '{name}' (id {obj.id}) from the RTO Dashboard."
             + (f" Cluster: {cluster}" if cluster else "")
         ),
+        summary=f"Created the RTO Master group '{name}'", target=obj,
+        details={"id": obj.id, "rto_name": name, "rto_cluster": cluster or None},
     )
     # Mirrors api_upload_chunk / create_make_model: every write to this master
     # table busts the key get_rto_and_make_choices caches the rate forms'
@@ -233,13 +235,14 @@ def create_make_model(request):
 
     obj = MakeModelMaster.objects.create(make_model_name=name, make_model_cluster=cluster or None)
 
-    AuditLog.objects.create(
-        user=request.user,
-        action="MAKE MODEL MASTER CREATE",
-        details=(
+    audit_change(
+        request.user, "MAKE MODEL MASTER CREATE",
+        (
             f"Created new Make/Model Master group '{name}' (id {obj.id}) from the Make Model Dashboard."
             + (f" Cluster: {cluster}" if cluster else "")
         ),
+        summary=f"Created the Make/Model Master group '{name}'", target=obj,
+        details={"id": obj.id, "make_model_name": name, "make_model_cluster": cluster or None},
     )
     # Mirrors api_upload_chunk / add_missing_make_model_to_master: every write
     # to this master table busts the key get_rto_and_make_choices caches the
@@ -365,13 +368,14 @@ def create_pincode(request):
 
     obj = PincodeMaster.objects.create(pincode_zone=zone, pincode_cluster=cluster or None)
 
-    AuditLog.objects.create(
-        user=request.user,
-        action="PINCODE MASTER CREATE",
-        details=(
+    audit_change(
+        request.user, "PINCODE MASTER CREATE",
+        (
             f"Created new Pincode Master zone '{zone}' (id {obj.id}) from the Pincode Dashboard."
             + (f" Cluster: {cluster}" if cluster else "")
         ),
+        summary=f"Created the Pincode Master zone '{zone}'", target=obj,
+        details={"id": obj.id, "pincode_zone": zone, "pincode_cluster": cluster or None},
     )
 
     return JsonResponse({
@@ -414,7 +418,13 @@ def edit_rto(request, pk):
     if request.method == "POST":
         form = RTOForm(request.POST, instance=obj)
         if form.is_valid():
+            changes = form_changes(form)
             form.save()
+            if changes:
+                record_activity(
+                    request.user, EDIT, "rto.master.edited", f"Edited the RTO Master group '{obj.rto_name}'",
+                    target=obj, details={"id": obj.id, "changes": changes},
+                )
             return redirect("rto_dashboard")
     else:
         form = RTOForm(instance=obj)
@@ -431,7 +441,14 @@ def edit_make_model(request, pk):
     if request.method == "POST":
         form = MakeModelForm(request.POST, instance=obj)
         if form.is_valid():
+            changes = form_changes(form)
             form.save()
+            if changes:
+                record_activity(
+                    request.user, EDIT, "make_model.master.edited",
+                    f"Edited the Make/Model Master group '{obj.make_model_name}'",
+                    target=obj, details={"id": obj.id, "changes": changes},
+                )
             return redirect("make_model_dashboard")
     else:
         form = MakeModelForm(instance=obj)
@@ -448,7 +465,13 @@ def edit_pincode(request, pk):
     if request.method == "POST":
         form = PincodeForm(request.POST, instance=obj)
         if form.is_valid():
+            changes = form_changes(form)
             form.save()
+            if changes:
+                record_activity(
+                    request.user, EDIT, "pincode.master.edited", f"Edited the Pincode Master zone '{obj.pincode_zone}'",
+                    target=obj, details={"id": obj.id, "changes": changes},
+                )
             return redirect("pincode_dashboard")
     else:
         form = PincodeForm(instance=obj)

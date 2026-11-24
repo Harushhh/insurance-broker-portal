@@ -138,6 +138,14 @@ def lock_unlock_policy(request, rate_id):
     record_activity(
         request.user, STATUS, "policy.locked",
         f"Locked {kind} with {obj.insurance_company or 'an insurer'}", target=obj,
+        details={
+            "locked_policy_id": obj.id, "rate_id": rate_obj.id, "newly_locked": created,
+            "vehicle_no": vehicle_no, "policy_holder_name": policy_holder_name, "target_date": target_date,
+            "product": obj.product_name, "sub_product": obj.sub_product_name, "insurer": obj.insurance_company,
+            "rto_code": obj.rto_code, "make": obj.make_name, "fuel": obj.fuel, "cc": obj.cc, "sc": obj.sc,
+            "mfg_year": obj.mfg_year, "po_type": obj.po_type, "po_rate": obj.po_rate,
+            "po_flat_amount": obj.po_flat_amount, "add_tnc": obj.add_tnc,
+        },
     )
 
     return JsonResponse({"success": True, "message": f"Successfully locked policy for {vehicle_no}."})

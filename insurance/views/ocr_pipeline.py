@@ -36,10 +36,13 @@ def upload_extract_pdf(request):
                     doc_obj.save()
 
                     process_policy_document_task.delay(doc_obj.id)
-                    # No file name: a policy document's name can carry a policy number or a person's name.
+                    # The sentence has no file name (it can carry a policy number or a person's name); the details do.
                     record_activity(
                         request.user, UPLOAD, "ocr.document.uploaded",
                         "Uploaded a policy document for AI extraction", target=doc_obj,
+                        details={"document_id": doc_obj.id, "file": doc_obj.original_filename,
+                                 "mime_type": getattr(uploaded_file, "content_type", "") or "",
+                                 "size_bytes": uploaded_file.size},
                     )
                     return redirect("upload_extract_pdf")
 

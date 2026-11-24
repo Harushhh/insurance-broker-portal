@@ -8,8 +8,9 @@ from django.shortcuts import redirect, render
 from django.views.decorators.http import require_POST
 
 from ..forms import LifeInsurerAliasForm, LifePlanMappingForm
-from ..models import AuditLog, LifeInsurerAlias, LifePlanMapping
+from ..models import LifeInsurerAlias, LifePlanMapping
 from ..services import life_mis
+from ..services.activity import audit_change
 
 WAITING_LIMIT = 100          # the most spellings listed as still waiting to be mapped, most policies first
 
@@ -79,6 +80,8 @@ def life_plan_mapping_save(request):
             return redirect("life_plan_mapping")
     created = mapping is None
     before = "" if created else f" Was: {mapping.insurer} / '{mapping.plan_name}' -> {_one_line(mapping.grid_products)}."
+    old_values = None if created else {"insurer": mapping.insurer, "plan_name": mapping.plan_name,
+                                       "grid_products": mapping.grid_products, "note": mapping.note}
     if created:
         mapping = LifePlanMapping(created_by=request.user)
     mapping.insurer = data["insurer"]
@@ -92,11 +95,18 @@ def life_plan_mapping_save(request):
         messages.error(request, "Someone just mapped this plan for this insurer: refresh and edit that mapping.")
         return redirect("life_plan_mapping")
 
-    AuditLog.objects.create(
-        user=request.user,
-        action="LIFE PLAN MAPPING CREATE" if created else "LIFE PLAN MAPPING UPDATE",
-        details=(f"{'Created' if created else 'Updated'} Life Plan Mapping {mapping.id}: {mapping.insurer} / "
-                 f"'{mapping.plan_name}' -> {_one_line(mapping.grid_products)}.{before}"),
+    new_values = {"insurer": mapping.insurer, "plan_name": mapping.plan_name,
+                  "grid_products": mapping.grid_products, "note": mapping.note}
+    audit_change(
+        request.user, "LIFE PLAN MAPPING CREATE" if created else "LIFE PLAN MAPPING UPDATE",
+        (f"{'Created' if created else 'Updated'} Life Plan Mapping {mapping.id}: {mapping.insurer} / "
+         f"'{mapping.plan_name}' -> {_one_line(mapping.grid_products)}.{before}"),
+        summary=f"{'Created' if created else 'Updated'} the Life plan mapping for {mapping.insurer} / '{mapping.plan_name}'",
+        target=mapping,
+        details={"mapping_id": mapping.id,
+                 **({"values": new_values} if created else
+                    {"changes": {name: {"from": old_values[name], "to": value}
+                                 for name, value in new_values.items() if old_values[name] != value}})},
     )
     products, rows = life_mis.mapping_reach(grid, mapping.insurer, mapping.grid_products)
     messages.success(
@@ -113,9 +123,13 @@ def life_plan_mapping_delete(request, pk):
         messages.error(request, "That mapping no longer exists.")
         return redirect("life_plan_mapping")
     summary = f"{mapping.insurer} / '{mapping.plan_name}' -> {_one_line(mapping.grid_products)}"
+    removed = {"insurer": mapping.insurer, "plan_name": mapping.plan_name, "grid_products": mapping.grid_products,
+               "note": mapping.note}
     mapping.delete()
-    AuditLog.objects.create(
-        user=request.user, action="LIFE PLAN MAPPING DELETE", details=f"Deleted Life Plan Mapping {pk}: {summary}.")
+    audit_change(
+        request.user, "LIFE PLAN MAPPING DELETE", f"Deleted Life Plan Mapping {pk}: {summary}.",
+        summary=f"Deleted the Life plan mapping for {removed['insurer']} / '{removed['plan_name']}'",
+        details={"mapping_id": pk, "values": removed})
     messages.success(request, f"Deleted the mapping for '{summary.split(' -> ')[0]}'.")
     return redirect("life_plan_mapping")
 
@@ -169,6 +183,7 @@ def life_insurer_alias_save(request):
             return redirect("life_insurer_aliases")
     created = alias is None
     before = "" if created else f" Was: '{alias.mis_name}' -> {alias.insurer}."
+    old_values = None if created else {"mis_name": alias.mis_name, "insurer": alias.insurer}
     if created:
         alias = LifeInsurerAlias(created_by=request.user)
     alias.mis_name = data["mis_name"]
@@ -180,10 +195,16 @@ def life_insurer_alias_save(request):
         messages.error(request, "Someone just mapped this name: refresh and edit that alias.")
         return redirect("life_insurer_aliases")
 
-    AuditLog.objects.create(
-        user=request.user,
-        action="LIFE INSURER ALIAS CREATE" if created else "LIFE INSURER ALIAS UPDATE",
-        details=f"{'Created' if created else 'Updated'} Life Insurer Alias {alias.id}: '{alias.mis_name}' -> {alias.insurer}.{before}",
+    new_values = {"mis_name": alias.mis_name, "insurer": alias.insurer}
+    audit_change(
+        request.user, "LIFE INSURER ALIAS CREATE" if created else "LIFE INSURER ALIAS UPDATE",
+        f"{'Created' if created else 'Updated'} Life Insurer Alias {alias.id}: '{alias.mis_name}' -> {alias.insurer}.{before}",
+        summary=f"{'Created' if created else 'Updated'} the Life insurer alias '{alias.mis_name}' -> {alias.insurer}",
+        target=alias,
+        details={"alias_id": alias.id,
+                 **({"values": new_values} if created else
+                    {"changes": {name: {"from": old_values[name], "to": value}
+                                 for name, value in new_values.items() if old_values[name] != value}})},
     )
     messages.success(request, f"Saved: '{alias.mis_name}' now means {alias.insurer}. Re-run mapping for a MIS file to use it.")
     return redirect("life_insurer_aliases")
@@ -196,9 +217,11 @@ def life_insurer_alias_delete(request, pk):
         messages.error(request, "That alias no longer exists.")
         return redirect("life_insurer_aliases")
     summary = f"'{alias.mis_name}' -> {alias.insurer}"
+    removed = {"mis_name": alias.mis_name, "insurer": alias.insurer}
     alias.delete()
-    AuditLog.objects.create(
-        user=request.user, action="LIFE INSURER ALIAS DELETE", details=f"Deleted Life Insurer Alias {pk}: {summary}.")
+    audit_change(
+        request.user, "LIFE INSURER ALIAS DELETE", f"Deleted Life Insurer Alias {pk}: {summary}.",
+        summary=f"Deleted the Life insurer alias {summary}", details={"alias_id": pk, "values": removed})
     messages.success(request, f"Deleted the alias {summary}.")
     return redirect("life_insurer_aliases")
 

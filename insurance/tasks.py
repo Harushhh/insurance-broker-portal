@@ -21,14 +21,12 @@ def cleanup_points_search_logs():
 
 @shared_task
 def cleanup_team_activity():
-    """Delete Team Activity events older than TEAM_ACTIVITY_RETENTION_DAYS (90 by default)."""
-    from datetime import timedelta
-    from django.conf import settings
-    from django.utils import timezone
+    """Delete Team Activity events from before the start of last month (services.activity.retention_cutoff): the feed
+    keeps last month in full plus the month so far, so daily, weekly and monthly numbers are never cut in half."""
     from .models import ActivityEvent
+    from .services.activity import retention_cutoff
 
-    cutoff = timezone.now() - timedelta(days=settings.TEAM_ACTIVITY_RETENTION_DAYS)
-    deleted_count, _ = ActivityEvent.objects.filter(occurred_at__lt=cutoff).delete()
+    deleted_count, _ = ActivityEvent.objects.filter(occurred_at__lt=retention_cutoff()).delete()
     return deleted_count
 
 

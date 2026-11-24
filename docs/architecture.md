@@ -43,7 +43,7 @@ browser ──> urls.py ──> views/<feature>.py ──> services/<feature>.py
 | Grid management | `views/grid_management.py` | `services/email.py`, `grid_archive.py` |
 | Tickets, special rate requests | `views/tickets.py`, `views/special_rates.py` | `services/tickets.py` |
 | Audit logs | `views/audit_logs.py` | `services/audit_logs.py` |
-| Team Activity (a manager's view of their team's runs, uploads, tests and status changes) | `views/team_activity.py` | `services/activity.py` (write: `record_activity`), `services/team_scope.py` (read: `visible_events`) |
+| Team Activity (a manager's view of their team's runs, uploads, tests, status changes and record edits, each with its exact parameters; also holds every audit-log entry) | `views/team_activity.py` | `services/activity.py` (write: `record_activity`, `audit_change`, the audit-log mirror in `signals.py`), `services/team_scope.py` (read: `visible_events`) |
 | Analysis | `views/analysis.py` | `services/analysis.py` |
 | AI rulebook (field configurator) | `views/ai_rulebook.py` | |
 | Users, SSO landing, home, Rate Checker | `views/user_management.py`, `views/sso_handoff.py`, `views/home.py`, `views/rate_checker.py` | `sso.py` |

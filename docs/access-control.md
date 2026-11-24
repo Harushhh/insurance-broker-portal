@@ -43,8 +43,20 @@ Every view and export starts from `visible_events()` and only narrows it, so a f
 reach another team (`?team=` is not even read for anyone but `ADMIN`). `test_team_activity.StructureTests` fails if a
 view or the API queries `ActivityEvent` directly.
 
+What the page shows per event has two parts. The **sentence** (`summary`, and the small `extra` counts) never carries
+personal data. The **Details** (`ActivityEvent.details`) are the exact parameters of what the person did: the values a
+check was run with (a vehicle number, a policy-holder name), what an edit changed from and to, the rows a bulk update
+touched, the ticket text. Details can therefore hold personal data, and they sit under exactly the same row rule as the
+sentence: a manager reads them only for the people below them, `ADMIN` for everyone. Never written into them: any
+password (a new user's one-time password, a reset password), and the values of PAN, bank account, bank name and IFSC
+(Access Control logs those as "changed" only).
+
+Every audit-log entry also lands on this page, as an Edit event whose details are the entry's text (the entries written by
+`audit_change` carry the exact parameters as well). That is what lets Team Activity replace the Security Audit page: the
+page itself is still there with its own 7-day retention, while Team Activity keeps last month and this month.
+
 Reports To is a tree: one manager per person, `UserProfile.clean()` refuses self-links and loops, and every change is
-written to the Security Audit log as `TEAM CHANGE`, because it decides who can read whose work. Run
+written to the audit log as `TEAM CHANGE` (so it is on Team Activity too), because it decides who can read whose work. Run
 `python manage.py check_team_hierarchy` to list the links and spot bad ones. Deleting a manager's account leaves their
 reports without a manager (their events are then visible to admins only): deactivate the account instead.
 

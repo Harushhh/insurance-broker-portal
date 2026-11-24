@@ -16,8 +16,9 @@ from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.views.decorators.http import require_POST
 
 from ..forms import LifeBulkUpdateForm, LifeInsurerNoteForm, LifeRateAddForm, LifeRateForm
-from ..models import AuditLog, LifeGridUpload, LifeInsurerNote, LifeRate
-from ..services.activity import STATUS, TEST, UPLOAD, record_activity
+from ..models import LifeGridUpload, LifeInsurerNote, LifeRate
+from ..services.activity import MAX_LISTED_IDS, STATUS, TEST, UPLOAD, audit_change, plain, record_activity
+from ..services.activity import snapshot as row_snapshot
 from ..services.life_filters import CATEGORIES, PAYMENT_MODES, PPT_CHOICES, PT_CHOICES
 from ..services.life_dashboard import COLUMN_HELP, dashboard_data, dashboard_workbook
 from ..services.life_rates import (
@@ -62,10 +63,16 @@ def life_payout_rates(request):
                        if any(getattr(r, attr) is not None for r in results)]
 
     if has_searched:
-        # Only that a search happened and how many rows it found: no filter values or search words.
+        # The sentence names no search value; the details hold exactly what was searched for and how many rows it found.
+        parameters = {
+            key: values[0] if len(values) == 1 else values for key, values in request.GET.lists()
+            if key != "csrfmiddlewaretoken" and any(value.strip() for value in values)
+        }
         record_activity(
             request.user, TEST, "life.rates.searched", "Ran a Life payout rate search",
             extra={"results": total_found},
+            details={"page": "Life Payout Rates", "grid": upload.label if upload else None,
+                     "parameters": parameters, "results": total_found},
         )
 
     return render(request, "life_payout_rates.html", {
@@ -196,16 +203,15 @@ def _label_for(request, file_name):
 
 def _stored_for_review(request, upload, file_name, label):
     """Log an upload that was stored but not made live, tell the user, and open its review."""
-    AuditLog.objects.create(
-        user=request.user,
-        action="LIFE GRID UPLOAD",
-        details=(f"Uploaded '{file_name}' as '{label}' for review: {upload.row_count} rows from "
-                 f"{upload.insurer_count} insurers. It is not live."),
-    )
-    record_activity(
-        request.user, UPLOAD, "life.grid.uploaded",
-        f"Uploaded the Life grid '{label}' for review: {upload.row_count} rows from {upload.insurer_count} insurers (not live)",
+    audit_change(
+        request.user, "LIFE GRID UPLOAD",
+        (f"Uploaded '{file_name}' as '{label}' for review: {upload.row_count} rows from "
+         f"{upload.insurer_count} insurers. It is not live."),
+        category=UPLOAD, code="life.grid.uploaded",
+        summary=f"Uploaded the Life grid '{label}' for review: {upload.row_count} rows from {upload.insurer_count} insurers (not live)",
         target=upload, extra={"rows": upload.row_count, "insurers": upload.insurer_count, "live": False},
+        details={"upload_id": upload.pk, "label": label, "file": file_name, "rows": upload.row_count,
+                 "insurers": upload.insurer_count, "live": False, "notes_from_the_file": upload.warnings.splitlines()},
     )
     messages.success(
         request, f"'{label}' was read: {upload.row_count} payout rows from {upload.insurer_count} insurers. "
@@ -240,15 +246,14 @@ def life_rate_master_upload(request):
                               make_live=not review_first)
     if review_first:
         return _stored_for_review(request, upload, uploaded.name, label)
-    AuditLog.objects.create(
-        user=request.user,
-        action="LIFE GRID UPLOAD",
-        details=f"Uploaded '{uploaded.name}' as '{label}': {upload.row_count} rows from {upload.insurer_count} insurers.",
-    )
-    record_activity(
-        request.user, UPLOAD, "life.grid.uploaded",
-        f"Uploaded the Life grid '{label}' and made it live: {upload.row_count} rows from {upload.insurer_count} insurers",
+    audit_change(
+        request.user, "LIFE GRID UPLOAD",
+        f"Uploaded '{uploaded.name}' as '{label}': {upload.row_count} rows from {upload.insurer_count} insurers.",
+        category=UPLOAD, code="life.grid.uploaded",
+        summary=f"Uploaded the Life grid '{label}' and made it live: {upload.row_count} rows from {upload.insurer_count} insurers",
         target=upload, extra={"rows": upload.row_count, "insurers": upload.insurer_count, "live": True},
+        details={"upload_id": upload.pk, "label": label, "file": uploaded.name, "rows": upload.row_count,
+                 "insurers": upload.insurer_count, "live": True, "notes_from_the_file": upload.warnings.splitlines()},
     )
     messages.success(
         request, f"'{label}' is now live: {upload.row_count} payout rows from {upload.insurer_count} insurers.")
@@ -336,14 +341,12 @@ def life_rate_master_discard(request, pk):
     except ValueError as exc:
         messages.error(request, str(exc))
         return redirect("life_rate_master_uploads")
-    AuditLog.objects.create(
-        user=request.user,
-        action="LIFE GRID UPLOAD",
-        details=f"Discarded the upload '{label}' ('{file_name}', {rows} rows) that was waiting for review.",
-    )
-    record_activity(
-        request.user, STATUS, "life.grid.discarded", f"Discarded the Life grid upload '{label}' that was waiting for review",
-        extra={"rows": rows},
+    audit_change(
+        request.user, "LIFE GRID UPLOAD",
+        f"Discarded the upload '{label}' ('{file_name}', {rows} rows) that was waiting for review.",
+        category=STATUS, code="life.grid.discarded",
+        summary=f"Discarded the Life grid upload '{label}' that was waiting for review", extra={"rows": rows},
+        details={"label": label, "file": file_name, "rows": rows},
     )
     messages.success(request, f"'{label}' was discarded. The live grid is unchanged.")
     return redirect("life_rate_master_uploads")
@@ -368,15 +371,14 @@ def life_rate_master_delete_upload(request, pk):
     except ValueError as exc:
         messages.error(request, str(exc))
         return redirect("life_rate_master_uploads")
-    AuditLog.objects.create(
-        user=request.user,
-        action="LIFE GRID UPLOAD",
-        details=(f"Deleted {kind} '{label}' ('{file_name}', {_count(rows, 'row')} from {_count(insurers, 'insurer')}, "
-                 f"uploaded {uploaded}) with its rows and notes."),
-    )
-    record_activity(
-        request.user, STATUS, "life.grid.deleted", f"Deleted {kind} '{label}' (uploaded {uploaded})",
+    audit_change(
+        request.user, "LIFE GRID UPLOAD",
+        (f"Deleted {kind} '{label}' ('{file_name}', {_count(rows, 'row')} from {_count(insurers, 'insurer')}, "
+         f"uploaded {uploaded}) with its rows and notes."),
+        category=STATUS, code="life.grid.deleted", summary=f"Deleted {kind} '{label}' (uploaded {uploaded})",
         extra={"rows": rows, "insurers": insurers},
+        details={"label": label, "file": file_name, "rows": rows, "insurers": insurers, "uploaded": uploaded,
+                 "what_it_was": kind},
     )
     messages.success(request, f"'{label}' (uploaded {uploaded}) was deleted with its {_count(rows, 'row')}. "
                               f"The live grid is unchanged.")
@@ -387,9 +389,10 @@ def life_rate_master_delete_upload(request, pk):
 def life_rate_master_activate(request, pk):
     upload = get_object_or_404(LifeGridUpload, pk=pk)
     activate_life_upload(upload)
-    AuditLog.objects.create(user=request.user, action="LIFE GRID UPLOAD", details=f"Made '{upload.label}' the live Life grid.")
-    record_activity(
-        request.user, STATUS, "life.grid.live", f"Made the Life grid '{upload.label}' live", target=upload,
+    audit_change(
+        request.user, "LIFE GRID UPLOAD", f"Made '{upload.label}' the live Life grid.",
+        category=STATUS, code="life.grid.live", summary=f"Made the Life grid '{upload.label}' live", target=upload,
+        details={"upload_id": upload.pk, "label": upload.label, "file": upload.file_name, "rows": upload.row_count},
     )
     messages.success(request, f"'{upload.label}' is now live.")
     return redirect("life_rate_master_uploads")
@@ -431,10 +434,16 @@ def life_rate_master_edit(request, pk):
                 row.edited_at = timezone.now()
                 row.edited_by = request.user
                 row.save()
-                AuditLog.objects.create(
-                    user=request.user,
-                    action="LIFE RATE EDIT",
-                    details=f"Edited Life rate #{pk} ({row.insurer} | {row.product or 'no product'}): {changes}",
+                audit_change(
+                    request.user, "LIFE RATE EDIT",
+                    f"Edited Life rate #{pk} ({row.insurer} | {row.product or 'no product'}): {changes}",
+                    summary=f"Edited Life rate #{pk} ({row.insurer} | {row.product or 'no product'}): "
+                            f"{', '.join(form.changed_data)}",
+                    target=row,
+                    details={"life_rate_id": pk, "grid": record.upload.label, "insurer": row.insurer,
+                             "product": row.product, "workbook_cell": row.source_ref,
+                             "changes": {name: {"from": plain(getattr(before, name)),
+                                                "to": plain(form.cleaned_data[name])} for name in form.changed_data}},
                 )
                 messages.success(request, "The payout row was saved.")
             return redirect(next_url)
@@ -480,11 +489,13 @@ def life_rate_master_note_edit(request, pk):
         if form.is_valid():
             if form.has_changed():
                 saved = form.save()
-                AuditLog.objects.create(
-                    user=request.user,
-                    action="LIFE NOTE EDIT",
-                    details=(f"Edited the notes of {saved.insurer} in '{saved.upload.label}': "
-                             f"{_preview(before_text)} -> {_preview(saved.text)}"),
+                audit_change(
+                    request.user, "LIFE NOTE EDIT",
+                    (f"Edited the notes of {saved.insurer} in '{saved.upload.label}': "
+                     f"{_preview(before_text)} -> {_preview(saved.text)}"),
+                    summary=f"Edited the notes of {saved.insurer} in '{saved.upload.label}'", target=saved,
+                    details={"insurer": saved.insurer, "grid": saved.upload.label,
+                             "notes": {"from": before_text, "to": saved.text}},
                 )
                 messages.success(request, f"The notes of {saved.insurer} were saved.")
             return redirect(next_url)
@@ -521,10 +532,12 @@ def life_rate_master_add(request):
         if form.is_valid():
             with transaction.atomic():
                 row = add_life_rate(upload, form.cleaned_data, request.user)
-                AuditLog.objects.create(
-                    user=request.user,
-                    action="LIFE RATE ADD",
-                    details=f"Added Life rate #{row.pk} to '{upload.label}': {life_rate_snapshot(row)}",
+                audit_change(
+                    request.user, "LIFE RATE ADD",
+                    f"Added Life rate #{row.pk} to '{upload.label}': {life_rate_snapshot(row)}",
+                    summary=f"Added Life rate #{row.pk} ({row.insurer} | {row.product or 'no product'}) to '{upload.label}'",
+                    target=row,
+                    details={"life_rate_id": row.pk, "grid": upload.label, "row": row_snapshot(row)},
                 )
             messages.success(request, f"Added row #{row.pk}: {row.insurer} | {row.product}.")
             return redirect(_row_url(upload, row))
@@ -544,12 +557,14 @@ def life_rate_master_delete(request, pk):
     upload = row.upload
     next_url = _safe_next(request, reverse("life_rate_master") + _upload_query(upload))
     snapshot, label = life_rate_snapshot(row), f"{row.insurer} | {row.product or 'no product'}"
+    row_values = row_snapshot(row)               # taken before the delete: it is what the row held
     with transaction.atomic():
         delete_life_rate(row)
-        AuditLog.objects.create(
-            user=request.user,
-            action="LIFE RATE DELETE",
-            details=f"Deleted Life rate #{pk} from '{upload.label}': {snapshot}",
+        audit_change(
+            request.user, "LIFE RATE DELETE",
+            f"Deleted Life rate #{pk} from '{upload.label}': {snapshot}",
+            summary=f"Deleted Life rate #{pk} ({label}) from '{upload.label}'",
+            details={"life_rate_id": pk, "grid": upload.label, "row": row_values},
         )
     messages.success(request, f"Deleted row #{pk} ({label}).")
     return redirect(next_url)
@@ -625,10 +640,16 @@ def life_rate_master_bulk_update(request):
 
     with transaction.atomic():
         changed = save_bulk_changes(plan, column, request.user)
-        AuditLog.objects.create(
-            user=request.user,
-            action="LIFE BULK UPDATE",
-            details=bulk_audit_details(upload, column, operation, value, scope, plan),
+        audit_change(
+            request.user, "LIFE BULK UPDATE", bulk_audit_details(upload, column, operation, value, scope, plan),
+            summary=f"Bulk update on '{upload.label}': {what}; {len(plan.changes)} row(s) changed",
+            details={
+                "grid": upload.label, "field": column, "operation": operation, "value": plain(value),
+                "what": what, "rows_chosen": scope, "rows_changed": len(plan.changes),
+                "rows_already_had_it": plan.unchanged, "rows_skipped_blank_payout": plan.skipped,
+                "changes": [{"id": row.id, "from": plain(old), "to": plain(new)}
+                            for row, old, new in plan.changes[:MAX_LISTED_IDS]],
+            },
         )
     extra = []
     if plan.skipped:

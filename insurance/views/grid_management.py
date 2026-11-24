@@ -46,6 +46,9 @@ def grid_management(request):
                         request.user, STATUS, "grid.status.changed",
                         f"Changed the {doc.insurer_name} grid from {old_label} to {doc.get_status_display()}",
                         target=doc, extra={"from": old_status, "to": new_status},
+                        details={"document_id": doc.id, "insurer": doc.insurer_name,
+                                 "status": {"from": old_label, "to": doc.get_status_display()},
+                                 "remarks": doc.remarks, "work_effected_date": doc.work_effected_date},
                     )
             # The row's status form has no action=, so it posts to the page's
             # own URL and request.GET still holds the filters (month,
@@ -82,6 +85,8 @@ def grid_management(request):
             record_activity(
                 request.user, UPLOAD, "grid.uploaded", f"Uploaded the grid '{file_name}' for {insurer_name}",
                 target=doc,
+                details={"document_id": doc.id, "insurer": insurer_name, "file": file_name,
+                         "size_bytes": len(file_bytes), "remarks": remarks, "work_effected_date": work_effected_date},
             )
             # Writing uploaded_file to storage (Cloudflare R2) here used to
             # block this request until the write finished -- when R2 was slow

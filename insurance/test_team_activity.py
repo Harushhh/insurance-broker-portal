@@ -6,28 +6,30 @@ request is phrased (a forged ?person= or ?team=, the export, a longer chain, ano
 """
 import datetime
 import io
+import math
 import pathlib
 import re
 from io import StringIO
 from unittest import mock
+from urllib.parse import parse_qs
 
 from django.conf import settings
 from django.contrib.auth.models import AnonymousUser, Group, User
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.db import connection, transaction
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 from django.utils import timezone
 from openpyxl import load_workbook
 
 from insurance import tasks
 from insurance.models import ActivityEvent, AuditLog, UserProfile
-from insurance.services.activity import record_activity
+from insurance.services.activity import record_activity, retention_cutoff
 from insurance.services.team_scope import (
     is_admin, managers_with_teams, team_user_ids, visible_events, visible_people,
 )
-from insurance.views.team_activity import _safe_cell
+from insurance.views.team_activity import DONUT_GAP, DONUT_RADIUS, _donut_slices, _percent_text, _safe_cell
 
 
 def make_user(username, manager=None, **fields):
@@ -579,10 +581,11 @@ class TeamActivityPageLeakTests(PageTestMixin, TestCase):
                 self.assertEqual(self.feed_names(response), own_team)
                 self.assertIsNone(response.context["selected"]["team"])
 
-    def test_the_person_dropdown_and_the_strip_list_only_the_team(self):
+    def test_the_person_dropdown_and_the_charts_list_only_the_team(self):
         response = self.get(self.lead1)
         self.assertEqual({p.username for p in response.context["people"]}, {"a1", "a2", "junior"})
-        self.assertEqual({row["username"] for row in response.context["strip"]}, {"a1", "a2", "junior"})
+        self.assertEqual({row["username"] for row in response.context["people_chart"]["rows"]}, {"a1", "a2", "junior"})
+        self.assertEqual(response.context["category_chart"]["total"], 3)          # one event each, nobody else's
         self.assertNotContains(response, "lead2")
         self.assertNotContains(response, "other_boss")
 
@@ -619,17 +622,17 @@ class TeamActivityPageLeakTests(PageTestMixin, TestCase):
         self.assertEqual(self.feed_names(self.get(admin, {"team": self.lead1.pk})), {"a1", "a2", "junior"})
         self.assertEqual(self.feed_names(self.get(admin, {"team": "not-a-number"})), everyone)
 
-    def test_an_admin_with_a_team_filter_sees_quiet_members_in_the_strip(self):
+    def test_an_admin_with_a_team_filter_sees_that_teams_quiet_members_under_no_activity(self):
         make_user("quiet", self.lead1)
-        response = self.get(self.make_admin(), {"team": self.lead1.pk})
-        self.assertEqual({row["username"] for row in response.context["strip"]}, {"a1", "a2", "junior", "quiet"})
+        chart = self.get(self.make_admin(), {"team": self.lead1.pk}).context["people_chart"]
+        self.assertEqual({row["username"] for row in chart["rows"]}, {"a1", "a2", "junior"})
+        self.assertEqual(chart["quiet"], ["quiet"])
 
-    def test_an_admin_without_a_team_filter_sees_only_people_who_did_something_in_the_strip(self):
+    def test_an_admin_without_a_team_filter_is_not_shown_the_whole_organisation_as_quiet(self):
         make_user("quiet", self.lead1)
-        response = self.get(self.make_admin())
-        names = {row["username"] for row in response.context["strip"]}
-        self.assertNotIn("quiet", names)
-        self.assertIn("a1", names)
+        chart = self.get(self.make_admin()).context["people_chart"]
+        self.assertEqual({row["username"] for row in chart["rows"]}, {u.username for u in self.everyone})
+        self.assertEqual(chart["quiet"], [])
 
 
 class TeamActivityFilterTests(PageTestMixin, TestCase):
@@ -680,27 +683,6 @@ class TeamActivityFilterTests(PageTestMixin, TestCase):
         self.assertNotContains(response, "<script>alert(1)</script>")
         self.assertContains(response, "&lt;script&gt;alert(1)&lt;/script&gt;")
 
-    def test_the_strip_counts_by_category_lists_quiet_people_and_ignores_the_person_filter(self):
-        make_user("quiet", self.lead1)
-        record_activity(self.a1, "UPLOAD", "grid.uploaded", "Uploaded a grid")
-        response = self.get(self.lead1)
-        rows = {row["username"]: row for row in response.context["strip"]}
-        self.assertEqual(set(rows), {"a1", "a2", "junior", "quiet"})
-        self.assertEqual(rows["a1"]["total"], 2)
-        self.assertEqual({cell["code"]: cell["n"] for cell in rows["a1"]["cells"]}, {"RUN": 1, "UPLOAD": 1, "TEST": 0, "STATUS": 0})
-        self.assertEqual(rows["quiet"]["total"], 0)
-        self.assertIsNone(rows["quiet"]["last"])
-        self.assertEqual(response.context["strip"][0]["username"], "a1")          # busiest first
-        narrowed = self.get(self.lead1, {"person": self.a2.pk})
-        self.assertEqual({row["username"] for row in narrowed.context["strip"]}, {"a1", "a2", "junior", "quiet"})
-        self.assertTrue(next(r for r in narrowed.context["strip"] if r["username"] == "a2")["active"])
-
-    def test_the_edit_column_only_appears_once_something_is_recorded_under_it(self):
-        self.assertEqual([c for c, _ in self.get(self.lead1).context["strip_columns"]], ["RUN", "UPLOAD", "TEST", "STATUS"])
-        record_activity(self.a1, "EDIT", "rate.edited", "Edited a rate")
-        self.assertEqual([c for c, _ in self.get(self.lead1).context["strip_columns"]],
-                         ["RUN", "UPLOAD", "TEST", "STATUS", "EDIT"])
-
     def test_paging_and_the_rows_per_page_choice(self):
         for n in range(120):
             record_activity(self.a1, "RUN", "test.run", f"a1 run {n}")
@@ -715,6 +697,184 @@ class TeamActivityFilterTests(PageTestMixin, TestCase):
         self.assertContains(self.get(self.lead1, {"page": 2}), "Newer")
 
 
+class TeamActivityChartTests(PageTestMixin, TestCase):
+    """The two charts: a donut of events by category and ranked bars of events by person. Both are filters too:
+    each follows every filter except its own kind, so every slice and every bar stays on screen and can be undone."""
+
+    def setUp(self):
+        self.build_page_org()
+
+    def chart(self, params=None, viewer=None):
+        response = self.get(viewer or self.lead1, params)
+        return response, response.context["category_chart"], response.context["people_chart"]
+
+    def test_the_donut_counts_events_by_category_in_a_fixed_order(self):
+        record_activity(self.a1, "UPLOAD", "grid.uploaded", "Uploaded a grid")
+        record_activity(self.a1, "UPLOAD", "grid.uploaded", "Uploaded another grid")
+        record_activity(self.a2, "TEST", "life.rates.searched", "Ran a Life payout rate search")
+        _, donut, _ = self.chart()
+        self.assertEqual([(i["code"], i["n"]) for i in donut["legend"]],
+                         [("RUN", 3), ("UPLOAD", 2), ("TEST", 1), ("STATUS", 0)])
+        self.assertEqual([s["code"] for s in donut["slices"]], ["RUN", "UPLOAD", "TEST"])      # nothing drawn for nothing
+        self.assertEqual(donut["total"], 6)
+        self.assertEqual([i["pct"] for i in donut["legend"]], ["50%", "33%", "17%", "0%"])
+        self.assertEqual(donut["aria"], "Events by category, 6 in all: Run 3, Upload 2, Test 1")
+        self.assertEqual(donut["scope"], "Everyone")
+
+    def test_the_people_bars_rank_people_by_events_with_a_ratio_to_the_longest_bar(self):
+        for _ in range(3):
+            record_activity(self.a1, "TEST", "test.run", "a1 tested")
+        record_activity(self.a2, "TEST", "test.run", "a2 tested")
+        _, _, people = self.chart()
+        self.assertEqual([(r["username"], r["n"]) for r in people["rows"]], [("a1", 4), ("a2", 2), ("junior", 1)])
+        self.assertEqual([r["ratio"] for r in people["rows"]], ["1.0000", "0.5000", "0.2500"])
+        self.assertEqual([r["share"] for r in people["rows"]], ["57%", "29%", "14%"])        # of 7 events
+        self.assertEqual((people["total"], people["scope"]), (7, "All categories"))
+
+    def test_picking_a_person_changes_the_donut_but_not_the_bars(self):
+        record_activity(self.a1, "UPLOAD", "grid.uploaded", "Uploaded a grid")
+        _, donut, people = self.chart({"person": self.a1.pk})
+        self.assertEqual({i["code"]: i["n"] for i in donut["legend"]}, {"RUN": 1, "UPLOAD": 1, "TEST": 0, "STATUS": 0})
+        self.assertEqual(donut["scope"], "a1")
+        self.assertEqual({r["username"] for r in people["rows"]}, {"a1", "a2", "junior"})        # everyone still there
+        self.assertEqual([r["username"] for r in people["rows"] if r["active"]], ["a1"])
+
+    def test_picking_a_category_changes_the_bars_but_not_the_donut(self):
+        record_activity(self.a1, "UPLOAD", "grid.uploaded", "Uploaded a grid")
+        _, donut, people = self.chart({"category": "UPLOAD"})
+        self.assertEqual({i["code"]: i["n"] for i in donut["legend"]}, {"RUN": 3, "UPLOAD": 1, "TEST": 0, "STATUS": 0})
+        self.assertEqual([i["code"] for i in donut["legend"] if i["active"]], ["UPLOAD"])
+        self.assertEqual([(r["username"], r["n"]) for r in people["rows"]], [("a1", 1)])
+        self.assertEqual(people["quiet"], ["a2", "junior"])                       # nobody else uploaded anything
+        self.assertEqual(people["scope"], "Upload only")
+
+    def test_the_search_box_narrows_both_charts(self):
+        _, donut, people = self.chart({"q": "junior"})
+        self.assertEqual(donut["total"], 1)
+        self.assertEqual([r["username"] for r in people["rows"]], ["junior"])
+
+    def test_every_slice_legend_row_and_bar_links_to_the_page_with_one_more_filter(self):
+        response, donut, people = self.chart({"q": "ran", "page": 2})
+        window = response.context["selected"]["date_range"]
+        run = next(s for s in donut["slices"] if s["code"] == "RUN")
+        self.assertEqual(parse_qs(run["url"][1:]), {"date_range": [window], "q": ["ran"], "category": ["RUN"]})
+        legend_run = next(i for i in donut["legend"] if i["code"] == "RUN")
+        self.assertEqual(legend_run["url"], run["url"])
+        first = people["rows"][0]
+        self.assertEqual(parse_qs(first["url"][1:]),
+                         {"date_range": [window], "q": ["ran"], "person": [str(first["id"])]})       # and never `page`
+        self.assertEqual(next(i for i in donut["legend"] if i["code"] == "UPLOAD")["url"], "")     # nothing to show: no link
+
+    def test_the_selected_slice_and_bar_link_back_to_the_page_without_that_filter(self):
+        _, donut, people = self.chart({"category": "RUN", "person": self.a1.pk})
+        slice_ = next(s for s in donut["slices"] if s["active"])
+        self.assertNotIn("category", parse_qs(slice_["url"][1:]))
+        self.assertEqual(parse_qs(slice_["url"][1:])["person"], [str(self.a1.pk)])           # the other filter stays
+        bar = next(r for r in people["rows"] if r["active"])
+        self.assertNotIn("person", parse_qs(bar["url"][1:]))
+        self.assertEqual(parse_qs(bar["url"][1:])["category"], ["RUN"])
+
+    def test_an_admins_team_filter_travels_with_every_link(self):
+        _, donut, people = self.chart({"team": self.lead1.pk}, viewer=self.make_admin())
+        self.assertEqual(parse_qs(people["rows"][0]["url"][1:])["team"], [str(self.lead1.pk)])
+        self.assertEqual(parse_qs(donut["slices"][0]["url"][1:])["team"], [str(self.lead1.pk)])
+
+    def test_a_forged_person_gives_an_empty_donut_that_does_not_say_who_that_is(self):
+        response, donut, people = self.chart({"person": self.x1.pk})
+        self.assertEqual((donut["total"], donut["slices"]), (0, []))
+        self.assertEqual(donut["scope"], "Selected person")
+        self.assertEqual({r["username"] for r in people["rows"]}, {"a1", "a2", "junior"})
+        self.assertNotContains(response, "x1 ran something")
+
+    def test_the_charts_never_mention_another_team(self):
+        make_user("quiet", self.lead1)
+        for viewer in (self.lead1, self.lead2):
+            with self.subTest(viewer=viewer.username):
+                _, _, people = self.chart(viewer=viewer)
+                names = {r["username"] for r in people["rows"]} | set(people["quiet"])
+                self.assertTrue(names.isdisjoint({"x1", "other_boss", "boss", "loner"}))
+        _, _, lead2_people = self.chart(viewer=self.lead2)
+        self.assertEqual({r["username"] for r in lead2_people["rows"]}, {"b1"})
+
+    def test_more_people_than_bars_are_folded_into_a_count_and_the_picked_person_keeps_a_bar(self):
+        extra = [make_user(f"u{i}", self.lead1) for i in range(1, 10)]
+        for count, user in enumerate(extra, start=1):
+            for _ in range(count):
+                record_activity(user, "RUN", "test.run", f"{user.username} ran something")
+        _, _, people = self.chart()                       # 12 people: u9..u1 with 9..1 events, a1, a2, junior with 1
+        self.assertEqual(len(people["rows"]), 10)
+        self.assertEqual(people["rows"][0]["username"], "u9")
+        self.assertEqual((people["more_people"], people["more_events"]), (2, 2))
+        _, _, picked = self.chart({"person": extra[0].pk})     # u1 is among the folded ones
+        self.assertEqual(len(picked["rows"]), 10)
+        self.assertEqual([r["username"] for r in picked["rows"] if r["active"]], ["u1"])
+        self.assertEqual((picked["more_people"], picked["more_events"]), (2, 2))
+
+    def test_quiet_people_are_listed_by_name_up_to_a_limit(self):
+        for i in range(1, 11):
+            make_user(f"q{i:02d}", self.lead1)
+        _, _, people = self.chart()
+        self.assertEqual(people["quiet"], [f"q{i:02d}" for i in range(1, 9)])
+        self.assertEqual(people["quiet_more"], 2)
+
+    def test_the_edit_category_only_gets_a_slice_once_something_is_recorded_under_it(self):
+        self.assertEqual([i["code"] for i in self.chart()[1]["legend"]], ["RUN", "UPLOAD", "TEST", "STATUS"])
+        record_activity(self.a1, "EDIT", "rate.edited", "Edited a rate")
+        self.assertEqual([i["code"] for i in self.chart()[1]["legend"]], ["RUN", "UPLOAD", "TEST", "STATUS", "EDIT"])
+
+    def test_the_page_draws_the_donut_its_legend_and_the_bars_and_the_old_table_is_gone(self):
+        record_activity(self.a1, "UPLOAD", "grid.uploaded", "Uploaded a grid")
+        response = self.get(self.lead1)
+        self.assertContains(response, '<svg class="ta-donut"')
+        self.assertContains(response, 'aria-label="Events by category, 4 in all: Run 3, Upload 1"')
+        self.assertContains(response, "<title>Run: 3 events (75%)</title>")
+        self.assertContains(response, "<title>Upload: 1 event (25%)</title>")
+        self.assertContains(response, "ta-legend-row")
+        self.assertContains(response, "ta-bar-row")
+        self.assertContains(response, "At a glance")
+        self.assertNotContains(response, "Team at a glance")
+
+    def test_with_nothing_to_show_the_donut_is_an_empty_ring_and_the_bars_say_so(self):
+        response = self.get(self.lead1, {"q": "zzz-nothing"})
+        self.assertContains(response, "ta-donut-track")
+        self.assertContains(response, "No events for these filters.")
+
+    def test_names_in_the_charts_are_shown_escaped(self):
+        sneaky = make_user("sneaky", self.lead1, first_name="<script>alert(1)</script>")
+        record_activity(sneaky, "RUN", "test.run", "sneaky ran something")
+        response = self.get(self.lead1)
+        self.assertNotContains(response, "<script>alert(1)</script>")
+        self.assertContains(response, "&lt;script&gt;alert(1)&lt;/script&gt;")
+
+
+class DonutGeometryTests(SimpleTestCase):
+    circumference = 2 * math.pi * DONUT_RADIUS
+
+    def test_a_lone_slice_is_the_whole_ring_with_no_gap(self):
+        slices = _donut_slices([("RUN", "Run", 5), ("UPLOAD", "Upload", 0)], 5)
+        self.assertEqual(len(slices), 1)
+        self.assertAlmostEqual(float(slices[0]["dash"].split()[0]), self.circumference, places=1)
+        self.assertEqual(slices[0]["offset"], "0.00")
+
+    def test_slices_are_their_share_of_the_ring_less_a_gap_and_start_where_the_last_ended(self):
+        slices = _donut_slices([("RUN", "Run", 1), ("UPLOAD", "Upload", 1), ("TEST", "Test", 2)], 4)
+        for item, share in zip(slices, (0.25, 0.25, 0.5)):
+            self.assertAlmostEqual(float(item["dash"].split()[0]), self.circumference * share - DONUT_GAP, places=1)
+        self.assertAlmostEqual(float(slices[0]["offset"]), -DONUT_GAP / 2, places=1)
+        self.assertAlmostEqual(float(slices[1]["offset"]), -(self.circumference * 0.25 + DONUT_GAP / 2), places=1)
+        self.assertAlmostEqual(float(slices[2]["offset"]), -(self.circumference * 0.5 + DONUT_GAP / 2), places=1)
+
+    def test_a_tiny_share_still_gets_a_visible_arc(self):
+        slices = _donut_slices([("RUN", "Run", 1), ("TEST", "Test", 10000)], 10001)
+        self.assertGreaterEqual(float(slices[0]["dash"].split()[0]), 1.0)
+
+    def test_nothing_to_draw_gives_no_slices_and_percentages_never_say_zero_for_something(self):
+        self.assertEqual(_donut_slices([("RUN", "Run", 0)], 0), [])
+        self.assertEqual(_percent_text(0, 0), "0%")
+        self.assertEqual(_percent_text(1, 1000), "<1%")
+        self.assertEqual(_percent_text(1, 2), "50%")
+
+
 class TeamActivityExportTests(PageTestMixin, TestCase):
     def setUp(self):
         self.build_page_org()
@@ -723,7 +883,6 @@ class TeamActivityExportTests(PageTestMixin, TestCase):
         return list(load_workbook(io.BytesIO(response.content)).active.iter_rows(values_only=True))
 
     def test_the_file_has_a_header_the_scoped_rows_and_india_time(self):
-        utc = datetime.timezone.utc
         event = ActivityEvent.objects.get(actor=self.a1)
         ActivityEvent.objects.filter(pk=event.pk).update(occurred_at=timezone.now().replace(microsecond=0))
         event.refresh_from_db()
@@ -731,7 +890,7 @@ class TeamActivityExportTests(PageTestMixin, TestCase):
         self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         self.assertIn("team_activity.xlsx", response["Content-Disposition"])
         rows = self.rows(response)
-        self.assertEqual(rows[0], ("Time (IST)", "Username", "Name", "Category", "Action", "Summary", "About", "About id"))
+        self.assertEqual(rows[0], ("Time (IST)", "Username", "Name", "Category", "Action", "Summary", "About", "About id", "Details"))
         mine = next(row for row in rows[1:] if row[1] == "a1")
         self.assertEqual(mine[0], timezone.localtime(event.occurred_at).strftime("%Y-%m-%d %H:%M:%S"))
         self.assertEqual(mine[3:6], ("Run", "test.run", "a1 ran something"))
@@ -931,43 +1090,94 @@ class SafeCellTests(SimpleTestCase):
         self.assertEqual(_safe_cell(12), "12")
 
 
+def at(*when):
+    """An aware datetime in the site's time zone (IST): at(2026, 12, 1, 2, 30) is 1 Dec 2026, 02:30 in India."""
+    return timezone.make_aware(datetime.datetime(*when))
+
+
+class RetentionCutoffTests(SimpleTestCase):
+    """Events are kept by whole calendar month: from midnight on the 1st of LAST month. So a daily, weekly or monthly
+    report for last month or this month is never cut in half the way a rolling 90 days cut it."""
+
+    def test_the_cutoff_is_midnight_on_the_first_of_last_month(self):
+        for now, first_kept in (
+            (at(2026, 11, 24, 10, 0), at(2026, 10, 1)),
+            (at(2026, 11, 1, 0, 0), at(2026, 10, 1)),                # the very first moment of November
+            (at(2026, 11, 30, 23, 59, 59), at(2026, 10, 1)),         # the very last moment of November
+            (at(2026, 12, 1, 0, 0), at(2026, 11, 1)),                # December starts: October is out
+            (at(2027, 1, 1, 0, 0), at(2026, 12, 1)),                 # across the year
+            (at(2027, 1, 31, 12, 0), at(2026, 12, 1)),
+            (at(2027, 3, 1, 9, 0), at(2027, 2, 1)),                  # last month is a short one
+            (at(2028, 3, 31, 9, 0), at(2028, 2, 1)),                 # a leap year
+        ):
+            with self.subTest(now=now.isoformat()):
+                self.assertEqual(retention_cutoff(now), first_kept)
+
+    def test_the_month_rolls_over_at_midnight_india_time_not_utc(self):
+        utc = datetime.timezone.utc
+        # 30 Nov 19:00 UTC is already 1 Dec 00:30 in India.
+        self.assertEqual(retention_cutoff(datetime.datetime(2026, 11, 30, 19, 0, tzinfo=utc)), at(2026, 11, 1))
+        self.assertEqual(retention_cutoff(datetime.datetime(2026, 11, 30, 18, 0, tzinfo=utc)), at(2026, 10, 1))
+
+    def test_without_an_argument_it_is_now(self):
+        cutoff = retention_cutoff()
+        self.assertEqual((cutoff.day, cutoff.hour, cutoff.minute, cutoff.second), (1, 0, 0, 0))
+        self.assertLess(cutoff, timezone.now())
+        self.assertGreater(cutoff, timezone.now() - datetime.timedelta(days=63))      # at most two months back
+
+
 class RetentionTests(TestCase):
     def setUp(self):
         self.user = User.objects.create(username="keeper")
 
-    def make(self, days_old):
-        event = record_activity(self.user, "RUN", "test.run", f"{days_old} days old")
-        ActivityEvent.objects.filter(pk=event.pk).update(occurred_at=timezone.now() - datetime.timedelta(days=days_old))
+    def make(self, when):
+        event = record_activity(self.user, "RUN", "test.run", f"happened {when:%d %b %Y %H:%M}")
+        ActivityEvent.objects.filter(pk=event.pk).update(occurred_at=when)
         return event
 
-    def test_events_older_than_the_retention_window_are_deleted_and_newer_ones_kept(self):
-        old, recent = self.make(91), self.make(89)
-        deleted = tasks.cleanup_team_activity()
-        self.assertEqual(deleted, 1)
-        self.assertFalse(ActivityEvent.objects.filter(pk=old.pk).exists())
-        self.assertTrue(ActivityEvent.objects.filter(pk=recent.pk).exists())
+    def run_on(self, now):
+        """The nightly job as it would run at `now`."""
+        with mock.patch("django.utils.timezone.now", return_value=now):
+            return tasks.cleanup_team_activity()
 
-    @override_settings(TEAM_ACTIVITY_RETENTION_DAYS=10)
-    def test_the_window_is_a_setting(self):
-        self.make(11)
-        kept = self.make(9)
-        self.assertEqual(tasks.cleanup_team_activity(), 1)
-        self.assertEqual(list(ActivityEvent.objects.values_list("pk", flat=True)), [kept.pk])
+    def test_last_month_and_this_month_are_kept_and_anything_older_is_deleted(self):
+        before = self.make(at(2026, 9, 30, 23, 59, 59))
+        first_moment = self.make(at(2026, 10, 1, 0, 0, 0))
+        recent = self.make(at(2026, 11, 20, 9, 0))
+        self.assertEqual(self.run_on(at(2026, 11, 24, 2, 30)), 1)
+        self.assertFalse(ActivityEvent.objects.filter(pk=before.pk).exists())
+        self.assertEqual(ActivityEvent.objects.filter(pk__in=[first_moment.pk, recent.pk]).count(), 2)
 
-    def test_the_default_window_is_ninety_days(self):
-        self.assertEqual(settings.TEAM_ACTIVITY_RETENTION_DAYS, 90)
+    def test_the_oldest_month_goes_on_the_night_the_next_month_starts(self):
+        """The example that matters: October's events are kept all through November and removed on 1 December."""
+        october = self.make(at(2026, 10, 31, 23, 59, 59))
+        november = self.make(at(2026, 11, 1, 0, 0, 0))
+        self.assertEqual(self.run_on(at(2026, 11, 30, 2, 30)), 0)         # the last night of November: nothing goes
+        self.assertEqual(self.run_on(at(2026, 12, 1, 2, 30)), 1)          # the first night of December
+        self.assertFalse(ActivityEvent.objects.filter(pk=october.pk).exists())
+        self.assertTrue(ActivityEvent.objects.filter(pk=november.pk).exists())
+
+    def test_running_it_again_deletes_nothing_more(self):
+        self.make(at(2026, 8, 1))
+        self.assertEqual(self.run_on(at(2026, 11, 24, 2, 30)), 1)
+        self.assertEqual(self.run_on(at(2026, 11, 24, 2, 31)), 0)
+
+    def test_nothing_is_a_setting_any_more(self):
+        """The window is whole months, not a number of days: a leftover setting would only mislead."""
+        self.assertFalse(hasattr(settings, "TEAM_ACTIVITY_RETENTION_DAYS"))
 
     def test_the_job_is_scheduled_and_has_a_management_command(self):
         entry = settings.CELERY_BEAT_SCHEDULE["cleanup-team-activity"]
         self.assertEqual(entry["task"], "insurance.tasks.cleanup_team_activity")
         self.assertEqual(tasks.cleanup_team_activity.name, entry["task"])
-        self.make(120)
+        self.make(at(2026, 9, 15, 12, 0))
         out = StringIO()
-        call_command("cleanup_team_activity", stdout=out)
-        self.assertIn("Deleted 1 Team Activity event(s) older than 90 days", out.getvalue())
+        with mock.patch("django.utils.timezone.now", return_value=at(2026, 11, 24, 2, 30)):
+            call_command("cleanup_team_activity", stdout=out)
+        self.assertIn("Deleted 1 Team Activity event(s) from before 01 Oct 2026.", out.getvalue())
 
     def test_the_audit_log_purges_do_not_touch_team_activity(self):
-        self.make(400)
+        self.make(at(2026, 1, 1))
         tasks.cleanup_points_search_logs()
         tasks.cleanup_security_audit_logs()
         self.assertEqual(ActivityEvent.objects.count(), 1)

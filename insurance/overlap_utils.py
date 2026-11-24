@@ -1187,6 +1187,12 @@ def run_overlap_scan(scan_id, type_caps=None):
             scan.triggered_by, RUN, "overlap.scan.finished",
             f"Overlap scan finished{_scope_note(scan)}: {scan.groups_scanned} groups, {scan.pairs_found} conflicts",
             target=scan, extra={"groups": scan.groups_scanned, "conflicts": scan.pairs_found},
+            details={
+                "scan_id": scan.id, "insurer": scan.filter_insurer, "product": scan.filter_product,
+                "as_of_date": scan.filter_as_of_date, "groups_scanned": scan.groups_scanned,
+                "conflicts_found": scan.pairs_found, "conflicts_by_type": scan.type_counts,
+                "capped_types": scan.capped_types, "seconds": round(time.monotonic() - started),
+            },
         )
     except Exception as exc:
         scan.status = RateOverlapScan.STATUS_FAILED
@@ -1195,6 +1201,8 @@ def run_overlap_scan(scan_id, type_caps=None):
         scan.save(update_fields=["status", "error_message", "finished_at"])
         record_activity(
             scan.triggered_by, RUN, "overlap.scan.failed", f"Overlap scan failed{_scope_note(scan)}", target=scan,
+            details={"scan_id": scan.id, "insurer": scan.filter_insurer, "product": scan.filter_product,
+                     "as_of_date": scan.filter_as_of_date, "error": str(exc)[:1000]},
         )
         raise
     return scan

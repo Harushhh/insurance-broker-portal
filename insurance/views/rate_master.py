@@ -8,8 +8,9 @@ from django.core.paginator import Paginator
 import csv
 import json
 from collections import defaultdict
-from ..models import RTOMaster, MakeModelMaster, RateMaster, YesNoNAMaster, ProductMaster, SubProductMaster, PolicyTypeMaster, FuelTypeMaster, MakeModelClassMaster, AuditLog
+from ..models import RTOMaster, MakeModelMaster, RateMaster, YesNoNAMaster, ProductMaster, SubProductMaster, PolicyTypeMaster, FuelTypeMaster, MakeModelClassMaster
 from ..forms import RATE_DECIMAL_FIELDS, RateForm
+from ..services.activity import EDIT, MAX_LISTED_IDS, audit_change, form_changes, plain, previous_values, record_activity
 from ..services.common import parse_yes_no_na, split_csv_values, unique_join
 from ..services.make_model import NA_MAKE_MODEL_MAP, apply_make_model_filter, get_dynamic_make_model_class_list, get_translated_make_model, resolve_make_model_groups, strict_match_in_cluster
 from ..services.rate_master import apply_range_filter
@@ -450,14 +451,31 @@ def update_cluster_details(request):
         obj = RTOMaster.objects.filter(rto_name__iexact=name).first()
         if not obj:
             return JsonResponse({"success": False, "message": f'No RTO group found for "{name}".'})
+        old_items = split_csv_values([obj.rto_cluster or ""])
+        group_name = obj.rto_name
         obj.rto_cluster = cluster_value
         obj.save(update_fields=["rto_cluster", "updated_at"])
     else:
         obj = MakeModelMaster.objects.filter(make_model_name__iexact=name).first()
         if not obj:
             return JsonResponse({"success": False, "message": f'No vehicle make group found for "{name}".'})
+        old_items = split_csv_values([obj.make_model_cluster or ""])
+        group_name = obj.make_model_name
         obj.make_model_cluster = cluster_value
         obj.save(update_fields=["make_model_cluster", "updated_at"])
+
+    # The exact edit: which items the group lost and gained (and the full list now), not only that it changed.
+    old_upper = {item.upper() for item in old_items}
+    new_upper = {item.upper() for item in cleaned_items}
+    kind = "RTO" if cluster_type == "rto" else "Make/Model"
+    record_activity(
+        request.user, EDIT, f"{cluster_type}.cluster.edited",
+        f"Edited the {kind} group '{group_name}' from the Rate Master dashboard", target=obj,
+        details={"group": group_name, "group_id": obj.id, "type": kind,
+                 "items_removed": [item for item in old_items if item.upper() not in new_upper],
+                 "items_added": [item for item in cleaned_items if item.upper() not in old_upper],
+                 "items_now": cleaned_items},
+    )
 
     return JsonResponse({"success": True, "type": cluster_type, "name": name, "items": cleaned_items})
 
@@ -710,15 +728,21 @@ def edit_rate(request, group_id):
             # field is only written when the user genuinely touched it.
             update_data = {field: form.cleaned_data[field] for field in form.changed_data}
             if update_data:
+                changes = form_changes(form)         # from what the form showed to what it accepted
+                affected_ids = list(records.values_list("id", flat=True)[:MAX_LISTED_IDS])
                 update_data["updated_at"] = timezone.now()
                 records.update(**update_data)
-                AuditLog.objects.create(
-                    user=request.user,
-                    action="MANUAL EDIT",
-                    details=(
+                audit_change(
+                    request.user, "MANUAL EDIT",
+                    (
                         f"Edited Group/Record ID {group_id} via form. Updated {record_count} rows. "
                         f"Changed fields: {', '.join(sorted(update_data.keys()))}."
-                    )
+                    ),
+                    summary=f"Edited Rate Master group {group_id}: {record_count} row(s), "
+                            f"{', '.join(sorted(changes))}",
+                    target=first_record,
+                    details={"group_or_record_id": group_id, "rows_updated": record_count,
+                             "record_ids": affected_ids, "changes": changes},
                 )
             return redirect("dashboard")
     else:
@@ -843,13 +867,17 @@ def bulk_update_rates(request):
                 parsed_value = round(parsed_value, 2)
 
         # 4. Perform ultra-fast vectorized update to the DB
+        before_values = previous_values(records, field_name)         # read before the update: it is the "from" side
+        affected_ids = list(records.values_list("id", flat=True)[:MAX_LISTED_IDS])
         records.update(**{field_name: parsed_value, "updated_at": timezone.now()})
 
         # 5. Log the action
-        AuditLog.objects.create(
-            user=request.user,
-            action="BULK UPDATE",
-            details=f"Updated {record_count} rows. Changed '{field_name}' to '{new_value}'."
+        audit_change(
+            request.user, "BULK UPDATE", f"Updated {record_count} rows. Changed '{field_name}' to '{new_value}'.",
+            summary=f"Bulk update on Rate Master: {record_count} row(s), '{field_name}' set to '{new_value}'",
+            details={"field": field_name, "new_value_submitted": new_value, "new_value_applied": plain(parsed_value),
+                     "rows_updated": record_count, "groups_selected": group_ids[:MAX_LISTED_IDS],
+                     "values_before": before_values, "record_ids": affected_ids},
         )
 
     return redirect("dashboard")

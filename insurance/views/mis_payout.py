@@ -8,7 +8,7 @@ import mimetypes
 from ..models import MISFile, MappingConfiguration
 from ..forms import MISUploadForm, MappingConfigurationForm
 from ..tasks import process_mis_mapping_task
-from ..services.activity import RUN, UPLOAD, record_activity
+from ..services.activity import EDIT, RUN, UPLOAD, form_changes, record_activity, snapshot
 from ..services.mis_payout import get_rule_schema_context
 
 
@@ -40,6 +40,8 @@ def mis_payout_automation(request):
                 request.user, UPLOAD, "mis.file.uploaded",
                 f"Uploaded MIS file '{mis_obj.uploaded_file.name.split('/')[-1]}' and started the mapping run",
                 target=mis_obj,
+                details={"file": mis_obj.uploaded_file.name.split('/')[-1], "size_bytes": mis_obj.uploaded_file.size,
+                         "mis_file_id": mis_obj.id, "celery_task_id": mis_obj.celery_task_id},
             )
 
             msg ="File uploaded successfully. The mapping engine has started processing in the background."
@@ -120,6 +122,8 @@ def cancel_mis_processing(request, file_id):
         request.user, RUN, "mis.run.cancelled",
         f"Cancelled the MIS mapping run for '{mis_obj.uploaded_file.name.split('/')[-1]}'",
         target=mis_obj,
+        details={"file": mis_obj.uploaded_file.name.split('/')[-1], "mis_file_id": mis_obj.id,
+                 "status_before": mis_obj.status, "uploaded_by": mis_obj.uploaded_by.username if mis_obj.uploaded_by else None},
     )
     return JsonResponse({"success": True, "message": f"File #{file_id} cancelled."})
 
@@ -133,7 +137,11 @@ def add_mis_mapping(request):
     if request.method == 'POST':
         form = MappingConfigurationForm(request.POST)
         if form.is_valid():
-            form.save()
+            rule = form.save()
+            record_activity(
+                request.user, EDIT, "mis.mapping_rule.created", "Added a MIS mapping rule", target=rule,
+                details={"rule_id": rule.pk, "values": snapshot(rule)},
+            )
             return redirect('mis_mapping_dashboard')
     else:
         form = MappingConfigurationForm()
@@ -150,7 +158,13 @@ def edit_mis_mapping(request, pk):
     if request.method == 'POST':
         form = MappingConfigurationForm(request.POST, instance=mapping)
         if form.is_valid():
+            changes = form_changes(form)
             form.save()
+            if changes:
+                record_activity(
+                    request.user, EDIT, "mis.mapping_rule.edited", "Edited a MIS mapping rule", target=mapping,
+                    details={"rule_id": mapping.pk, "changes": changes},
+                )
             return redirect('mis_mapping_dashboard')
     else:
         form = MappingConfigurationForm(instance=mapping)
@@ -164,5 +178,10 @@ def edit_mis_mapping(request, pk):
 
 def delete_mis_mapping(request, pk):
     mapping = get_object_or_404(MappingConfiguration, pk=pk)
+    removed = snapshot(mapping)
     mapping.delete()
+    record_activity(
+        request.user, EDIT, "mis.mapping_rule.deleted", "Deleted a MIS mapping rule",
+        details={"rule_id": pk, "values": removed},
+    )
     return redirect('mis_mapping_dashboard')

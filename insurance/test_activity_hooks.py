@@ -1,7 +1,8 @@
 """The events the pages and jobs put on the Team Activity feed.
 
-One per thing a person did, with the right person, category and wording, and never a vehicle number, a policy-holder
-name or the file name of a policy document: those are personal data, and the feed is read by managers.
+One per thing a person did, with the right person, category and wording. The sentence (`summary`) and `extra` never hold
+a vehicle number, a policy-holder name or the file name of a policy document; the exact values a person ran or changed
+something with are in `details`, which the feed shows only to that person's managers and admins.
 """
 import json
 import tempfile
@@ -16,7 +17,7 @@ from django.urls import reverse
 
 from insurance.mapping_engine import process_mis_mapping
 from insurance.models import (
-    ActivityEvent, CsvUploadAttempt, GridDocument, LifeGridUpload, LifeRate, LockedPolicy,
+    ActivityEvent, AuditLog, CsvUploadAttempt, GridDocument, LifeGridUpload, LifeRate, LockedPolicy,
     MissingMakeModelManualResolution, MISFile, PolicyDocumentUpload, RateMaster, RateOverlapScan,
     SpecialRateRequest, SupportTicket,
 )
@@ -52,6 +53,7 @@ class HookCase(TestCase):
         return found[0]
 
     def assert_no_personal_data(self, *secrets):
+        """The sentence and the small counts carry none of these (the exact values are in `details`, which this skips)."""
         everything = json.dumps(list(ActivityEvent.objects.values(
             "summary", "action", "extra", "target_type", "target_id", "actor_username", "actor_name")), default=str)
         for secret in secrets:
@@ -59,7 +61,7 @@ class HookCase(TestCase):
 
 
 class EligibilityCheckEventTests(HookCase):
-    def test_a_motor_search_is_recorded_without_its_values(self):
+    def test_a_motor_search_keeps_its_values_in_the_details_and_out_of_the_sentence(self):
         user = self.sign_in("tester", "Can_View_Motor_Payout_Rates")
         response = self.client.get(reverse("motor_payout_rates"),
                                    {"vehicle_no": "MH12AB1234", "policy_holder_name": "Ravi Kumar"})
@@ -68,6 +70,8 @@ class EligibilityCheckEventTests(HookCase):
         self.assertEqual((event.actor, event.category), (user, "TEST"))
         self.assertIn("Motor Payout Rates", event.summary)
         self.assert_no_personal_data("MH12AB1234", "Ravi")
+        self.assertEqual(event.details["page"], "Motor Payout Rates")
+        self.assertEqual(event.details["parameters"], {"vehicle_no": "MH12AB1234", "policy_holder_name": "Ravi Kumar"})
 
     def test_opening_the_page_without_searching_records_nothing(self):
         self.sign_in("tester", "Can_View_Motor_Payout_Rates")
@@ -81,6 +85,7 @@ class EligibilityCheckEventTests(HookCase):
         event = self.only_event("policy_lock.checked")
         self.assertEqual((event.actor, event.category), (user, "TEST"))
         self.assert_no_personal_data("MH12AB1234")
+        self.assertEqual(event.details, {"page": "Policy Lock Checker", "parameters": {"vehicle_no": "MH12AB1234"}})
 
     def test_a_health_search_is_recorded(self):
         user = self.sign_in("tester", "Can_View_Health_Payout_Rates")
@@ -88,14 +93,17 @@ class EligibilityCheckEventTests(HookCase):
         self.assertEqual(response.status_code, 200)
         event = self.only_event("health.eligibility.checked")
         self.assertEqual((event.actor, event.category), (user, "TEST"))
+        self.assertEqual(event.details, {"page": "Health Payout Rates", "parameters": {"policy_term": "1"}})
 
-    def test_a_life_search_is_recorded_with_how_many_rows_it_found_and_nothing_it_searched_for(self):
+    def test_a_life_search_is_recorded_with_how_many_rows_it_found_and_what_it_searched_for_only_in_the_details(self):
         user = self.sign_in("tester", "Can_View_Life_Payout_Grid")
         response = self.client.get(reverse("life_payout_rates"), {"q": "Ravi Kumar"})
         self.assertEqual(response.status_code, 200)
         event = self.only_event("life.rates.searched")
         self.assertEqual((event.actor, event.category, event.extra), (user, "TEST", {"results": 0}))
         self.assert_no_personal_data("Ravi")
+        self.assertEqual((event.details["page"], event.details["results"]), ("Life Payout Rates", 0))
+        self.assertEqual(event.details["parameters"], {"q": "Ravi Kumar"})
 
     def test_the_life_checker_opened_without_a_search_records_nothing(self):
         self.sign_in("tester", "Can_View_Life_Payout_Grid")
@@ -121,6 +129,9 @@ class UploadEventTests(HookCase):
         event = self.only_event("mis.file.uploaded")
         self.assertEqual((event.actor, event.category, event.target_type), (user, "UPLOAD", "misfile"))
         self.assertIn("sept", event.summary)
+        self.assertIn("sept", event.details["file"])
+        self.assertEqual((event.details["size_bytes"], event.details["celery_task_id"]), (8, "task-1"))
+        self.assertEqual(event.details["mis_file_id"], MISFile.objects.get().id)
 
     def test_a_finished_csv_upload_is_recorded_for_the_person_who_started_it(self):
         user = self.sign_in("importer", "Can_Upload_CSV")
@@ -132,6 +143,8 @@ class UploadEventTests(HookCase):
         self.assertEqual((event.actor, event.category), (user, "UPLOAD"))
         self.assertEqual(event.summary, "Uploaded 'acko_sept.csv' into Rate Master: 120 rows")
         self.assertEqual(event.extra, {"table": "rate_master", "rows": 120})
+        self.assertEqual(event.details, {"table": "Rate Master", "file": "acko_sept.csv", "rows": 120,
+                                         "attempt_id": attempt.id, "file_hash": "h" * 64})
 
     def test_a_failed_csv_upload_is_recorded_as_failed(self):
         user = self.sign_in("importer", "Can_Upload_CSV")
@@ -158,18 +171,22 @@ class UploadEventTests(HookCase):
         uploaded = self.only_event("grid.uploaded")
         self.assertEqual((uploaded.actor, uploaded.category), (user, "UPLOAD"))
         self.assertEqual(uploaded.summary, f"Uploaded the grid 'acko.xlsx' for {insurer}")
-
         doc = GridDocument.objects.get()
+        self.assertEqual((uploaded.details["insurer"], uploaded.details["file"], uploaded.details["size_bytes"],
+                          uploaded.details["document_id"]), (insurer, "acko.xlsx", 1, doc.id))
+
         self.client.post(reverse("grid_management"), {"action": "update_status", "doc_id": doc.id, "status": "DONE"})
         changed = self.only_event("grid.status.changed")
         self.assertEqual((changed.actor, changed.category), (user, "STATUS"))
         self.assertEqual(changed.summary, f"Changed the {insurer} grid from Pending to Done")
         self.assertEqual(changed.extra, {"from": "PENDING", "to": "DONE"})
+        self.assertEqual(changed.details["status"], {"from": "Pending", "to": "Done"})
+        self.assertEqual((changed.details["insurer"], changed.details["document_id"]), (insurer, doc.id))
 
         self.client.post(reverse("grid_management"), {"action": "update_status", "doc_id": doc.id, "status": "DONE"})
         self.assertEqual(ActivityEvent.objects.filter(action="grid.status.changed").count(), 1)   # no change, no event
 
-    def test_a_policy_document_upload_never_carries_its_file_name(self):
+    def test_a_policy_document_upload_keeps_its_file_name_in_the_details_only(self):
         user = self.sign_in("scanner", "Can_View_OCR_Pipeline")
         with mock.patch("insurance.views.ocr_pipeline.process_policy_document_task"):
             self.client.post(reverse("upload_extract_pdf"), {
@@ -178,6 +195,8 @@ class UploadEventTests(HookCase):
         event = self.only_event("ocr.document.uploaded")
         self.assertEqual((event.actor, event.category, event.target_type), (user, "UPLOAD", "policydocumentupload"))
         self.assert_no_personal_data("Ravi", "MH12AB1234", ".pdf")
+        self.assertEqual(event.details["file"], "Ravi Kumar MH12AB1234.pdf")
+        self.assertEqual((event.details["mime_type"], event.details["size_bytes"]), ("application/pdf", 13))
 
 
 class LifeGridEventTests(LifeStandardViewMixin, TestCase):
@@ -253,6 +272,10 @@ class RunEventTests(HookCase):
         self.assertEqual(event.extra["rows"], 1)
         self.assertEqual(event.extra["matched"], 1)
         self.assert_no_personal_data("POLICY-9999", "MH12AB1234")
+        # The run's own figures (and which file) are in the details; the policy rows themselves are not copied anywhere.
+        self.assertIn("jan", event.details["file"])
+        self.assertEqual((event.details["mis_file_id"], event.details["rows"], event.details["matched"]), (mis.pk, 1, 1))
+        self.assertNotIn("POLICY-9999", json.dumps(event.details))
 
     def test_a_failed_mis_run_is_recorded_without_the_error_text(self):
         user = User.objects.create(username="runner")
@@ -338,6 +361,9 @@ class RunEventTests(HookCase):
         event = self.only_event("ocr.document.extracted")
         self.assertEqual((event.actor, event.category), (user, "RUN"))
         self.assert_no_personal_data("Ravi", "P-1")
+        self.assertEqual((event.details["document_id"], event.details["file"], event.details["fields_found"]),
+                         (doc.pk, "Ravi Kumar.pdf", 2))
+        self.assertNotIn("P-1", json.dumps(event.details))               # what was read out of the document is not copied
 
     def test_a_failed_ocr_extraction_is_recorded_without_the_error_text(self):
         user = User.objects.create(username="scanner")
@@ -352,7 +378,7 @@ class RunEventTests(HookCase):
 
 
 class StatusEventTests(HookCase):
-    def test_opening_and_moving_a_ticket_are_recorded_without_its_text(self):
+    def test_opening_and_moving_a_ticket_keep_its_text_in_the_details_only(self):
         user = self.sign_in("raiser", "Can_View_Tickets")
         self.post_json("create_ticket_api", {
             "remarks": "Wrong rate for MH12AB1234, owner Ravi", "category": "MOTOR",
@@ -362,14 +388,18 @@ class StatusEventTests(HookCase):
         self.assertEqual((opened.actor, opened.category), (user, "STATUS"))
         self.assertEqual(opened.summary, f"Opened Motor support ticket #{ticket.id}")
         self.assert_no_personal_data("MH12AB1234", "Ravi")
+        self.assertEqual(opened.details["remarks"], "Wrong rate for MH12AB1234, owner Ravi")
+        self.assertEqual(opened.details["search_values"], {"vehicle_no": "MH12AB1234"})
 
         self.post_json("update_ticket_status", {"ticket_id": ticket.id, "status": "closed"})
         changed = self.only_event("ticket.status.changed")
         self.assertEqual(changed.summary, f"Changed support ticket #{ticket.id} from OPEN to CLOSED")
+        self.assertEqual(changed.details["status"], {"from": "OPEN", "to": "CLOSED"})
+        self.assertEqual(changed.details["raised_by"], "raiser")
         self.post_json("update_ticket_status", {"ticket_id": ticket.id, "status": "CLOSED"})
         self.assertEqual(ActivityEvent.objects.filter(action="ticket.status.changed").count(), 1)
 
-    def test_submitting_and_reviewing_a_special_rate_request_are_recorded_without_the_entry_number(self):
+    def test_submitting_and_reviewing_a_special_rate_request_keep_the_entry_number_in_the_details_only(self):
         user = self.sign_in("requester", "Can_View_Special_Rates", "ADMIN")
         self.client.post(reverse("special_rate_requests"), {
             "submit_bg": "1", "bg-product": "MOTOR", "bg-entry_no": "ENT-SECRET-77", "bg-remarks": "please"})
@@ -378,13 +408,17 @@ class StatusEventTests(HookCase):
         self.assertEqual((submitted.actor, submitted.category, submitted.summary),
                          (user, "STATUS", "Submitted a Special BG rate request"))
         self.assert_no_personal_data("ENT-SECRET-77")
+        self.assertEqual((submitted.details["entry_no"], submitted.details["remarks"], submitted.details["request_id"]),
+                         ("ENT-SECRET-77", "please", request.id))
 
         self.post_json("update_special_rate_request_status", {"request_id": request.id, "status": "approved"})
         reviewed = self.only_event("special_rate.reviewed")
         self.assertEqual(reviewed.summary, "Set a Special BG rate request to Approved")
         self.assertEqual(reviewed.extra, {"from": "PENDING", "to": "APPROVED", "rate_type": "BG"})
+        self.assertEqual(reviewed.details["status"], {"from": "PENDING", "to": "APPROVED"})
+        self.assertEqual((reviewed.details["entry_no"], reviewed.details["requested_by"]), ("ENT-SECRET-77", "requester"))
 
-    def test_locking_a_policy_records_the_product_and_insurer_but_not_the_vehicle_or_holder(self):
+    def test_locking_a_policy_names_the_vehicle_and_holder_in_the_details_but_not_in_the_sentence(self):
         user = self.sign_in("locker", "Can_View_Policy_Locker")
         rate = RateMaster.objects.create(
             insurance_company="Acme General", status="ACTIVE", is_deleted="NO", po_type="On Net", po_net_rate=10)
@@ -397,6 +431,9 @@ class StatusEventTests(HookCase):
         self.assertEqual(event.summary, "Locked a policy with Acme General")
         self.assertTrue(LockedPolicy.objects.filter(vehicle_no="MH12AB1234").exists())
         self.assert_no_personal_data("MH12AB1234", "Ravi")
+        self.assertEqual((event.details["vehicle_no"], event.details["policy_holder_name"], event.details["insurer"]),
+                         ("MH12AB1234", "Ravi Kumar", "Acme General"))
+        self.assertEqual(event.details["rate_id"], rate.id)
 
     def test_marking_and_unmarking_a_missing_make_model_resolved_are_recorded(self):
         user = self.sign_in("resolver", "Can_View_Missing_Make_Model")
@@ -405,6 +442,9 @@ class StatusEventTests(HookCase):
         marked = self.only_event("missing_make_model.marked_resolved")
         self.assertEqual((marked.actor, marked.category), (user, "STATUS"))
         self.assertEqual(marked.summary, "Marked missing make/model 'hero splendor' as resolved")
+        self.assertEqual(marked.details["value"], "hero splendor")
+        self.assertEqual(marked.details["product"].lower(), "two wheeler")
+        self.assertEqual(AuditLog.objects.get(action="MAKE MODEL MANUALLY RESOLVED").pk, marked.legacy_audit_id)
 
         self.client.post(reverse("mark_missing_make_model_resolved"), fields)         # already marked: nothing new
         self.assertEqual(ActivityEvent.objects.filter(action="missing_make_model.marked_resolved").count(), 1)

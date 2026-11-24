@@ -696,14 +696,19 @@ class AuditLog(models.Model):
 
 class ActivityEvent(models.Model):
     """One thing a person did in the portal (a run, an upload, a test, a status
-    change), as listed on the Team Activity page (/team-activity/).
+    change, an edit), as listed on the Team Activity page (/team-activity/).
 
-    Append-only. Written only through services/activity.py::record_activity and
-    read only through services/team_scope.py::visible_events, which is what keeps
-    a manager to their own team. Deliberately not AuditLog: that table is purged
-    after 7 days, has no index, and its details carry vehicle numbers and
-    policy-holder names, which an audience of managers must not get. So `summary`
-    and `extra` are written without personal data (counts, file names, statuses).
+    Append-only. Written only through services/activity.py (record_activity, or
+    audit_change which also writes the audit log entry) and read only through
+    services/team_scope.py::visible_events, which is what keeps a manager to their
+    own team. Every AuditLog row is mirrored here too (services/activity.py), so
+    this one table holds everything the Security Audit page used to show.
+
+    `summary` is one short sentence and `extra` a few counts, both written without
+    personal data. `details` holds the EXACT parameters of what was done (the
+    values a search was run with, what a bulk edit changed from and to, the rows
+    it touched) and so can contain vehicle numbers, policy-holder names and the
+    like: it is shown and exported under the same team scoping as the event.
     """
 
     CATEGORY_RUN = "RUN"
@@ -735,6 +740,10 @@ class ActivityEvent(models.Model):
     target_type = models.CharField(max_length=40, blank=True)
     target_id = models.CharField(max_length=40, blank=True)
     extra = models.JSONField(default=dict, blank=True)
+    # The exact parameters (see the class docstring); rendered by services/activity.py::detail_rows.
+    details = models.JSONField(default=dict, blank=True)
+    # The AuditLog row this event mirrors, so the copy is made once (also by the backfill migration).
+    legacy_audit_id = models.BigIntegerField(null=True, blank=True, unique=True)
 
     class Meta:
         ordering = ["-occurred_at", "-id"]
@@ -742,6 +751,7 @@ class ActivityEvent(models.Model):
             models.Index(fields=["actor", "-occurred_at"], name="activity_actor_time_idx"),
             models.Index(fields=["-occurred_at"], name="activity_time_idx"),
             models.Index(fields=["category", "-occurred_at"], name="activity_cat_time_idx"),
+            models.Index(fields=["action", "-occurred_at"], name="activity_action_time_idx"),
         ]
 
     def __str__(self):

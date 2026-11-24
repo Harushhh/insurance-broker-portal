@@ -8,8 +8,9 @@ from django.db.models import Q
 from django.core.paginator import Paginator
 from urllib.parse import urlencode
 from openpyxl import Workbook
-from ..models import PincodeMaster, AuditLog, HealthRateMaster
+from ..models import PincodeMaster, HealthRateMaster
 from ..forms import HealthRateForm
+from ..services.activity import MAX_LISTED_IDS, audit_change, form_changes, plain, previous_values
 from ..services.make_model import strict_match_in_cluster
 from ..services.rate_master import apply_range_filter
 
@@ -225,11 +226,12 @@ def health_rate_master_edit(request, pk):
     if request.method == "POST":
         form = HealthRateForm(request.POST, instance=record)
         if form.is_valid():
+            changes = form_changes(form)          # read before save: the form's initial values are the old ones
             form.save()
-            AuditLog.objects.create(
-                user=request.user,
-                action="HEALTH RATE EDIT",
-                details=f"Edited HealthRateMaster #{record.pk} via form."
+            audit_change(
+                request.user, "HEALTH RATE EDIT", f"Edited HealthRateMaster #{record.pk} via form.",
+                summary=f"Edited Health rate #{record.pk}: {', '.join(changes) or 'nothing changed'}", target=record,
+                details={"health_rate_id": record.pk, "insurer": record.insurance_company, "changes": changes},
             )
             return redirect("health_rate_master")
     else:
@@ -301,12 +303,17 @@ def health_rate_master_bulk_update(request):
                 )
                 return redirect("health_rate_master")
 
+        before_values = previous_values(records, field_name)         # read before the update: it is the "from" side
+        affected_ids = list(records.values_list("id", flat=True)[:MAX_LISTED_IDS])
         records.update(**{field_name: parsed_value})
 
-        AuditLog.objects.create(
-            user=request.user,
-            action="HEALTH BULK UPDATE",
-            details=f"Updated {record_count} Health rate rows. Changed '{field_name}' to '{new_value}'."
+        audit_change(
+            request.user, "HEALTH BULK UPDATE",
+            f"Updated {record_count} Health rate rows. Changed '{field_name}' to '{new_value}'.",
+            summary=f"Bulk update on Health Rate Master: {record_count} row(s), '{field_name}' set to '{new_value}'",
+            details={"field": field_name, "new_value_submitted": new_value, "new_value_applied": plain(parsed_value),
+                     "rows_updated": record_count, "rows_selected": ids[:MAX_LISTED_IDS],
+                     "values_before": before_values, "record_ids": affected_ids},
         )
 
     return redirect("health_rate_master")

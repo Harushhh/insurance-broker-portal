@@ -1,24 +1,46 @@
 """Audit-log writers for the Motor and Health "Check Eligibility" searches."""
-from ..models import AuditLog
+from ..models import AuditLog, FuelTypeMaster, MakeModelClassMaster, ProductMaster, SubProductMaster
 from .activity import TEST, record_activity
 
 
 # What each checker page is called on the Team Activity feed, by URL name. The
 # Motor Payout Rates page, the Policy Lock Checker and the Health Payout Rates
 # page all write through the two functions below, so this is how the feed tells
-# them apart. Never a vehicle number, policy-holder name or any search value.
+# them apart. (action code, sentence without any search value, page name)
 _CHECKER_EVENTS = {
-    "motor_payout_rates": ("motor.eligibility.checked", "Ran a Motor eligibility check on Motor Payout Rates"),
-    "policy_lock_checker": ("policy_lock.checked", "Ran a Policy Lock Checker search"),
-    "health_payout_rates": ("health.eligibility.checked", "Ran a Health eligibility check on Health Payout Rates"),
+    "motor_payout_rates": ("motor.eligibility.checked", "Ran a Motor eligibility check on Motor Payout Rates", "Motor Payout Rates"),
+    "policy_lock_checker": ("policy_lock.checked", "Ran a Policy Lock Checker search", "Policy Lock Checker"),
+    "health_payout_rates": ("health.eligibility.checked", "Ran a Health eligibility check on Health Payout Rates", "Health Payout Rates"),
+}
+
+# The Motor search forms submit these as numeric ids; the feed shows the names.
+_ID_FIELDS = {
+    "product": ProductMaster, "sub_product": SubProductMaster,
+    "make_model_class": MakeModelClassMaster, "fuel": FuelTypeMaster,
 }
 
 
-def _record_checker_activity(request, default_action, default_summary):
+def search_parameters(params):
+    """The values a search was run with, for the Team Activity details: the ids of Product, Sub Product, Class and Fuel
+    replaced by their names (what the page showed the person), every other value exactly as submitted."""
+    shown = dict(params)
+    for key, model in _ID_FIELDS.items():
+        value = shown.get(key)
+        if value and str(value).isdigit():
+            name = model.objects.filter(pk=int(value)).values_list("name", flat=True).first()
+            if name:
+                shown[key] = name
+    return shown
+
+
+def _record_checker_activity(request, default_action, default_summary, default_page, flat_params):
     url_name = getattr(getattr(request, "resolver_match", None), "url_name", None)
-    action, summary = _CHECKER_EVENTS.get(url_name, (default_action, default_summary))
+    action, summary, page = _CHECKER_EVENTS.get(url_name, (default_action, default_summary, default_page))
     # An API-key request has no signed-in user; record_activity then records nothing.
-    record_activity(request.user, TEST, action, summary)
+    record_activity(
+        request.user, TEST, action, summary,
+        details={"page": page, "parameters": search_parameters(flat_params)},
+    )
 
 
 def _log_motor_points_search(request):
@@ -38,7 +60,7 @@ def _log_motor_points_search(request):
             action="MOTOR_POINTS_SEARCH",
             details=str(flat_params)
         )
-        _record_checker_activity(request, "motor.eligibility.checked", "Ran a Motor eligibility check")
+        _record_checker_activity(request, "motor.eligibility.checked", "Ran a Motor eligibility check", "Motor eligibility check", flat_params)
 
 
 def _log_health_points_search(request):
@@ -62,4 +84,4 @@ def _log_health_points_search(request):
             action="HEALTH_POINTS_SEARCH",
             details=str(flat_params)
         )
-        _record_checker_activity(request, "health.eligibility.checked", "Ran a Health eligibility check")
+        _record_checker_activity(request, "health.eligibility.checked", "Ran a Health eligibility check", "Health eligibility check", flat_params)

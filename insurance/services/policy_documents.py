@@ -99,10 +99,13 @@ def process_policy_document(document_obj):
             }
         )
 
-        # No file name or extracted value: a policy document's name and content are personal data.
+        # The sentence has no file name; the details say which document and how much was read, not the extracted values.
         record_activity(
             document_obj.uploaded_by, RUN, "ocr.document.extracted",
             "AI extraction finished for a policy document", target=document_obj,
+            details={"document_id": document_obj.pk, "file": document_obj.original_filename,
+                     "method": document_obj.extraction_method,
+                     "fields_found": sum(1 for value in (mapped_data or {}).values() if value not in (None, ""))},
         )
 
     except Exception as e:
@@ -114,4 +117,6 @@ def process_policy_document(document_obj):
         record_activity(
             document_obj.uploaded_by, RUN, "ocr.document.failed",
             "AI extraction failed for a policy document", target=document_obj,
+            details={"document_id": document_obj.pk, "file": document_obj.original_filename,
+                     "error": str(e)[:1000]},
         )
