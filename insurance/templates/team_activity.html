@@ -40,6 +40,7 @@
             <label for="taPerson">Person</label>
             <select id="taPerson" name="person" data-autosubmit>
                 <option value="">Everyone</option>
+                {% if is_admin_view %}<option value="system" {% if selected.person == "system" %}selected{% endif %}>System (nobody signed in)</option>{% endif %}
                 {% for p in people %}
                 <option value="{{ p.id }}" {% if selected.person == p.id %}selected{% endif %}>{{ p.get_full_name|default:p.username }} ({{ p.username }})</option>
                 {% endfor %}
@@ -165,6 +166,7 @@
                     <th>Person</th>
                     <th>Category</th>
                     <th>What happened</th>
+                    <th>Source path</th>
                 </tr>
             </thead>
             <tbody>
@@ -172,8 +174,13 @@
                 <tr>
                     <td class="ta-time">{{ event.occurred_at|date:"d M Y" }}<br><span class="ta-muted">{{ event.occurred_at|date:"h:i A" }}</span></td>
                     <td>
+                        {% if event.is_system %}
+                        <strong>{{ event.actor_name }}</strong>
+                        <span class="ta-muted">no signed-in user</span>
+                        {% else %}
                         <strong>{{ event.actor_name|default:event.actor_username }}</strong>
                         <span class="ta-muted">@{{ event.actor_username }}{% if event.actor %}{% if event.actor.profile.designation %} · {{ event.actor.profile.designation }}{% endif %}{% else %} · account removed{% endif %}</span>
+                        {% endif %}
                     </td>
                     <td><span class="ta-badge ta-cat-{{ event.category|lower }}">{{ event.get_category_display }}</span></td>
                     <td class="ta-what">
@@ -189,9 +196,10 @@
                         </details>
                         {% endif %}
                     </td>
+                    <td class="ta-source">{% if event.source_path %}<code title="Where this was recorded from: the page or API address, or the background job">{{ event.source_path }}</code>{% else %}<span class="ta-muted" title="Not kept for events from before source paths were recorded, or for a script run by hand">not recorded</span>{% endif %}</td>
                 </tr>
                 {% empty %}
-                <tr><td colspan="4" class="ta-none">No activity matches these filters.</td></tr>
+                <tr><td colspan="5" class="ta-none">No activity matches these filters.</td></tr>
                 {% endfor %}
             </tbody>
         </table>

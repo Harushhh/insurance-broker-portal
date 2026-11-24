@@ -43,7 +43,7 @@ browser ──> urls.py ──> views/<feature>.py ──> services/<feature>.py
 | Grid management | `views/grid_management.py` | `services/email.py`, `grid_archive.py` |
 | Tickets, special rate requests | `views/tickets.py`, `views/special_rates.py` | `services/tickets.py` |
 | Audit logs | `views/audit_logs.py` | `services/audit_logs.py` |
-| Team Activity (a manager's view of their team's runs, uploads, tests, status changes and record edits, each with its exact parameters; also holds every audit-log entry) | `views/team_activity.py` | `services/activity.py` (write: `record_activity`, `audit_change`, the audit-log mirror in `signals.py`), `services/team_scope.py` (read: `visible_events`) |
+| Team Activity (a manager's view of their team's runs, uploads, tests, status changes and record edits, each with its exact parameters and its source path; also holds every audit-log entry and, for ADMIN, what nobody signed in did: "System") | `views/team_activity.py` | `services/activity.py` (write: `record_activity`, `record_system_activity`, `audit_change`, the audit-log mirror in `signals.py`, the source path kept by `middleware.py`), `services/team_scope.py` (read: `visible_events`) |
 | Analysis | `views/analysis.py` | `services/analysis.py` |
 | AI rulebook (field configurator) | `views/ai_rulebook.py` | |
 | Users, SSO landing, home, Rate Checker | `views/user_management.py`, `views/sso_handoff.py`, `views/home.py`, `views/rate_checker.py` | `sso.py` |
@@ -51,7 +51,9 @@ browser ──> urls.py ──> views/<feature>.py ──> services/<feature>.py
 
 Modules deliberately left at the top level of `insurance/`: `mapping_engine.py`, `overlap_utils.py`,
 `grid_archive.py`, `health_grid_utils.py`, `sso.py`, `tasks.py`, `models.py`. Celery task names, the beat schedule and
-the tests' `mock.patch` targets refer to those import paths.
+the tests' `mock.patch` targets refer to those import paths. `middleware.py` (the one request middleware, which keeps
+the URL path an event came from for Team Activity), `signals.py` and `apps.py` are wired in `project/settings.py` and
+`apps.ready()`.
 
 ## Where does new code go?
 

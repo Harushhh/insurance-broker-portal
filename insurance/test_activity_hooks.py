@@ -22,6 +22,7 @@ from insurance.models import (
     SpecialRateRequest, SupportTicket,
 )
 from insurance.overlap_utils import run_overlap_scan
+from insurance.services.activity import activity_source
 from insurance.services.points_audit import _log_motor_points_search
 from insurance.services.policy_documents import process_policy_document
 from insurance.test_life_standard_file import LifeStandardViewMixin
@@ -110,12 +111,19 @@ class EligibilityCheckEventTests(HookCase):
         self.client.get(reverse("life_payout_rates"))
         self.assertEqual(ActivityEvent.objects.count(), 0)
 
-    def test_a_request_with_no_signed_in_user_records_no_event(self):
-        # The policy-lock and health APIs reach the same search code with an API key and no person.
+    def test_a_request_with_no_signed_in_user_is_recorded_under_system(self):
+        # The policy-lock and health APIs reach the same search code with an API key and no person: the search is
+        # filed under System (and, like every search, linked to its Points Logs row), not dropped.
         request = RequestFactory().get("/api/policy-lock-checker/", {"vehicle_no": "MH12AB1234"})
         request.user = AnonymousUser()
-        _log_motor_points_search(request)
-        self.assertEqual(ActivityEvent.objects.count(), 0)
+        with activity_source("/api/policy-lock-checker/"):
+            _log_motor_points_search(request)
+        event = self.only_event("motor.eligibility.checked")
+        self.assertTrue(event.is_system)
+        self.assertEqual((event.actor, event.category, event.source_path), (None, "TEST", "/api/policy-lock-checker/"))
+        self.assertEqual(event.details["parameters"], {"vehicle_no": "MH12AB1234"})
+        self.assertEqual(event.legacy_audit_id, AuditLog.objects.get(action="MOTOR_POINTS_SEARCH").pk)
+        self.assert_no_personal_data("MH12AB1234")                    # the sentence and counts stay clean for System too
 
 
 class UploadEventTests(HookCase):

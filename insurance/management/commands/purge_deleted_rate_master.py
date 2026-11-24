@@ -19,6 +19,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from insurance.models import AuditLog, RateMaster
+from insurance.services.activity import activity_source
 
 BATCH_SIZE = 2000
 
@@ -53,15 +54,17 @@ class Command(BaseCommand):
             ))
             return
 
-        AuditLog.objects.create(
-            user=None,
-            action="BULK PERMANENT DELETE",
-            details=(
-                f"purge_deleted_rate_master management command: about to permanently delete "
-                f"{total} RateMaster rows with is_deleted=YES. Logged before deletion since "
-                f"the rows won't exist to reference afterward."
-            ),
-        )
+        # Under "manage.py purge_deleted_rate_master" so the Team Activity feed (System) says where this came from.
+        with activity_source("manage.py purge_deleted_rate_master"):
+            AuditLog.objects.create(
+                user=None,
+                action="BULK PERMANENT DELETE",
+                details=(
+                    f"purge_deleted_rate_master management command: about to permanently delete "
+                    f"{total} RateMaster rows with is_deleted=YES. Logged before deletion since "
+                    f"the rows won't exist to reference afterward."
+                ),
+            )
 
         deleted_total = 0
         while True:

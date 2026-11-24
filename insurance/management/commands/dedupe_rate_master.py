@@ -27,6 +27,7 @@ from django.utils import timezone
 
 from insurance.models import AuditLog, RateMaster
 from insurance.management.commands.find_duplicate_rate_master import find_duplicate_clusters
+from insurance.services.activity import activity_source
 
 BATCH_SIZE = 2000
 
@@ -85,14 +86,16 @@ class Command(BaseCommand):
                 updated_total += RateMaster.objects.filter(id__in=batch).update(
                     is_deleted="YES", updated_at=now,
                 )
-            AuditLog.objects.create(
-                user=None,
-                action="BULK DEDUPE",
-                details=(
-                    f"dedupe_rate_master management command ({mode_desc}): soft-deleted "
-                    f"{updated_total} exact-duplicate RateMaster rows across {len(clusters)} clusters. "
-                    f"Lowest id per duplicate cluster was kept; nothing else on any row was modified."
-                ),
-            )
+            # Under "manage.py dedupe_rate_master" so the Team Activity feed (System) says where this came from.
+            with activity_source("manage.py dedupe_rate_master"):
+                AuditLog.objects.create(
+                    user=None,
+                    action="BULK DEDUPE",
+                    details=(
+                        f"dedupe_rate_master management command ({mode_desc}): soft-deleted "
+                        f"{updated_total} exact-duplicate RateMaster rows across {len(clusters)} clusters. "
+                        f"Lowest id per duplicate cluster was kept; nothing else on any row was modified."
+                    ),
+                )
 
         self.stdout.write(self.style.SUCCESS(f"Soft-deleted {updated_total:,} rows."))

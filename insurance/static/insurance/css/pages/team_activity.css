@@ -83,6 +83,10 @@
     /* The floor matters: the details break anywhere, which would let the table squeeze this column to a few letters wide. */
     .ta-what { white-space: normal; min-width: 280px; max-width: 620px; }
     .ta-code { color: #94a3b8; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    /* Where an event came from (a URL path, or a background job): monospace, breaks anywhere so a long path never widens the table. */
+    .ta-source { min-width: 150px; max-width: 260px; }
+    .ta-source code { color: #475569; font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    .ta-source .ta-muted { display: inline; }
 
     /* The exact parameters of an event (what a test was run with, what an edit changed from and to). Collapsed until
        asked for, so a busy day still reads as one line per event. */

@@ -890,7 +890,8 @@ class TeamActivityExportTests(PageTestMixin, TestCase):
         self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         self.assertIn("team_activity.xlsx", response["Content-Disposition"])
         rows = self.rows(response)
-        self.assertEqual(rows[0], ("Time (IST)", "Username", "Name", "Category", "Action", "Summary", "About", "About id", "Details"))
+        self.assertEqual(rows[0], ("Time (IST)", "Username", "Name", "Category", "Action", "Summary", "About", "About id",
+                                   "Source path", "Details"))
         mine = next(row for row in rows[1:] if row[1] == "a1")
         self.assertEqual(mine[0], timezone.localtime(event.occurred_at).strftime("%Y-%m-%d %H:%M:%S"))
         self.assertEqual(mine[3:6], ("Run", "test.run", "a1 ran something"))

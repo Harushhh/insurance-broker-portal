@@ -24,8 +24,8 @@ from openpyxl import load_workbook
 
 from insurance.models import ActivityEvent, AuditLog, FuelTypeMaster, ProductMaster, RateGroup, RateMaster
 from insurance.services.activity import (
-    LISTED_ITEMS, LISTED_ROWS, MAX_DETAILS_CHARS, STATUS, audit_change, detail_rows, form_changes, mirror_audit_entry,
-    plain, previous_values, record_activity, retention_cutoff, snapshot, snapshot_changes,
+    LISTED_ITEMS, LISTED_ROWS, MAX_DETAILS_CHARS, STATUS, SYSTEM_USERNAME, audit_change, detail_rows, form_changes,
+    mirror_audit_entry, plain, previous_values, record_activity, retention_cutoff, snapshot, snapshot_changes,
 )
 from insurance.services.points_audit import search_parameters
 from insurance.test_team_activity import PageTestMixin
@@ -239,13 +239,25 @@ class AuditMirrorTests(TestCase):
         self.assertEqual(len(event.action), 60)
         self.assertEqual(event.details["entry"], "x" * 500)
 
-    def test_entries_with_no_person_the_points_searches_and_sso_tickets_are_not_copied(self):
-        AuditLog.objects.create(user=None, action="SYSTEM", details="no person")
-        AuditLog.objects.create(user=self.user, action="MOTOR_POINTS_SEARCH", details="{'a': 1}")
-        AuditLog.objects.create(user=self.user, action="HEALTH_POINTS_SEARCH", details="{'a': 1}")
-        AuditLog.objects.create(user=self.user, action="sso_ticket_issued", details="partner")
-        AuditLog.objects.create(user=self.user, action="SSO_TICKET_CONSUMED", details="partner")
+    def test_the_points_searches_and_sso_tickets_are_not_copied_by_the_mirror(self):
+        """The searches get their own Test events (with every parameter) from points_audit, and the sso_ticket rows are
+        sign-in handoffs, not activity."""
+        for user in (self.user, None):
+            AuditLog.objects.create(user=user, action="MOTOR_POINTS_SEARCH", details="{'a': 1}")
+            AuditLog.objects.create(user=user, action="HEALTH_POINTS_SEARCH", details="{'a': 1}")
+            AuditLog.objects.create(user=user, action="sso_ticket_issued", details="partner")
+            AuditLog.objects.create(user=user, action="SSO_TICKET_CONSUMED", details="partner")
         self.assertEqual(ActivityEvent.objects.count(), 0)
+
+    def test_an_entry_with_no_user_is_copied_as_a_system_event(self):
+        """Written by a management command, or after its writer's account was gone: nobody signed in, so System."""
+        entry = AuditLog.objects.create(user=None, action="BULK DEDUPE", details="dedupe_rate_master: soft-deleted 12 rows")
+        event = ActivityEvent.objects.get()
+        self.assertTrue(event.is_system)
+        self.assertEqual((event.actor, event.actor_username, event.actor_name), (None, SYSTEM_USERNAME, "System"))
+        self.assertEqual((event.category, event.action, event.summary), ("EDIT", "BULK DEDUPE", entry.details))
+        self.assertEqual(event.details, {"entry": entry.details})
+        self.assertEqual(event.legacy_audit_id, entry.pk)
 
     def test_saving_an_entry_again_does_not_copy_it_twice(self):
         entry = AuditLog.objects.create(user=self.user, action="X", details="one")
@@ -539,8 +551,8 @@ class ExportDetailsTests(PageTestMixin, TestCase):
 
     def details_cell(self, action, params=None):
         rows = self.event_rows(params)
-        self.assertEqual(rows[0][8], "Details")
-        return next(row for row in rows[1:] if row[4] == action)[8]
+        self.assertEqual(rows[0][9], "Details")
+        return next(row for row in rows[1:] if row[4] == action)[9]
 
     def test_every_parameter_is_one_line_with_nested_names_old_to_new_and_the_whole_list(self):
         record_activity(
@@ -563,9 +575,9 @@ class ExportDetailsTests(PageTestMixin, TestCase):
         response = self.get(self.lead1, name="export_team_activity_xlsx")
         ws = load_workbook(io.BytesIO(response.content))["Team Activity"]
         self.assertEqual(ws.freeze_panes, "A2")
-        self.assertTrue(ws["I2"].alignment.wrap_text)
+        self.assertTrue(ws["J2"].alignment.wrap_text)
         self.assertTrue(ws["F2"].alignment.wrap_text)
-        self.assertGreaterEqual(ws.column_dimensions["I"].width, 60)
+        self.assertGreaterEqual(ws.column_dimensions["J"].width, 60)
         self.assertTrue(ws["A1"].font.bold)
 
     def test_text_that_would_run_as_a_formula_is_defused(self):

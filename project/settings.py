@@ -134,6 +134,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Tells the Team Activity feed which URL path an event came from (insurance/middleware.py).
+    'insurance.middleware.ActivitySourceMiddleware',
 ]
 
 ROOT_URLCONF = 'project.urls'

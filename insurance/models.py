@@ -709,7 +709,18 @@ class ActivityEvent(models.Model):
     values a search was run with, what a bulk edit changed from and to, the rows
     it touched) and so can contain vehicle numbers, policy-holder names and the
     like: it is shown and exported under the same team scoping as the event.
+
+    Some events have no signed-in person behind them: a search made through the
+    API with an API key, an audit entry written by a management command. They are
+    filed under the System pseudo-person (`actor` is NULL, `actor_username` is
+    SYSTEM_USERNAME); no manager has them in their team, so only ADMIN reads them.
+    `source_path` says where every event came from.
     """
+
+    # The name events with no signed-in person are filed under. Parentheses can never be part of a real username
+    # (Django's validator allows letters, digits and @ . + - _), so no account can be mistaken for it. A deleted
+    # account's events also have actor NULL but keep their own username, so they are not System events.
+    SYSTEM_USERNAME = "(system)"
 
     CATEGORY_RUN = "RUN"
     CATEGORY_UPLOAD = "UPLOAD"
@@ -742,8 +753,12 @@ class ActivityEvent(models.Model):
     extra = models.JSONField(default=dict, blank=True)
     # The exact parameters (see the class docstring); rendered by services/activity.py::detail_rows.
     details = models.JSONField(default=dict, blank=True)
-    # The AuditLog row this event mirrors, so the copy is made once (also by the backfill migration).
+    # The AuditLog row this event mirrors, so the copy is made once (also by the backfill migrations).
     legacy_audit_id = models.BigIntegerField(null=True, blank=True, unique=True)
+    # Where it came from: the URL path of the request that caused it ("/api/v1/health-payout-rates/", never the query
+    # string, which can hold a vehicle number) or "celery:<task name>" for a background job. Empty when it was not
+    # recorded: events from before this was kept, work done by a script run by hand.
+    source_path = models.CharField(max_length=200, blank=True, default="")
 
     class Meta:
         ordering = ["-occurred_at", "-id"]
@@ -756,6 +771,11 @@ class ActivityEvent(models.Model):
 
     def __str__(self):
         return f"{self.actor_username}: {self.action} @ {self.occurred_at:%Y-%m-%d %H:%M}"
+
+    @property
+    def is_system(self):
+        """True for an event with no signed-in person behind it (see the class docstring)."""
+        return self.actor_id is None and self.actor_username == self.SYSTEM_USERNAME
 
 
 class GridDocument(models.Model):

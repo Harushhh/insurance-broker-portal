@@ -10,10 +10,18 @@ Events are read back through services/team_scope.py.
 onto the feed by the post_save receiver in signals.py (`mirror_audit_entry`), so the page holds everything the Security
 Audit page showed.
 
+`record_system_activity` is for what nobody signed in did (a search made through the API with an API key, an entry
+written by a management command): the event is filed under the System pseudo-person, which only ADMIN can read.
+
+Every event also says where it came from (`source_path`): the URL path of the request being served (kept by
+middleware.ActivitySourceMiddleware, never the query string), or `celery:<task name>` inside a background job.
+
 Best effort, by design: recording what someone did must never break what they were doing, so a failure is logged and
 swallowed, and the insert runs in its own savepoint so a database error cannot poison the caller's transaction (on
 Postgres one failed statement would otherwise abort the whole transaction).
 """
+import contextlib
+import contextvars
 import datetime
 import json
 import logging
@@ -35,11 +43,47 @@ EDIT = ActivityEvent.CATEGORY_EDIT
 
 _CATEGORIES = {value for value, _ in ActivityEvent.CATEGORY_CHOICES}
 
+SYSTEM_USERNAME = ActivityEvent.SYSTEM_USERNAME     # what an event with no signed-in person is filed under
+SYSTEM_NAME = "System"                              # and how the page names it
+
 MAX_DETAILS_CHARS = 200_000        # a bigger `details` is replaced by a note: the row must stay a sensible size
 MAX_LISTED_IDS = 5000              # callers cap the row ids they list at this
-# Audit actions that are not copied onto the feed: the points-search rows already have their own Test events (with
-# every parameter), and the sso_ticket_* rows are system events with no person behind them.
+# Audit actions that are not copied onto the feed by the mirror: the points-search rows get their own Test events (with
+# every parameter, for a signed-in person or for System), and the sso_ticket_* rows are sign-in handoffs, not activity.
 MIRROR_SKIP_ACTIONS = {"MOTOR_POINTS_SEARCH", "HEALTH_POINTS_SEARCH"}
+
+
+# -------------------------
+# Where an event came from
+# -------------------------
+_source_path = contextvars.ContextVar("team_activity_source_path", default="")
+
+
+@contextlib.contextmanager
+def activity_source(path):
+    """Everything recorded inside this block says it came from `path`. middleware.ActivitySourceMiddleware wraps each
+    request in it (the URL path); a management command can wrap the work it audits in it ("manage.py <command>")."""
+    token = _source_path.set(path or "")
+    try:
+        yield
+    finally:
+        _source_path.reset(token)
+
+
+def _running_task_name():
+    """The name of the Celery task running right now, or "" (in a view, a test, a script)."""
+    try:
+        from celery import current_task
+        return getattr(current_task._get_current_object(), "name", "") or ""
+    except Exception:
+        return ""
+
+
+def current_source():
+    """Where an event recorded right now comes from: the Celery task doing the work (`celery:<name>`), else the URL path
+    of the request being served, else "" (nothing says: a script run by hand, a test)."""
+    task_name = _running_task_name()
+    return f"celery:{task_name}" if task_name else _source_path.get()
 
 
 def _clip(value, field_name):
@@ -139,22 +183,8 @@ def previous_values(queryset, field_name, limit=50):
 # -------------------------
 # Writing events
 # -------------------------
-def record_activity(user, category, action, summary, *, target=None, extra=None, details=None, legacy_audit_id=None):
-    """Record that `user` did something. Returns the event, or None when nothing was recorded.
-
-    category: one of RUN / UPLOAD / TEST / STATUS / EDIT (the constants above).
-    action:   a stable machine code, e.g. "mis.run.finished".
-    summary:  one human sentence, without personal data.
-    target:   the model instance it was about (stored as a pointer, not a ForeignKey), or None.
-    extra:    a small dict (counts, status from -> to); must be JSON-friendly and carry no personal data.
-    details:  the exact parameters, a JSON-friendly dict (see the module docstring); may carry personal data.
-    legacy_audit_id: the AuditLog row this event mirrors, if any.
-
-    Nothing is recorded for a missing or anonymous user: an event with no
-    person cannot be shown to anyone's manager.
-    """
-    if user is None or getattr(user, "pk", None) is None:
-        return None
+def _write_event(actor, username, name, category, action, summary, *, target, extra, details, legacy_audit_id, source):
+    """The one place an event row is written (for a person or for System). Never raises; returns the event or None."""
     try:
         if category not in _CATEGORIES:
             raise ValueError(f"unknown activity category {category!r}")
@@ -164,9 +194,9 @@ def record_activity(user, category, action, summary, *, target=None, extra=None,
             details_json = json.dumps({"too_large": True, "characters": len(details_json)})
         with transaction.atomic():
             return ActivityEvent.objects.create(
-                actor=user,
-                actor_username=_clip(user.get_username(), "actor_username"),
-                actor_name=_clip(user.get_full_name(), "actor_name"),
+                actor=actor,
+                actor_username=_clip(username, "actor_username"),
+                actor_name=_clip(name, "actor_name"),
                 category=category,
                 action=_clip(action, "action"),
                 summary=_clip(summary, "summary"),
@@ -175,11 +205,47 @@ def record_activity(user, category, action, summary, *, target=None, extra=None,
                 extra=json.loads(json.dumps(extra or {}, default=str)),
                 details=json.loads(details_json),
                 legacy_audit_id=legacy_audit_id,
+                source_path=_clip(current_source() if source is None else source, "source_path"),
             )
     except Exception:
         # Deliberately swallowed (see the module docstring); logged so it is not silent.
-        logger.exception("Could not record activity %r for user id %s", action, user.pk)
+        logger.exception("Could not record activity %r for %s", action, username)
         return None
+
+
+def record_activity(user, category, action, summary, *, target=None, extra=None, details=None, legacy_audit_id=None,
+                    source=None):
+    """Record that `user` did something. Returns the event, or None when nothing was recorded.
+
+    category: one of RUN / UPLOAD / TEST / STATUS / EDIT (the constants above).
+    action:   a stable machine code, e.g. "mis.run.finished".
+    summary:  one human sentence, without personal data.
+    target:   the model instance it was about (stored as a pointer, not a ForeignKey), or None.
+    extra:    a small dict (counts, status from -> to); must be JSON-friendly and carry no personal data.
+    details:  the exact parameters, a JSON-friendly dict (see the module docstring); may carry personal data.
+    legacy_audit_id: the AuditLog row this event mirrors, if any.
+    source:   where it came from; by default the request path or Celery task being run (see current_source()).
+
+    Nothing is recorded for a missing or anonymous user: an event with no person cannot be shown to anyone's manager.
+    Work with nobody behind it goes through record_system_activity() instead.
+    """
+    if user is None or getattr(user, "pk", None) is None:
+        return None
+    return _write_event(
+        user, user.get_username(), user.get_full_name(), category, action, summary,
+        target=target, extra=extra, details=details, legacy_audit_id=legacy_audit_id, source=source,
+    )
+
+
+def record_system_activity(category, action, summary, *, target=None, extra=None, details=None, legacy_audit_id=None,
+                           source=None):
+    """Record something nobody signed in did: a search made through the API with an API key, an audit entry written by
+    a management command. Same arguments as record_activity() minus the user. The event is filed under the System
+    pseudo-person (no actor, username SYSTEM_USERNAME): no manager has it in their team, so only ADMIN reads it."""
+    return _write_event(
+        None, SYSTEM_USERNAME, SYSTEM_NAME, category, action, summary,
+        target=target, extra=extra, details=details, legacy_audit_id=legacy_audit_id, source=source,
+    )
 
 
 def audit_change(user, action, text, *, category=EDIT, code=None, summary=None, details=None, target=None, extra=None):
@@ -201,15 +267,20 @@ def audit_change(user, action, text, *, category=EDIT, code=None, summary=None, 
 
 
 def mirror_audit_entry(entry):
-    """Copy a new AuditLog row onto the feed as an Edit event whose details are the entry's text. Called by the
-    post_save receiver for every audit entry that `audit_change` did not already record. Never raises."""
+    """Copy a new AuditLog row onto the feed as an Edit event whose details are the entry's text (under System when the
+    entry has no user, e.g. one written by a management command). Called by the post_save receiver for every audit
+    entry that `audit_change` did not already record. Never raises."""
     try:
         action = entry.action or ""
-        if (entry.user_id is None or getattr(entry, "_activity_recorded", False)
-                or action in MIRROR_SKIP_ACTIONS or action.lower().startswith("sso_ticket")):
+        if (getattr(entry, "_activity_recorded", False) or action in MIRROR_SKIP_ACTIONS
+                or action.lower().startswith("sso_ticket")):
             return None
         if ActivityEvent.objects.filter(legacy_audit_id=entry.pk).exists():
             return None
+        if entry.user_id is None:
+            return record_system_activity(
+                EDIT, action, entry.details, details={"entry": entry.details}, legacy_audit_id=entry.pk,
+            )
         return record_activity(
             entry.user, EDIT, action, entry.details, details={"entry": entry.details}, legacy_audit_id=entry.pk,
         )

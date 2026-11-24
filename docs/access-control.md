@@ -55,6 +55,14 @@ Every audit-log entry also lands on this page, as an Edit event whose details ar
 `audit_change` carry the exact parameters as well). That is what lets Team Activity replace the Security Audit page: the
 page itself is still there with its own 7-day retention, while Team Activity keeps last month and this month.
 
+Some events have **nobody signed in** behind them: a search made through the API with an API key (the Points Logs page
+calls these "System"), an audit entry written by a management command. They are filed under a **System** pseudo-person.
+No manager has System in their team, so only `ADMIN` reads these events; the Person filter's System choice, the System
+bar and `?person=system` exist only for them and find nothing for anyone else. Every event also shows its **source path**:
+the page or API address that caused it (`/api/v1/health-payout-rates/`, `/motor-payout-rates/`; never the query string,
+which can hold a vehicle number), `celery:<task>` for a background job, `manage.py <command>` for a command, or "not
+recorded" for events from before this was kept.
+
 Reports To is a tree: one manager per person, `UserProfile.clean()` refuses self-links and loops, and every change is
 written to the audit log as `TEAM CHANGE` (so it is on Team Activity too), because it decides who can read whose work. Run
 `python manage.py check_team_hierarchy` to list the links and spot bad ones. Deleting a manager's account leaves their

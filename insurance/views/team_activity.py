@@ -20,7 +20,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
 from ..models import ActivityEvent
-from ..services.activity import detail_rows, retention_cutoff
+from ..services.activity import SYSTEM_NAME, SYSTEM_USERNAME, detail_rows, retention_cutoff
 from ..services.common import safe_cell as _safe_cell     # Excel formula defusing, shared with the other exports
 from ..services.team_scope import is_admin, managers_with_teams, team_user_ids, visible_events, visible_people
 
@@ -40,6 +40,7 @@ DONUT_GAP = 2.0                                                # the surface gap
 MAX_PEOPLE_BARS = 10                                           # more people than this fold into "+ N more"
 MAX_QUIET_NAMES = 8                                            # names listed under "No activity"
 EXCEL_CELL_LIMIT = 32000                                       # Excel refuses a cell over 32,767 characters
+SYSTEM_PERSON = "system"                                       # the ?person= value that picks the System pseudo-person
 
 # feed: what the list shows; base: what the charts count; scope: everyone the viewer may see in the chosen period
 # (before the Search and Action filters), which is where the Action dropdown's choices come from.
@@ -81,6 +82,14 @@ def _start_of(day):
     return timezone.make_aware(datetime.combine(day, time.min))
 
 
+def _for_person(events, person):
+    """`events` narrowed to one person: a user id, or SYSTEM_PERSON for the events nobody signed in made (an API-key
+    call, a management command). Only ADMIN's scope holds any System events, so for a manager this finds nothing."""
+    if person == SYSTEM_PERSON:
+        return events.filter(actor__isnull=True, actor_username=SYSTEM_USERNAME)
+    return events.filter(actor_id=person)
+
+
 def _filtered(request):
     """A `Filtered`: the events for the feed, the events the charts count from, the events in scope, the selected filters.
 
@@ -102,11 +111,12 @@ def _filtered(request):
     scope = base
     q = (request.GET.get("q") or "").strip()[:100]
     if q:
-        # The details are searched too (a vehicle number, a holder name, a field name), inside the same scope.
+        # The details are searched too (a vehicle number, a holder name, a field name), and so is where the event came
+        # from (a URL path), inside the same scope.
         base = base.filter(
             Q(summary__icontains=q) | Q(action__icontains=q)
             | Q(actor_username__icontains=q) | Q(actor_name__icontains=q)
-            | Q(details__icontains=q)
+            | Q(details__icontains=q) | Q(source_path__icontains=q)
         )
     action = (request.GET.get("action") or "").strip()[:60]
     if action:
@@ -118,9 +128,10 @@ def _filtered(request):
         category = ""
     if category:
         feed = feed.filter(category=category)
-    person = _int(request.GET.get("person"))
+    person_text = (request.GET.get("person") or "").strip()
+    person = SYSTEM_PERSON if person_text.lower() == SYSTEM_PERSON else _int(person_text)
     if person:
-        feed = feed.filter(actor_id=person)
+        feed = _for_person(feed, person)
 
     selected = {
         "team": team, "date_range": range_text, "category": category, "q": q, "person": person, "action": action,
@@ -178,7 +189,7 @@ def _category_chart(base, selected, link, names):
     """The donut: events by category. It counts the same events as the feed except for the Category filter (so every
     category stays on screen and a slice can be switched off again), but WITH the Person filter, so a click on a
     person shows what that person did. Slices keep a fixed order and a fixed colour per category."""
-    events = base.filter(actor_id=selected["person"]) if selected["person"] else base
+    events = _for_person(base, selected["person"]) if selected["person"] else base
     counts = dict(events.order_by().values_list("category").annotate(n=Count("id")))
     # Edit (record edits and the audit-log entries) only gets a slice and a legend row when the events being counted
     # include one, so a quiet period keeps the four-category legend.
@@ -226,6 +237,15 @@ def _people_chart(request, base, selected, link, people):
             "id": person.pk, "username": person.username, "name": person.get_full_name() or person.username,
             "designation": (profile.designation if profile else "") or "", "n": counts.get(person.pk, 0),
         })
+    if is_admin(request.user):
+        # System (nobody signed in: API-key calls, management commands) gets a bar of its own, for the one role that can
+        # read it. With a Team picked the base has no System events, so it never shows then.
+        system_n = events.order_by().filter(actor__isnull=True, actor_username=SYSTEM_USERNAME).count()
+        if system_n:
+            rows.append({
+                "id": SYSTEM_PERSON, "username": SYSTEM_USERNAME, "name": SYSTEM_NAME,
+                "designation": "no signed-in user", "n": system_n,
+            })
     rows.sort(key=lambda row: (-row["n"], row["name"].lower()))
     active_rows = [row for row in rows if row["n"]]
     quiet = [row for row in rows if not row["n"]]
@@ -292,6 +312,7 @@ def team_activity(request):
     query_without_page.pop("page", None)
     link = _chart_link(selected)
     names = {person.pk: person.get_full_name() or person.username for person in people}
+    names[SYSTEM_PERSON] = SYSTEM_NAME
 
     return render(request, "team_activity.html", {
         "page_obj": page_obj,
@@ -391,7 +412,7 @@ def _filters_note(selected):
     if selected["team"] is not None:
         parts.append(f"Team of {selected['team'].get_full_name() or selected['team'].username}")
     if selected["person"]:
-        parts.append("One person")
+        parts.append("System events" if selected["person"] == SYSTEM_PERSON else "One person")
     if selected["category"]:
         parts.append(f"Category {dict(CATEGORIES)[selected['category']]}")
     if selected["action"]:
@@ -479,7 +500,8 @@ def export_team_activity_xlsx(request):
     wb = Workbook()
     ws = wb.active
     ws.title = EVENTS_SHEET
-    ws.append(["Time (IST)", "Username", "Name", "Category", "Action", "Summary", "About", "About id", "Details"])
+    ws.append(["Time (IST)", "Username", "Name", "Category", "Action", "Summary", "About", "About id", "Source path",
+               "Details"])
     written = 0
     for event in feed[:EXPORT_LIMIT].iterator(chunk_size=2000):
         # Every parameter, one "label: value" line each, in full (the page shortens long lists).
@@ -495,15 +517,16 @@ def export_team_activity_xlsx(request):
             _safe_cell(event.summary),
             _safe_cell(event.target_type),
             _safe_cell(event.target_id),
+            _safe_cell(event.source_path),
             _safe_cell(details),
         ])
         # Wrapped, so the one-line-per-parameter Details read as lines in Excel (header is row 1, this row is written + 2).
-        for column in (6, 9):
+        for column in (6, 10):
             ws.cell(row=written + 2, column=column).alignment = Alignment(wrap_text=True, vertical="top")
         written += 1
     _style_header(ws, 1)
     ws.freeze_panes = "A2"
-    for column, width in zip("ABCDEFGHI", (20, 14, 22, 10, 28, 60, 14, 10, 90)):
+    for column, width in zip("ABCDEFGHIJ", (20, 14, 22, 10, 28, 60, 14, 10, 34, 90)):
         ws.column_dimensions[column].width = width
 
     notes = [_filters_note(selected)]
